@@ -18,9 +18,11 @@ import {
 } from "@vis.gl/react-maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import toast, { Toaster } from "react-hot-toast";
+import maplibregl from "maplibre-gl";
 
 import { Button } from "@/components/ui/button";
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import {
   IconPlus,
   IconPencil,
@@ -145,9 +147,11 @@ export default function CustomRoutesPage(): JSX.Element {
   const [mapReady, setMapReady] = useState(false);
 
   const { isDark } = useAppTheme();
-  const mapStyleUrl = isDark
-    ? "https://api.maptiler.com/maps/dataviz-dark/style.json?key=ezFqZj4n29WctcwDznlR"
-    : "https://api.maptiler.com/maps/base-v4/style.json?key=ezFqZj4n29WctcwDznlR";
+  const stylePath = isDark
+    ? "/styles/osm-bright/style-local-dark.json"
+    : "/styles/osm-bright/style-local-light.json";
+  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const canRenderMap = !!baseStyle;
 
   function ensureCenter(lng: number, lat: number, zoom = 18.5) {
     const map = mapRef.current?.getMap?.();
@@ -999,88 +1003,95 @@ export default function CustomRoutesPage(): JSX.Element {
 
       {/* Map */}
       <div className="h-full w-full">
-        <ReactMap
-          ref={mapRef}
-          {...viewState}
-          onMove={(e: ViewStateChangeEvent) =>
-            setViewState((prev) => ({ ...prev, ...e.viewState }))
-          }
-          mapStyle={mapStyleUrl}
-          onLoad={() => setMapReady(true)}
-        >
-          {/* Building nodes */}
-          {buildingNodesFC && (
-            <Source
-              id="building-nodes"
-              type="geojson"
-              data={buildingNodesFC as any}
-            >
-              <Layer
-                id="building-nodes-circle"
-                type="circle"
-                paint={{
-                  "circle-radius": 8,
-                  "circle-color": isDark ? "#60a5fa" : "#2563eb",
-                  "circle-stroke-width": 2,
-                  "circle-stroke-color": isDark ? "#041631" : "#ffffff",
-                }}
-              />
-            </Source>
-          )}
+        {!canRenderMap ? (
+          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+            Loading basemap...
+          </div>
+        ) : (
+          <ReactMap
+            ref={mapRef}
+            {...viewState}
+            onMove={(e: ViewStateChangeEvent) =>
+              setViewState((prev) => ({ ...prev, ...e.viewState }))
+            }
+            mapLib={maplibregl}
+            mapStyle={baseStyle as any}
+            onLoad={() => setMapReady(true)}
+          >
+            {/* Building nodes */}
+            {buildingNodesFC && (
+              <Source
+                id="building-nodes"
+                type="geojson"
+                data={buildingNodesFC as any}
+              >
+                <Layer
+                  id="building-nodes-circle"
+                  type="circle"
+                  paint={{
+                    "circle-radius": 8,
+                    "circle-color": isDark ? "#60a5fa" : "#2563eb",
+                    "circle-stroke-width": 2,
+                    "circle-stroke-color": isDark ? "#041631" : "#ffffff",
+                  }}
+                />
+              </Source>
+            )}
 
-          {/* Building polygon */}
-          {previewDestId && curDestinationPoly && (
-            <Source id="boundary" type="geojson" data={curDestinationPoly as any}>
-              <Layer
-                id="boundary-fill"
-                type="fill"
-                paint={{
-                  "fill-color": isDark ? "#ffd200" : "#003c71",
-                  "fill-opacity": 0.2,
-                }}
-              />
-              <Layer
-                id="boundary-outline"
-                type="line"
-                paint={{
-                  "line-color": isDark ? "#ffd200" : "#003c71",
-                  "line-width": 2,
-                }}
-              />
-            </Source>
-          )}
+            {/* Building polygon */}
+            {previewDestId && curDestinationPoly && (
+              <Source id="boundary" type="geojson" data={curDestinationPoly as any}>
+                <Layer
+                  id="boundary-fill"
+                  type="fill"
+                  paint={{
+                    "fill-color": isDark ? "#ffd200" : "#003c71",
+                    "fill-opacity": 0.2,
+                  }}
+                />
+                <Layer
+                  id="boundary-outline"
+                  type="line"
+                  paint={{
+                    "line-color": isDark ? "#ffd200" : "#003c71",
+                    "line-width": 2,
+                  }}
+                />
+              </Source>
+            )}
 
-          {/* Optional: tiny "loading nodes" visual, without adding a destination marker */}
-          {buildingNodesPending && previewDestPos && (
-            <Source
-              id="nodes-loading-dot"
-              type="geojson"
-              data={{
-                type: "FeatureCollection",
-                features: [
-                  {
-                    type: "Feature",
-                    properties: {},
-                    geometry: {
-                      type: "Point",
-                      coordinates: [previewDestPos.lng, previewDestPos.lat],
+            {/* Optional: tiny "loading nodes" visual, without adding a destination marker */}
+            {buildingNodesPending && previewDestPos && (
+              <Source
+                id="nodes-loading-dot"
+                type="geojson"
+                data={{
+                  type: "FeatureCollection",
+                  features: [
+                    {
+                      type: "Feature",
+                      properties: {},
+                      geometry: {
+                        type: "Point",
+                        coordinates: [previewDestPos.lng, previewDestPos.lat],
+                      },
                     },
-                  },
-                ],
-              } as any}
-            >
-              <Layer
-                id="nodes-loading-dot-layer"
-                type="circle"
-                paint={{
-                  "circle-radius": 6,
-                  "circle-color": isDark ? "#ffd200" : "#003c71",
-                  "circle-opacity": 0.45,
-                }}
-              />
-            </Source>
-          )}
-        </ReactMap>
+                  ],
+                } as any}
+              >
+                <Layer
+                  id="nodes-loading-dot-layer"
+                  type="circle"
+                  paint={{
+                    "circle-radius": 6,
+                    "circle-color": isDark ? "#ffd200" : "#003c71",
+                    "circle-opacity": 0.45,
+                  }}
+                />
+              </Source>
+            )}
+          </ReactMap>
+        )}
       </div>
 
       {/* ---------------- Confirm Delete Modal ---------------- */}

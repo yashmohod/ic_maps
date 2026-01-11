@@ -12,7 +12,12 @@ import {
   type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 
-import type { MapLayerMouseEvent, MapMouseEvent } from "maplibre-gl";
+import maplibregl, {
+  type MapLayerMouseEvent,
+  type MapMouseEvent,
+  type LineLayerSpecification,
+  type SymbolLayerSpecification,
+} from "maplibre-gl";
 import type {
   Feature,
   FeatureCollection,
@@ -20,10 +25,6 @@ import type {
   Point,
   GeoJsonProperties,
 } from "geojson";
-import type {
-  LineLayerSpecification,
-  SymbolLayerSpecification,
-} from "maplibre-gl";
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -38,6 +39,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 
 import {
   getAllMapFeature,
@@ -101,9 +103,11 @@ export default function RouteEditor(): JSX.Element {
     zoom: 15.5,
   });
   const { isDark } = useAppTheme();
-  const mapStyleUrl = isDark
-    ? "https://api.maptiler.com/maps/dataviz-dark/style.json?key=ezFqZj4n29WctcwDznlR"
-    : "https://api.maptiler.com/maps/base-v4/style.json?key=ezFqZj4n29WctcwDznlR";
+  const stylePath = isDark
+    ? "/styles/osm-bright/style-local-dark.json"
+    : "/styles/osm-bright/style-local-light.json";
+  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const canRenderMap = !!baseStyle;
   const panelClass =
     "border border-border bg-panel text-panel-foreground shadow backdrop-blur";
 
@@ -1003,74 +1007,81 @@ export default function RouteEditor(): JSX.Element {
       )}
 
       <div className="w-full h-full">
-        <ReactMap
-          ref={mapRef}
-          longitude={viewState.longitude}
-          latitude={viewState.latitude}
-          zoom={viewState.zoom}
-          onMove={(evt: ViewStateChangeEvent) =>
-            setViewState({
-              longitude: evt.viewState.longitude,
-              latitude: evt.viewState.latitude,
-              zoom: evt.viewState.zoom,
-            })
-          }
-          onClick={handleMapClick as any}
-          mapStyle={mapStyleUrl}
-          onLoad={handleLoad}
-          style={{ width: "100%", height: "100%" }}
-        >
-          <Source id="edges" type="geojson" data={edgesGeoJSON}>
-            <Layer {...(lineLayer as any)} />
-            <Layer {...(oneWayArrows as any)} />
-          </Source>
+        {!canRenderMap ? (
+          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+            Loading basemap...
+          </div>
+        ) : (
+          <ReactMap
+            ref={mapRef}
+            longitude={viewState.longitude}
+            latitude={viewState.latitude}
+            zoom={viewState.zoom}
+            onMove={(evt: ViewStateChangeEvent) =>
+              setViewState({
+                longitude: evt.viewState.longitude,
+                latitude: evt.viewState.latitude,
+                zoom: evt.viewState.zoom,
+              })
+            }
+            onClick={handleMapClick as any}
+            mapLib={maplibregl}
+            mapStyle={baseStyle as any}
+            onLoad={handleLoad}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <Source id="edges" type="geojson" data={edgesGeoJSON}>
+              <Layer {...(lineLayer as any)} />
+              <Layer {...(oneWayArrows as any)} />
+            </Source>
 
-          {markers.map((m) => {
-            const isBuildingSel =
-              mode === "buildingGroup" && curBuildingNodes.has(m.id);
-            const isNavModeSel =
-              mode === "navMode" && isNodeSelectedNavMode(m.id);
-            const isBlueLightSel =
-              mode === "blueLight" && Boolean(m.isBlueLight);
-            const isDrawSel = mode === "select" && m.id === selectedId;
+            {markers.map((m) => {
+              const isBuildingSel =
+                mode === "buildingGroup" && curBuildingNodes.has(m.id);
+              const isNavModeSel =
+                mode === "navMode" && isNodeSelectedNavMode(m.id);
+              const isBlueLightSel =
+                mode === "blueLight" && Boolean(m.isBlueLight);
+              const isDrawSel = mode === "select" && m.id === selectedId;
 
-            if (mode === "navMode" && showOnlyNavMode && !isNavModeSel)
-              return null;
+              if (mode === "navMode" && showOnlyNavMode && !isNavModeSel)
+                return null;
 
-            const colorClass = isBuildingSel
-              ? "bg-amber-500"
-              : isNavModeSel || isDrawSel || isBlueLightSel
-              ? "bg-destructive"
-              : "bg-brand";
+              const colorClass = isBuildingSel
+                ? "bg-amber-500"
+                : isNavModeSel || isDrawSel || isBlueLightSel
+                ? "bg-destructive"
+                : "bg-brand";
 
-            return (
-              <Marker
-                key={m.id}
-                longitude={m.lng}
-                latitude={m.lat}
-                anchor="center"
-                draggable={mode === "edit"}
-                onDragEnd={(e) => handleMarkerDragEnd(e, m.id)}
-              >
-                <button
-                  onClick={(e) => handleMarkerClick(e, m.id)}
-                  onContextMenu={(e) => e.preventDefault()}
-                  aria-label={`marker-${m.id}`}
-                  className={`rounded-full border-2 shadow ${colorClass} border-white`}
-                  style={{
-                    width: 16,
-                    height: 16,
-                    cursor: "pointer",
-                    boxSizing: "content-box",
-                    opacity: showNodes ? 1 : 0,
-                    pointerEvents: showNodes ? "auto" : "none",
-                  }}
-                  title={`${m.id} (${m.lng.toFixed(5)}, ${m.lat.toFixed(5)})`}
-                />
-              </Marker>
-            );
-          })}
-        </ReactMap>
+              return (
+                <Marker
+                  key={m.id}
+                  longitude={m.lng}
+                  latitude={m.lat}
+                  anchor="center"
+                  draggable={mode === "edit"}
+                  onDragEnd={(e) => handleMarkerDragEnd(e, m.id)}
+                >
+                  <button
+                    onClick={(e) => handleMarkerClick(e, m.id)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    aria-label={`marker-${m.id}`}
+                    className={`rounded-full border-2 shadow ${colorClass} border-white`}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      cursor: "pointer",
+                      boxSizing: "content-box",
+                      opacity: showNodes ? 1 : 0,
+                      pointerEvents: showNodes ? "auto" : "none",
+                    }}
+                    title={`${m.id} (${m.lng.toFixed(5)}, ${m.lat.toFixed(5)})`}
+                  />
+                </Marker>
+              );
+            })}
+          </ReactMap>
+        )}
       </div>
 
       <Dialog open={showNavModeModal} onOpenChange={setShowNavModeModal}>

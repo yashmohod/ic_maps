@@ -11,7 +11,11 @@ import React, {
 } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import { Map as ReactMap, type MapRef } from "@vis.gl/react-maplibre";
-import type { Map as MlMap, MapMouseEvent } from "maplibre-gl";
+import maplibregl, {
+  type Map as MlMap,
+  type MapMouseEvent,
+  type StyleSpecification,
+} from "maplibre-gl";
 import type {
   Feature,
   FeatureCollection,
@@ -25,6 +29,7 @@ import "./page.css";
 import EditPanel from "@/components/BuildingInfoEditPanel";
 import DrawControl from "@/components/BuildingDrawControls";
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 
 import {
   getAllBuildings,
@@ -59,7 +64,7 @@ type MapSectionProps = {
   mlMap: MlMap | null;
   mapRef: React.RefObject<MapRef | null>;
   stableViewState: ViewStateLite;
-  mapStyleUrl: string;
+  mapStyle: StyleSpecification;
   onMapClick: (e: MapMouseEvent) => void;
   onLoad: () => void;
   onCreate: (e: DrawEvent, draw?: unknown) => void;
@@ -76,7 +81,7 @@ const MapSection = React.memo(function MapSection({
   mlMap,
   mapRef,
   stableViewState,
-  mapStyleUrl,
+  mapStyle,
   onMapClick,
   onLoad,
   onCreate,
@@ -92,7 +97,8 @@ const MapSection = React.memo(function MapSection({
       onClick={onMapClick as any}
       onLoad={onLoad}
       // Some versions don't accept className; wrapper handles sizing anyway
-      mapStyle={mapStyleUrl}
+      mapLib={maplibregl}
+      mapStyle={mapStyle}
       style={{ width: "100%", height: "100%" }}
     >
       <DrawControl
@@ -129,9 +135,11 @@ export default function BuildingEditor(): JSX.Element {
   );
   const [curEditName, setcurEditName] = useState<string>("");
 
-  const mapStyleUrl = isDark
-    ? "https://api.maptiler.com/maps/dataviz-dark/style.json?key=ezFqZj4n29WctcwDznlR"
-    : "https://api.maptiler.com/maps/base-v4/style.json?key=ezFqZj4n29WctcwDznlR";
+  const stylePath = isDark
+    ? "/styles/osm-bright/style-local-dark.json"
+    : "/styles/osm-bright/style-local-light.json";
+  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const canRenderMap = !!baseStyle;
 
   /** Stable initial map view */
   const stableViewState = useMemo<ViewStateLite>(
@@ -348,20 +356,26 @@ export default function BuildingEditor(): JSX.Element {
       />
 
       <div className="w-full h-full">
-        <MapSection
-          polys={polys}
-          mlMap={mlMap}
-          mapRef={mapRef}
-          stableViewState={stableViewState}
-          mapStyleUrl={mapStyleUrl}
-          onMapClick={onMapClick}
-          onLoad={onLoad}
-          onCreate={onCreate}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-          onSelectionChange={onSelectionChange}
-          onModeChange={onModeChange}
-        />
+        {!canRenderMap ? (
+          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+            Loading basemap...
+          </div>
+        ) : (
+          <MapSection
+            polys={polys}
+            mlMap={mlMap}
+            mapRef={mapRef}
+            stableViewState={stableViewState}
+            mapStyle={baseStyle as StyleSpecification}
+            onMapClick={onMapClick}
+            onLoad={onLoad}
+            onCreate={onCreate}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+            onSelectionChange={onSelectionChange}
+            onModeChange={onModeChange}
+          />
+        )}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import {
 import toast, { Toaster } from "react-hot-toast";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import {
   getAllBuildings,
   getAllNavModes,
@@ -36,6 +37,9 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { authClient, type Session } from "@/lib/auth-client";
+
+import maplibregl from "maplibre-gl";
+
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };
@@ -192,9 +196,12 @@ export default function NavigationMap(): JSX.Element {
   const stageDetails =
     STAGE_DETAILS[mapStage] ?? STAGE_DETAILS[MAP_STAGES.IDLE];
 
-  const mapStyleUrl = isDark
-    ? "https://api.maptiler.com/maps/dataviz-dark/style.json?key=ezFqZj4n29WctcwDznlR"
-    : "https://api.maptiler.com/maps/base-v4/style.json?key=ezFqZj4n29WctcwDznlR";
+  /** ---------------- PMTiles + Style ---------------- */
+
+  const stylePath = isDark
+    ? "/styles/osm-bright/style-local-dark.json"
+    : "/styles/osm-bright/style-local-light.json";
+  const { baseStyle, vectorSourceId } = usePmtilesStyle({ stylePath });
 
   const surfacePanelClass = "bg-panel text-panel-foreground";
   const surfaceSubtleClass = "bg-panel-muted text-panel-muted-foreground";
@@ -672,8 +679,7 @@ export default function NavigationMap(): JSX.Element {
   async function showRoute() {
     if (!selectedDest)
       return toast.error("Please select a destination before starting route.");
-    if (!userPos)
-      return toast.error("Tap Locate Me before looking for a route.");
+    if (!userPos) return toast.error("Tap Locate Me before looking for a route.");
 
     try {
       const resp: any = await getRouteTo(
@@ -698,7 +704,6 @@ export default function NavigationMap(): JSX.Element {
       setMapStage(MAP_STAGES.ROUTE);
 
       if (!coords) {
-        // if graph isn't loaded yet, defer geometry until markers/edgeIndex arrive
         setPendingPathKeys(pathKeys);
         setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
         setZoomed(true);
@@ -738,8 +743,6 @@ export default function NavigationMap(): JSX.Element {
         return;
       }
 
-      // Keep the UI in route-preview stage; geometry will be rebuilt once
-      // NavModeMap has loaded the new graph.
       routeCoordsRef.current = [];
       setPathNodeIds(new Set());
       setPath(new Set(keys));
@@ -747,7 +750,6 @@ export default function NavigationMap(): JSX.Element {
       setTracking(false);
       setMapStage(MAP_STAGES.ROUTE);
 
-      // Critical: defer geometry build until markers/edgeIndex correspond to new mode
       setPendingPathKeys(keys);
     } catch (err) {
       console.error("Recalc route failed", err);
@@ -758,8 +760,7 @@ export default function NavigationMap(): JSX.Element {
 
   async function startTracking() {
     if (!selectedDest) return toast.error("Please select a destination first.");
-    if (!userPos)
-      return toast.error("Tap Locate Me first so I know where you are.");
+    if (!userPos) return toast.error("Tap Locate Me first so I know where you are.");
 
     let resp: any;
     try {
@@ -814,10 +815,8 @@ export default function NavigationMap(): JSX.Element {
         );
 
         let brg: number;
-        if (typeof heading === "number" && !Number.isNaN(heading))
-          brg = heading;
-        else if (deviceHeadingRef.current != null)
-          brg = deviceHeadingRef.current;
+        if (typeof heading === "number" && !Number.isNaN(heading)) brg = heading;
+        else if (deviceHeadingRef.current != null) brg = deviceHeadingRef.current;
         else if (routeCoordsRef.current.length >= 2) {
           const [nx, ny] = routeCoordsRef.current[1];
           brg = bearingTo(longitude, latitude, nx, ny);
@@ -1093,8 +1092,7 @@ export default function NavigationMap(): JSX.Element {
   async function handelTheButton() {
     if (!selectedDest)
       return toast.error("Please select a destination before starting route.");
-    if (!userPos)
-      return toast.error("Tap Locate Me before looking for a route.");
+    if (!userPos) return toast.error("Tap Locate Me before looking for a route.");
 
     if (!navigating && !tracking) {
       showRoute();
@@ -1116,6 +1114,8 @@ export default function NavigationMap(): JSX.Element {
   const { toggleSidebar } = useSidebar();
 
   /** ---------------- Render ---------------- */
+
+  const canRenderMap = !!baseStyle;
 
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
@@ -1347,10 +1347,7 @@ export default function NavigationMap(): JSX.Element {
                 {sheetPosition > 0.5 ? (
                   <IconArrowBadgeUpFilled className="text-current" size={42} />
                 ) : (
-                  <IconArrowBadgeDownFilled
-                    className="text-current"
-                    size={42}
-                  />
+                  <IconArrowBadgeDownFilled className="text-current" size={42} />
                 )}
               </button>
             </div>
@@ -1398,104 +1395,136 @@ export default function NavigationMap(): JSX.Element {
         </div>
       </div>
 
-      {/* Map wrapper FIX: ReactMap props don't include `className` in TS */}
+      {/* Map wrapper */}
       <div className="h-full w-full">
-        <ReactMap
-          ref={mapRef}
-          {...viewState}
-          onMove={(e: ViewStateChangeEvent) =>
-            setViewState((prev) => ({ ...prev, ...e.viewState }))
-          }
-          mapStyle={mapStyleUrl}
-          onLoad={() => setMapReady(true)}
-        >
-          {buildingNodesFC && (
-            <Source
-              id="building-nodes"
-              type="geojson"
-              data={buildingNodesFC as any}
-            >
-              <Layer
-                id="building-nodes-circle"
-                type="circle"
-                paint={{
-                  "circle-radius": [
-                    "case",
-                    ["boolean", ["get", "onPath"], false],
-                    12,
-                    8,
-                  ],
-                  "circle-color": [
-                    "case",
-                    ["boolean", ["get", "onPath"], false],
-                    isDark ? "#ffd200" : "#003c71",
-                    isDark ? "#60a5fa" : "#2563eb",
-                  ],
-                  "circle-stroke-width": 2,
-                  "circle-stroke-color": isDark ? "#041631" : "#ffffff",
-                }}
-              />
-            </Source>
-          )}
+        {!canRenderMap ? (
+          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+            Loading basemap…
+          </div>
+        ) : (
+          <ReactMap
+            ref={mapRef}
+            {...viewState}
+            onMove={(e: ViewStateChangeEvent) =>
+              setViewState((prev) => ({ ...prev, ...e.viewState }))
+            }
+            mapLib={maplibregl}
+            mapStyle={baseStyle as any}
+            onLoad={() => {
+              setMapReady(true);
+              const map = mapRef.current?.getMap?.();
+              console.log(map?.getStyle().sources);
+              console.log(map?.getStyle().layers?.map(l => ({
+                id: l.id, source: (l as any).source, "source-layer": (l as any)["source-layer"], type: l.type
+              })));
+              map?.on("error", (e: any) => {
+                console.error("[maplibre error]", e?.error ?? e);
+              });
+            }}
+          >
+            <Layer
+              id="3d-buildings"
+              type="fill-extrusion"
+              source={vectorSourceId}
+              source-layer="building"
+              minzoom={15}
+              beforeId="place-city"
+              paint={{
+                "fill-extrusion-color": isDark ? "#2b3647" : "#dfdbd7",
+                "fill-extrusion-height": [
+                  "coalesce",
+                  ["get", "render_height"],
+                  ["get", "height"],
+                  12,
+                ],
+                "fill-extrusion-base": [
+                  "coalesce",
+                  ["get", "render_min_height"],
+                  ["get", "min_height"],
+                  0,
+                ],
+                "fill-extrusion-opacity": 0.75,
+              }}
+            />
 
-          {/* KEY forces remount so NavModeMap reloads graph cleanly per mode */}
-          <NavModeMap
-            key={`navmode-${String(curNavMode)}`}
-            path={path}
-            navMode={curNavMode}
-            markers={markers}
-            setMarkers={setMarkers}
-            edgeIndex={edgeIndex}
-            setEdgeIndex={setEdgeIndex}
-          />
+            {buildingNodesFC && (
+              <Source
+                id="building-nodes"
+                type="geojson"
+                data={buildingNodesFC as any}
+              >
+                <Layer
+                  id="building-nodes-circle"
+                  type="circle"
+                  paint={{
+                    "circle-radius": [
+                      "case",
+                      ["boolean", ["get", "onPath"], false],
+                      12,
+                      8,
+                    ],
+                    "circle-color": [
+                      "case",
+                      ["boolean", ["get", "onPath"], false],
+                      isDark ? "#ffd200" : "#003c71",
+                      isDark ? "#60a5fa" : "#2563eb",
+                    ],
+                    "circle-stroke-width": 2,
+                    "circle-stroke-color": isDark ? "#041631" : "#ffffff",
+                  }}
+                />
+              </Source>
+            )}
 
-          {accuracyGeoJSON && (
-            <Source
-              id="loc-accuracy"
-              type="geojson"
-              data={accuracyGeoJSON as any}
-            >
-              <Layer {...accuracyFill} />
-              <Layer {...accuracyLine} />
-            </Source>
-          )}
+            {/* KEY forces remount so NavModeMap reloads graph cleanly per mode */}
+            <NavModeMap
+              key={`navmode-${String(curNavMode)}`}
+              path={path}
+              navMode={curNavMode}
+              markers={markers}
+              setMarkers={setMarkers}
+              edgeIndex={edgeIndex}
+              setEdgeIndex={setEdgeIndex}
+            />
 
-          {selectedDest && curBuildingPoly && (
-            <Source id="boundary" type="geojson" data={curBuildingPoly as any}>
-              <Layer
-                id="boundary-fill"
-                type="fill"
-                paint={{
-                  "fill-color": isDark ? "#ffd200" : "#003c71",
-                  "fill-opacity": 0.2,
-                }}
-              />
-              <Layer
-                id="boundary-outline"
-                type="line"
-                paint={{
-                  "line-color": isDark ? "#ffd200" : "#003c71",
-                  "line-width": 2,
-                }}
-              />
-            </Source>
-          )}
+            {accuracyGeoJSON && (
+              <Source id="loc-accuracy" type="geojson" data={accuracyGeoJSON as any}>
+                <Layer {...accuracyFill} />
+                <Layer {...accuracyLine} />
+              </Source>
+            )}
 
-          {userPos && (
-            <Marker
-              longitude={userPos.lng}
-              latitude={userPos.lat}
-              anchor="center"
-            >
-              <div
-                title={`You are here (${userPos.lat.toFixed(
-                  6,
-                )}, ${userPos.lng.toFixed(6)})`}
-                className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
-              />
-            </Marker>
-          )}
-        </ReactMap>
+            {selectedDest && curBuildingPoly && (
+              <Source id="boundary" type="geojson" data={curBuildingPoly as any}>
+                <Layer
+                  id="boundary-fill"
+                  type="fill"
+                  paint={{
+                    "fill-color": isDark ? "#ffd200" : "#003c71",
+                    "fill-opacity": 0.2,
+                  }}
+                />
+                <Layer
+                  id="boundary-outline"
+                  type="line"
+                  paint={{
+                    "line-color": isDark ? "#ffd200" : "#003c71",
+                    "line-width": 2,
+                  }}
+                />
+              </Source>
+            )}
+
+            {userPos && (
+              <Marker longitude={userPos.lng} latitude={userPos.lat} anchor="center">
+                <div
+                  title={`You are here (${userPos.lat.toFixed(6)}, ${userPos.lng.toFixed(6)})`}
+                  className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
+                />
+              </Marker>
+            )}
+          </ReactMap>
+        )}
       </div>
     </div>
   );

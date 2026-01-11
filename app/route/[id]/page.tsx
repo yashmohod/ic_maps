@@ -14,9 +14,10 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import toast, { Toaster } from "react-hot-toast";
 import { useParams } from "next/navigation";
 
-import type { LineLayerSpecification } from "maplibre-gl";
+import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
 
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { getAllNavModes, RouteNavigate } from "@/lib/icmapsApi";
 
 // ✅ This is the KEY: load markers + edgeIndex the same way your working pages do
@@ -214,9 +215,11 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const [mapReady, setMapReady] = useState(false);
 
   const { isDark } = useAppTheme();
-  const mapStyleUrl = isDark
-    ? "https://api.maptiler.com/maps/dataviz-dark/style.json?key=ezFqZj4n29WctcwDznlR"
-    : "https://api.maptiler.com/maps/base-v4/style.json?key=ezFqZj4n29WctcwDznlR";
+  const stylePath = isDark
+    ? "/styles/osm-bright/style-local-dark.json"
+    : "/styles/osm-bright/style-local-light.json";
+  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const canRenderMap = !!baseStyle;
 
   const surfacePanelClass = "bg-panel text-panel-foreground";
   const surfaceSubtleClass = "bg-panel-muted text-panel-muted-foreground";
@@ -623,15 +626,21 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
       {/* Map */}
       <div className="h-full w-full">
-        <ReactMap
-          ref={mapRef}
-          {...viewState}
-          onMove={(e: ViewStateChangeEvent) =>
-            setViewState((prev) => ({ ...prev, ...e.viewState }))
-          }
-          mapStyle={mapStyleUrl}
-          onLoad={() => setMapReady(true)}
-        >
+        {!canRenderMap ? (
+          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+            Loading basemap...
+          </div>
+        ) : (
+          <ReactMap
+            ref={mapRef}
+            {...viewState}
+            onMove={(e: ViewStateChangeEvent) =>
+              setViewState((prev) => ({ ...prev, ...e.viewState }))
+            }
+            mapLib={maplibregl}
+            mapStyle={baseStyle as any}
+            onLoad={() => setMapReady(true)}
+          >
           {/* ✅ Load the graph (markers + edgeIndex) exactly like your working pages */}
           {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the yellow route ourselves) */}
           <NavModeMap
@@ -677,7 +686,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               />
             </Marker>
           )}
-        </ReactMap>
+          </ReactMap>
+        )}
       </div>
 
       {/* bottom-right status */}

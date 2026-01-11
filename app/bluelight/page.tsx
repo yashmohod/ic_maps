@@ -12,9 +12,10 @@ import {
 import toast, { Toaster } from "react-hot-toast";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import type { LineLayerSpecification } from "maplibre-gl";
+import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
 
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { getNearestBlueLightPath } from "@/lib/icmapsApi";
 import NavModeMap from "../../components/NavMode";
 
@@ -83,9 +84,11 @@ export default function NavigationMapBlueLight(): JSX.Element {
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
 
   const { isDark } = useAppTheme();
-  const mapStyleUrl = isDark
-    ? "https://api.maptiler.com/maps/dataviz-dark/style.json?key=ezFqZj4n29WctcwDznlR"
-    : "https://api.maptiler.com/maps/base-v4/style.json?key=ezFqZj4n29WctcwDznlR";
+  const stylePath = isDark
+    ? "/styles/osm-bright/style-local-dark.json"
+    : "/styles/osm-bright/style-local-light.json";
+  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const canRenderMap = !!baseStyle;
 
   const surfacePanelClass = "bg-panel text-panel-foreground";
   const borderMutedClass = "border-border";
@@ -591,73 +594,80 @@ export default function NavigationMapBlueLight(): JSX.Element {
 
       {/* Map wrapper owns the sizing className (Map component typings don't include className) */}
       <div className="h-full w-full">
-        <ReactMap
-          ref={mapRef}
-          {...viewState}
-          onMove={(e: any) =>
-            setViewState((prev) => ({ ...prev, ...e.viewState }))
-          }
-          mapStyle={mapStyleUrl}
-          onLoad={() => setMapReady(true)}
-        >
-          <NavModeMap
-            path={emptyPath}
-            navMode={1}
-            markers={markers}
-            setMarkers={setMarkers}
-            edgeIndex={edgeIndex}
-            setEdgeIndex={setEdgeIndex}
-          />
+        {!canRenderMap ? (
+          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+            Loading basemap...
+          </div>
+        ) : (
+          <ReactMap
+            ref={mapRef}
+            {...viewState}
+            onMove={(e: any) =>
+              setViewState((prev) => ({ ...prev, ...e.viewState }))
+            }
+            mapLib={maplibregl}
+            mapStyle={baseStyle as any}
+            onLoad={() => setMapReady(true)}
+          >
+            <NavModeMap
+              path={emptyPath}
+              navMode={1}
+              markers={markers}
+              setMarkers={setMarkers}
+              edgeIndex={edgeIndex}
+              setEdgeIndex={setEdgeIndex}
+            />
 
-          {accuracyGeoJSON && (
-            <Source
-              id="loc-accuracy"
-              type="geojson"
-              data={accuracyGeoJSON as any}
-            >
-              <Layer {...(accuracyFill as any)} />
-              <Layer {...(accuracyLine as any)} />
-            </Source>
-          )}
-
-          {routeFC && (
-            <Source id="route" type="geojson" data={routeFC as any}>
-              <Layer {...routeLineLayer} />
-            </Source>
-          )}
-
-          {destPos &&
-            Number.isFinite(destPos.lng) &&
-            Number.isFinite(destPos.lat) && (
-              <Marker
-                longitude={destPos.lng}
-                latitude={destPos.lat}
-                anchor="center"
+            {accuracyGeoJSON && (
+              <Source
+                id="loc-accuracy"
+                type="geojson"
+                data={accuracyGeoJSON as any}
               >
-                <div className="relative flex items-center justify-center">
-                  <div className="absolute h-8 w-8 rounded-full bg-red-600 opacity-40 animate-ping" />
-                  <div
-                    className="h-4 w-4 rounded-full border-2 border-red-700 bg-brand shadow-lg"
-                  />
-                </div>
-              </Marker>
+                <Layer {...(accuracyFill as any)} />
+                <Layer {...(accuracyLine as any)} />
+              </Source>
             )}
 
-          {userPos && (
-            <Marker
-              longitude={userPos.lng}
-              latitude={userPos.lat}
-              anchor="center"
-            >
-              <div
-                title={`You are here (${userPos.lat.toFixed(
-                  6
-                )}, ${userPos.lng.toFixed(6)})`}
-                className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
-              />
-            </Marker>
-          )}
-        </ReactMap>
+            {routeFC && (
+              <Source id="route" type="geojson" data={routeFC as any}>
+                <Layer {...routeLineLayer} />
+              </Source>
+            )}
+
+            {destPos &&
+              Number.isFinite(destPos.lng) &&
+              Number.isFinite(destPos.lat) && (
+                <Marker
+                  longitude={destPos.lng}
+                  latitude={destPos.lat}
+                  anchor="center"
+                >
+                  <div className="relative flex items-center justify-center">
+                    <div className="absolute h-8 w-8 rounded-full bg-red-600 opacity-40 animate-ping" />
+                    <div
+                      className="h-4 w-4 rounded-full border-2 border-red-700 bg-brand shadow-lg"
+                    />
+                  </div>
+                </Marker>
+              )}
+
+            {userPos && (
+              <Marker
+                longitude={userPos.lng}
+                latitude={userPos.lat}
+                anchor="center"
+              >
+                <div
+                  title={`You are here (${userPos.lat.toFixed(
+                    6
+                  )}, ${userPos.lng.toFixed(6)})`}
+                  className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
+                />
+              </Marker>
+            )}
+          </ReactMap>
+        )}
       </div>
     </div>
   );
