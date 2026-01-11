@@ -17,9 +17,10 @@ import { useParams } from "next/navigation";
 import type { LineLayerSpecification } from "maplibre-gl";
 
 import { useAppTheme } from "@/hooks/use-app-theme";
-import { getAllNavModes, RouteNavigate } from "@/lib/icmapsApi"; // <-- ensure exported
-// If yours is RouteNavigate, change the import:
-// import { getAllNavModes, RouteNavigate as RouteNaviagate } from "@/lib/icmapsApi";
+import { getAllNavModes, RouteNavigate } from "@/lib/icmapsApi";
+
+// ✅ This is the KEY: load markers + edgeIndex the same way your working pages do
+import NavModeMap from "@/components/NavMode"; // <-- adjust if your path differs
 
 type LngLat = { lng: number; lat: number };
 
@@ -35,13 +36,14 @@ type NavMode = {
   name: string;
 };
 
-type MarkerNode = { id?: string | number; lng: number; lat: number };
+type MarkerNode = { id: string | number; lng: number; lat: number };
+type EdgeIndexEntry = { key: string; from: string | number; to: string | number };
 
 type GeoJSONFeatureCollection = {
   type: "FeatureCollection";
   features: Array<{
     type: "Feature";
-    properties: Record<string, unknown>;
+    properties: Record<string, any>;
     geometry:
     | { type: "Point"; coordinates: [number, number] }
     | { type: "LineString"; coordinates: Array<[number, number]> }
@@ -61,57 +63,59 @@ function Spinner({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
-/** Robustly extract an array of "nodes" from whatever your API returns */
-function extractNodes(resp: any): any[] {
+/** Extract path keys from many possible shapes:
+ * - { path: [...] }
+ * - { path: { path: [...] } }
+ * - resp.path being array directly
+ */
+function extractPathKeys(resp: any): string[] {
   if (!resp) return [];
-  if (Array.isArray(resp)) return resp;
 
+  // common shapes
+  if (Array.isArray(resp?.path)) return resp.path.map(String);
+  if (Array.isArray(resp)) return resp.map(String);
+
+  // nested path object
+  if (resp?.path && typeof resp.path === "object" && Array.isArray(resp.path.path)) {
+    return resp.path.path.map(String);
+  }
+
+  // other possible fields
   const candidates = [
-    resp.nodes,
-    resp.routeNodes,
-    resp.route_nodes,
-    resp.pathNodes,
-    resp.path_nodes,
-    resp.data,
-    resp.payload?.nodes,
-    resp.payload?.route_nodes,
+    resp.pathKeys,
+    resp.path_keys,
+    resp.edges,
+    resp.routeEdges,
+    resp.route_edges,
+    resp.data?.path,
+    resp.payload?.path,
   ];
 
   const found = candidates.find((x) => Array.isArray(x));
-  return Array.isArray(found) ? found : [];
+  return Array.isArray(found) ? found.map(String) : [];
 }
 
-/** Convert node-ish values into {lng,lat} */
-function normalizeNodes(raw: any[]): MarkerNode[] {
-  return raw
-    .map((n) => {
-      // shape A: {lng, lat}
-      if (n && typeof n === "object" && "lng" in n && "lat" in n) {
-        const lng = Number((n as any).lng);
-        const lat = Number((n as any).lat);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-        return { id: (n as any).id, lng, lat };
-      }
+function makeLookups(markersLocal: MarkerNode[], edgeIndexLocal: EdgeIndexEntry[]) {
+  const nodesById = new Map<string, { lng: number; lat: number }>(
+    markersLocal.map((m) => [String(m.id), { lng: m.lng, lat: m.lat }]),
+  );
 
-      // shape B: {x,y}
-      if (n && typeof n === "object" && "x" in n && "y" in n) {
-        const lng = Number((n as any).x);
-        const lat = Number((n as any).y);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-        return { id: (n as any).id, lng, lat };
-      }
+  const edgesByKey = new Map<string, { from: string; to: string }>(
+    edgeIndexLocal.map((e) => [String(e.key), { from: String(e.from), to: String(e.to) }]),
+  );
 
-      // shape C: [lng,lat]
-      if (Array.isArray(n) && n.length >= 2) {
-        const lng = Number(n[0]);
-        const lat = Number(n[1]);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-        return { lng, lat };
-      }
+  return { nodesById, edgesByKey };
+}
 
-      return null;
-    })
-    .filter(Boolean) as MarkerNode[];
+/** Fallback: if key is literally "nodeA__nodeB" and not present in edgeIndex */
+function parseEdgeKeyFallback(key: string): { from: string; to: string } | null {
+  if (!key || typeof key !== "string") return null;
+  const parts = key.split("__");
+  if (parts.length !== 2) return null;
+  const from = parts[0]?.trim();
+  const to = parts[1]?.trim();
+  if (!from || !to) return null;
+  return { from, to };
 }
 
 function makeCircleGeoJSON(
@@ -127,8 +131,7 @@ function makeCircleGeoJSON(
   for (let i = 0; i <= points; i++) {
     const brng = (i * 2 * Math.PI) / points;
     const lat2 = Math.asin(
-      Math.sin(latRad) * Math.cos(d) +
-      Math.cos(latRad) * Math.sin(d) * Math.cos(brng),
+      Math.sin(latRad) * Math.cos(d) + Math.cos(latRad) * Math.sin(d) * Math.cos(brng),
     );
     const lon2 =
       lon +
@@ -158,9 +161,42 @@ function toDeg(rad: number) {
   return (rad * 180) / Math.PI;
 }
 
+/** Order node ids from edges (same style as your NavigationMap helper) */
+function orderNodeIdsFromEdges(edges: Array<{ from: string; to: string }>): string[] {
+  const adj = new Map<string, Set<string>>();
+  const add = (u: string, v: string) => {
+    if (!adj.has(u)) adj.set(u, new Set());
+    if (!adj.has(v)) adj.set(v, new Set());
+    adj.get(u)!.add(v);
+    adj.get(v)!.add(u);
+  };
+
+  for (const e of edges) add(e.from, e.to);
+  if (adj.size === 0) return [];
+
+  const endpoints = [...adj.entries()].filter(([, s]) => s.size === 1).map(([id]) => id);
+  const start = endpoints[0] ?? [...adj.keys()][0];
+
+  const ordered: string[] = [];
+  const visited = new Set<string>();
+  let cur: string | null = start;
+  let prev: string | null = null;
+
+  while (cur != null) {
+    ordered.push(cur);
+    visited.add(cur);
+    const nextNode =
+      [...(adj.get(cur) ?? [])].find((n) => n !== prev && !visited.has(n)) ?? null;
+    prev = cur;
+    cur = nextNode;
+  }
+
+  return ordered;
+}
+
 export default function ShareRouteNavigatePage(): JSX.Element {
   const params = useParams<{ id: string }>();
-  const routeId = params?.id ? String(params.id) : "";
+  const routeIdRaw = params?.id ?? "";
 
   const defViewState = useMemo(
     () => ({
@@ -254,9 +290,17 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     );
   }
 
-  /** -------- route from RouteNaviagate -------- */
-  const [routeNodes, setRouteNodes] = useState<MarkerNode[]>([]);
+  /** -------- graph data (from NavModeMap) -------- */
+  const [markers, setMarkers] = useState<MarkerNode[]>([]);
+  const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
+
+  /** -------- route state -------- */
   const [routePending, setRoutePending] = useState(false);
+  const [pathKeys, setPathKeys] = useState<string[]>([]);
+  const [pathSet, setPathSet] = useState<Set<string>>(new Set());
+
+  const [routeFC, setRouteFC] = useState<GeoJSONFeatureCollection | null>(null);
+  const [destPos, setDestPos] = useState<LngLat | null>(null);
 
   const routeLineLayer = useMemo<LineLayerSpecification>(
     () => ({
@@ -273,41 +317,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }),
     [],
   );
-
-  const routeFC = useMemo<GeoJSONFeatureCollection | null>(() => {
-    if (!routeNodes.length) return null;
-    const coords = routeNodes.map((n) => [n.lng, n.lat] as [number, number]);
-    if (coords.length < 2) return null;
-
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          properties: {},
-          geometry: { type: "LineString", coordinates: coords },
-        },
-      ],
-    };
-  }, [routeNodes]);
-
-  const routeNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
-    if (!routeNodes.length) return null;
-    return {
-      type: "FeatureCollection",
-      features: routeNodes.map((n, idx) => ({
-        type: "Feature",
-        properties: { idx },
-        geometry: { type: "Point", coordinates: [n.lng, n.lat] },
-      })),
-    };
-  }, [routeNodes]);
-
-  const destPos = useMemo<LngLat | null>(() => {
-    if (!routeNodes.length) return null;
-    const last = routeNodes[routeNodes.length - 1];
-    return { lng: last.lng, lat: last.lat };
-  }, [routeNodes]);
 
   const accuracyGeoJSON = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!userPos?.accuracy) return null;
@@ -334,17 +343,19 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     [],
   );
 
-  function fitToUserAndRoute() {
+  function fitToUserAndRoute(coords: Array<[number, number]>) {
     const map = mapRef.current?.getMap?.();
     if (!map) return;
+    if (!coords?.length) return;
 
-    const coords: Array<[number, number]> = [];
-    if (userPos) coords.push([userPos.lng, userPos.lat]);
-    for (const n of routeNodes) coords.push([n.lng, n.lat]);
-    if (coords.length < 2) return;
+    const all: Array<[number, number]> = [];
+    if (userPos) all.push([userPos.lng, userPos.lat]);
+    all.push(...coords);
 
-    const lngs = coords.map((c) => c[0]);
-    const lats = coords.map((c) => c[1]);
+    if (all.length < 2) return;
+
+    const lngs = all.map((c) => c[0]);
+    const lats = all.map((c) => c[1]);
     const west = Math.min(...lngs);
     const east = Math.max(...lngs);
     const south = Math.min(...lats);
@@ -368,59 +379,141 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     );
   }
 
+  /** Fetch path keys from backend */
   async function refreshRoute() {
-    if (!routeId) return;
+    if (!routeIdRaw) return;
     if (!userPos) return;
     if (!curNavMode) return;
     if (routePending) return;
 
     setRoutePending(true);
     try {
-      // IMPORTANT: adjust param order if your client differs
-      const resp: any = await RouteNavigate(
-        routeId,
+      // allow either numeric or string ids
+      const asNum = Number(routeIdRaw);
+      const routeIdForApi: any = Number.isFinite(asNum) ? asNum : routeIdRaw;
+
+      const resp: any = await (RouteNavigate as any)(
+        routeIdForApi,
         userPos.lat,
         userPos.lng,
-        String(curNavMode),
+        Number(curNavMode),
       );
 
-      const raw = extractNodes(resp);
-      const nodes = normalizeNodes(raw);
+      console.log("RouteNavigate resp:", resp);
 
-      if (nodes.length < 2) {
-        setRouteNodes([]);
-        toast.error("Route could not be built (no nodes returned).");
+      const keys = extractPathKeys(resp);
+      if (!keys.length) {
+        setPathKeys([]);
+        setPathSet(new Set());
+        setRouteFC(null);
+        setDestPos(null);
+        toast.error("No path returned for that share route.");
         return;
       }
 
-      setRouteNodes(nodes);
-
-      // camera
-      setTimeout(() => fitToUserAndRoute(), 0);
+      setPathKeys(keys);
+      setPathSet(new Set(keys));
     } catch (e) {
       console.error(e);
-      setRouteNodes([]);
+      setPathKeys([]);
+      setPathSet(new Set());
+      setRouteFC(null);
+      setDestPos(null);
       toast.error("Failed to load route.");
     } finally {
       setRoutePending(false);
     }
   }
 
-  /** -------- lifecycle -------- */
+  /** Build GeoJSON using markers+edgeIndex (exactly like your BlueLight page) */
   useEffect(() => {
-    if (!routeId) toast.error("Missing route id in URL.");
+    if (!pathKeys.length) {
+      setRouteFC(null);
+      setDestPos(null);
+      return;
+    }
+    if (!markers.length || !edgeIndex.length) {
+      // wait until NavModeMap loads graph
+      return;
+    }
+
+    const { nodesById, edgesByKey } = makeLookups(markers, edgeIndex);
+
+    const resolvedEdges: Array<{ from: string; to: string }> = [];
+    const segments: Array<Array<[number, number]>> = [];
+
+    for (const key of pathKeys) {
+      const edge =
+        edgesByKey.get(String(key)) ??
+        parseEdgeKeyFallback(String(key)); // fallback for "n1__n2" form
+
+      if (!edge) continue;
+
+      const from = nodesById.get(edge.from);
+      const to = nodesById.get(edge.to);
+      if (!from || !to) continue;
+
+      resolvedEdges.push({ from: edge.from, to: edge.to });
+      segments.push([
+        [from.lng, from.lat],
+        [to.lng, to.lat],
+      ]);
+    }
+
+    if (!segments.length) {
+      console.warn("No segments could be resolved from pathKeys", { pathKeys });
+      setRouteFC(null);
+      setDestPos(null);
+      toast.error("Path edges did not match any loaded graph edges for this nav mode.");
+      return;
+    }
+
+    // destination marker: try to order the nodes, else just use last segment end
+    const orderedNodeIds = orderNodeIdsFromEdges(resolvedEdges);
+    const lastId = orderedNodeIds[orderedNodeIds.length - 1];
+
+    if (lastId) {
+      const p = nodesById.get(String(lastId));
+      if (p) setDestPos({ lng: p.lng, lat: p.lat });
+      else setDestPos(null);
+    } else {
+      const lastSeg = segments[segments.length - 1];
+      const end = lastSeg?.[1];
+      setDestPos(end ? { lng: end[0], lat: end[1] } : null);
+    }
+
+    setRouteFC({
+      type: "FeatureCollection",
+      features: segments.map((coords) => ({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: coords },
+      })),
+    });
+
+    // fit bounds using ALL segment coords
+    const allCoords: Array<[number, number]> = [];
+    for (const seg of segments) {
+      allCoords.push(seg[0], seg[1]);
+    }
+    setTimeout(() => fitToUserAndRoute(allCoords), 0);
+  }, [pathKeys, markers, edgeIndex, userPos?.lat, userPos?.lng]);
+
+  /** lifecycle */
+  useEffect(() => {
+    if (!routeIdRaw) toast.error("Missing route id in URL.");
     void loadNavModes();
     void locateOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeId]);
+  }, [routeIdRaw]);
 
-  // refresh when mode changes OR location appears
+  // refresh route when mode/location ready
   useEffect(() => {
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curNavMode, userPos?.lat, userPos?.lng, routeId]);
+  }, [curNavMode, userPos?.lat, userPos?.lng, routeIdRaw]);
 
-  /** ---------------- Render ---------------- */
+  /** UI */
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
       <Toaster position="top-right" reverseOrder />
@@ -440,7 +533,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 Shareable Route
               </p>
               <p className="truncate text-sm font-semibold">
-                Route ID: <span className="opacity-80">{routeId || "—"}</span>
+                Route ID: <span className="opacity-80">{routeIdRaw || "—"}</span>
               </p>
               <p className="mt-1 text-xs text-panel-muted-foreground">
                 {routePending ? "Refreshing route…" : "Route loaded from your current location."}
@@ -539,6 +632,17 @@ export default function ShareRouteNavigatePage(): JSX.Element {
           mapStyle={mapStyleUrl}
           onLoad={() => setMapReady(true)}
         >
+          {/* ✅ Load the graph (markers + edgeIndex) exactly like your working pages */}
+          {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the yellow route ourselves) */}
+          <NavModeMap
+            path={useMemo(() => new Set<string>(), [])}
+            navMode={curNavMode}
+            markers={markers}
+            setMarkers={setMarkers}
+            edgeIndex={edgeIndex}
+            setEdgeIndex={setEdgeIndex}
+          />
+
           {/* accuracy ring */}
           {accuracyGeoJSON && (
             <Source id="loc-accuracy" type="geojson" data={accuracyGeoJSON as any}>
@@ -547,30 +651,14 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             </Source>
           )}
 
-          {/* route line */}
+          {/* route line (segments FC) */}
           {routeFC && (
             <Source id="route" type="geojson" data={routeFC as any}>
               <Layer {...routeLineLayer} />
             </Source>
           )}
 
-          {/* route nodes (from RouteNaviagate) */}
-          {routeNodesFC && (
-            <Source id="route-nodes" type="geojson" data={routeNodesFC as any}>
-              <Layer
-                id="route-nodes-circle"
-                type="circle"
-                paint={{
-                  "circle-radius": 6,
-                  "circle-color": isDark ? "#60a5fa" : "#2563eb",
-                  "circle-stroke-width": 2,
-                  "circle-stroke-color": isDark ? "#041631" : "#ffffff",
-                }}
-              />
-            </Source>
-          )}
-
-          {/* destination pulse = last node */}
+          {/* destination pulse */}
           {destPos && (
             <Marker longitude={destPos.lng} latitude={destPos.lat} anchor="center">
               <div className="relative flex items-center justify-center">
@@ -606,8 +694,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             <span className="text-panel-muted-foreground">
               {routePending
                 ? "Building route…"
-                : routeNodes.length
-                  ? `${routeNodes.length} nodes`
+                : pathKeys.length
+                  ? `${pathKeys.length} edges`
                   : userPos
                     ? "No route yet"
                     : "Waiting for location"}
@@ -618,4 +706,3 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     </div>
   );
 }
-

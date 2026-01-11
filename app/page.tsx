@@ -166,6 +166,11 @@ export default function NavigationMap(): JSX.Element {
   const [buildingNodes, setBuildingNodes] = useState<Set<string>>(new Set());
   const [pathNodeIds, setPathNodeIds] = useState<Set<string>>(new Set());
 
+  // ---- Route recalc on nav-mode change (route preview only) ----
+  const [pendingPathKeys, setPendingPathKeys] = useState<string[] | null>(null);
+  const routeReqSeqRef = useRef(0);
+  const lastRecalcToastRef = useRef<string>("");
+
   const selectedBuilding = useMemo(() => {
     return buildings.find((b) => `${b.id}` === `${selectedDest}`) ?? null;
   }, [buildings, selectedDest]);
@@ -174,20 +179,15 @@ export default function NavigationMap(): JSX.Element {
 
   const { data: session, error, refetch, isPending } = authClient.useSession();
 
-  // const [curUser, setCurUser] = useState<User>();
-
   async function userInit(userId: string) {
     let resp = await fetch("/api/user/");
-    console.log("resp", resp?.curUser);
-    // let temp = await getUser(userId)
-    // console.log(temp)
-    // setCurUser(temp);
+    console.log("resp", (resp as any)?.curUser);
   }
 
   useEffect(() => {
     if (!session || error) return;
     void userInit(session.user.id);
-  }, [session, refetch]);
+  }, [session, refetch, error]);
 
   const stageDetails =
     STAGE_DETAILS[mapStage] ?? STAGE_DETAILS[MAP_STAGES.IDLE];
@@ -373,7 +373,6 @@ export default function NavigationMap(): JSX.Element {
   function disableCompass() {
     setUseCompass(false);
     deviceHeadingRef.current = null;
-    // (Leaving listeners as-is; removing anonymous listeners requires storing handler refs.)
   }
 
   /** -------- Robust geolocation -------- */
@@ -469,6 +468,9 @@ export default function NavigationMap(): JSX.Element {
 
       setPath(new Set());
       setPathNodeIds(new Set());
+      routeCoordsRef.current = [];
+      setPendingPathKeys(null);
+
       setMapStage(MAP_STAGES.BUILDING);
     } catch (err) {
       console.error("Building lookup failed", err);
@@ -483,6 +485,8 @@ export default function NavigationMap(): JSX.Element {
     setBuildingNodes(new Set());
     setPath(new Set());
     setNavigating(false);
+    routeCoordsRef.current = [];
+    setPendingPathKeys(null);
     setMapStage(MAP_STAGES.IDLE);
     showCampusOverview();
   }
@@ -553,7 +557,6 @@ export default function NavigationMap(): JSX.Element {
     while (cur != null) {
       ordered.push(cur);
       visited.add(cur);
-      // IMPORTANT: do NOT name this variable `next` (it can trip TS in some patterns)
       const nextNode =
         [...(adj.get(cur) ?? [])].find((n) => n !== prev && !visited.has(n)) ??
         null;
@@ -605,6 +608,15 @@ export default function NavigationMap(): JSX.Element {
     routeCoordsRef.current = coords;
 
     return coords;
+  }
+
+  function extractPathKeys(resp: any): string[] {
+    const pathKeys: string[] = Array.isArray(resp?.path)
+      ? resp.path
+      : resp?.path instanceof Set
+        ? [...resp.path]
+        : [];
+    return pathKeys.map(String);
   }
 
   /** -------- Bearing / camera -------- */
@@ -670,11 +682,8 @@ export default function NavigationMap(): JSX.Element {
         userPos.lng,
         String(curNavMode),
       );
-      const pathKeys: string[] = Array.isArray(resp?.path)
-        ? resp.path
-        : resp?.path instanceof Set
-          ? [...resp.path]
-          : [];
+
+      const pathKeys = extractPathKeys(resp);
 
       if (pathKeys.length === 0) {
         toast.error("No route found for that selection.");
@@ -689,7 +698,10 @@ export default function NavigationMap(): JSX.Element {
       setMapStage(MAP_STAGES.ROUTE);
 
       if (!coords) {
-        toast.error("Route geometry is still loading. Please try again.");
+        // if graph isn't loaded yet, defer geometry until markers/edgeIndex arrive
+        setPendingPathKeys(pathKeys);
+        setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
+        setZoomed(true);
         fitToUserAndDest();
         return;
       }
@@ -700,6 +712,47 @@ export default function NavigationMap(): JSX.Element {
     } catch (err) {
       console.error("Route lookup failed", err);
       toast.error("Failed to build route. Please try again.");
+    }
+  }
+
+  async function recalcRouteForNavMode(nextNavMode: string | number) {
+    if (!selectedDest || !userPos) return;
+
+    const seq = ++routeReqSeqRef.current;
+
+    try {
+      const resp: any = await getRouteTo(
+        selectedDest,
+        userPos.lat,
+        userPos.lng,
+        String(nextNavMode),
+      );
+
+      if (seq !== routeReqSeqRef.current) return;
+
+      const keys = extractPathKeys(resp);
+
+      if (keys.length === 0) {
+        toast.error("No route found for that mode.");
+        setPendingPathKeys(null);
+        return;
+      }
+
+      // Keep the UI in route-preview stage; geometry will be rebuilt once
+      // NavModeMap has loaded the new graph.
+      routeCoordsRef.current = [];
+      setPathNodeIds(new Set());
+      setPath(new Set(keys));
+      setNavigating(true);
+      setTracking(false);
+      setMapStage(MAP_STAGES.ROUTE);
+
+      // Critical: defer geometry build until markers/edgeIndex correspond to new mode
+      setPendingPathKeys(keys);
+    } catch (err) {
+      console.error("Recalc route failed", err);
+      toast.error("Failed to recalculate route.");
+      setPendingPathKeys(null);
     }
   }
 
@@ -721,11 +774,7 @@ export default function NavigationMap(): JSX.Element {
       return;
     }
 
-    const pathKeys: string[] = Array.isArray(resp?.path)
-      ? resp.path
-      : resp?.path instanceof Set
-        ? [...resp.path]
-        : [];
+    const pathKeys = extractPathKeys(resp);
 
     if (pathKeys.length === 0) return toast.error("No route found.");
 
@@ -804,6 +853,7 @@ export default function NavigationMap(): JSX.Element {
     setPath(new Set());
     setNavigating(false);
     setTracking(false);
+    setPendingPathKeys(null);
     setMapStage(MAP_STAGES.IDLE);
     disableCompass();
   }
@@ -829,6 +879,40 @@ export default function NavigationMap(): JSX.Element {
     getNavModes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Recalculate route if user is previewing a route and nav mode changes
+  useEffect(() => {
+    const isViewingRoute =
+      mapStage === MAP_STAGES.ROUTE && navigating && !tracking;
+
+    if (!isViewingRoute) return;
+    if (!selectedDest || !userPos) return;
+
+    void recalcRouteForNavMode(curNavMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curNavMode]);
+
+  // Once NavModeMap loads the new mode graph, build the route geometry
+  useEffect(() => {
+    if (!pendingPathKeys || pendingPathKeys.length === 0) return;
+    if (!markers.length || !edgeIndex.length) return;
+
+    const coords = buildRouteFeature(pendingPathKeys);
+
+    if (!coords) {
+      const key = pendingPathKeys.slice(0, 3).join(",") + `|${curNavMode}`;
+      if (lastRecalcToastRef.current !== key) {
+        lastRecalcToastRef.current = key;
+        toast.error("Route geometry couldn't be built for this mode.");
+      }
+      setPendingPathKeys(null);
+      return;
+    }
+
+    fitToUserAndDest(coords, { duration: 900 });
+    setPendingPathKeys(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPathKeys, markers, edgeIndex]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -925,7 +1009,6 @@ export default function NavigationMap(): JSX.Element {
       const deltaY = clientY - sheetStartYRef.current;
       if (Math.abs(deltaY) > 6) sheetDidDragRef.current = true;
 
-      // FIX: rename `next` -> `nextPos` (avoids TS self-reference/any weirdness)
       const nextPos = clamp(
         sheetStartPosRef.current + deltaY / window.innerHeight,
         0,
@@ -1036,6 +1119,8 @@ export default function NavigationMap(): JSX.Element {
 
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
+      <Toaster position="top-right" reverseOrder />
+
       {/* Top brand + search bar */}
       <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
         <div className="flex w-full items-stretch gap-2 justify-items-center">
@@ -1100,9 +1185,9 @@ export default function NavigationMap(): JSX.Element {
       </div>
 
       {/* Nav mode pills */}
-      <div className="absolute  inset-x-3 top-21 z-30 space-y-3 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
+      <div className="absolute inset-x-3 top-21 z-30 space-y-3 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
         <div className="px-3">
-          <div className="flex  justify-center">
+          <div className="flex justify-center">
             <span
               className={`mx-2 w-15 rounded-3xl border ${borderMutedClass} ${surfacePanelClass} text-center text-[13px] font-bold uppercase tracking-wide text-panel-muted-foreground shadow-xl backdrop-blur`}
             >
@@ -1110,7 +1195,7 @@ export default function NavigationMap(): JSX.Element {
             </span>
           </div>
 
-          <div className="mt-1 justify-center  -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+          <div className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             {navModes.map((mode) => {
               const active = `${mode.id}` === `${curNavMode}`;
               return (
@@ -1137,8 +1222,8 @@ export default function NavigationMap(): JSX.Element {
         </div>
       </div>
 
-      {/* admin pages */}
-      <div className="absolute flex flex-col inset-x-3 top-40 z-30 space-y-3 md:left-1/2 md:-translate-x-1/2">
+      {/* admin pages (moved fully to left) */}
+      <div className="absolute left-3 top-40 z-30 flex flex-col space-y-3">
         <Link href="/route-editor">
           <button
             className={[
@@ -1160,6 +1245,7 @@ export default function NavigationMap(): JSX.Element {
             {"Building \n Editor"}
           </button>
         </Link>
+
         <Link href="/customRoute">
           <button
             className={[
@@ -1352,7 +1438,9 @@ export default function NavigationMap(): JSX.Element {
             </Source>
           )}
 
+          {/* KEY forces remount so NavModeMap reloads graph cleanly per mode */}
           <NavModeMap
+            key={`navmode-${String(curNavMode)}`}
             path={path}
             navMode={curNavMode}
             markers={markers}

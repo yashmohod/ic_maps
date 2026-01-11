@@ -286,14 +286,10 @@ export const RouteNavigate = async (
   navModeId: number,
 ) => {
   return apiClient.get(
-    `/api/shareableroute/navigate?lat=${encodeURIComponent(
+    `/api/shareableroute/navigate?userLat=${encodeURIComponent(
       String(userLat),
-    )}&lng=${encodeURIComponent(
-      String(userLng)
-    )}&routeId=${encodeURIComponent(
-      String(routeId)
-    )}&lng=${encodeURIComponent(
-      String(navModeId)
-    )}`,
+    )}&userLng=${encodeURIComponent(String(userLng))}&routeId=${encodeURIComponent(
+      String(routeId),
+    )}&navModeId=${encodeURIComponent(String(navModeId))}`,
   );
 };
