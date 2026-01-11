@@ -1,3 +1,4 @@
+"use client"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,7 +30,7 @@ import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 
-import { signUpAction } from "@/app/actions/auth";
+import { authClient } from "@/lib/auth-client";
 
 
 const formSchema = z.object({
@@ -66,22 +67,29 @@ export function SignupForm({
     },
   });
 
-  // 2. Define a submit handler.
-  async function onSubmit(values: z.infer<typeof formSchema>) {
-    const { success, message } = await signUpAction(
-      values.email,
-      values.password,
-      values.name,
 
-    );
-    if (success) {
-      toast.success(message as string);
-      router.push("/");
-    } else {
-      toast.error(message as string);
-    }
+// 2. Define a submit handler.
+async function onSubmit(values: z.infer<typeof formSchema>) {
+  const { email, password, name } = values;
+
+  const { data, error } = await authClient.signUp.email({
+    email,
+    password,
+    name,
+    // optional if your setup supports it:
+    // callbackURL: "/",
+  });
+
+  if (error) {
+    toast.error(error.message ?? "Failed to create account");
+    return;
   }
 
+  // If your Better Auth config has autoSignIn on signup (default), you’re now logged in.
+  toast.success("Account created!");
+  router.replace("/");
+  router.refresh(); // ensures server components read the new cookie
+}
 
 
   return (

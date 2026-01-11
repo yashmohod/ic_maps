@@ -1,4 +1,4 @@
-"use Client";
+"use client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/ui/spinner"
 import React, { useState} from "react";
+import { authClient } from "@/lib/auth-client";
 const formSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -58,18 +59,24 @@ export function LoginForm({
   // 2. Define a submit handler.
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setLoading(true);
-    const { success, message } = await signInAction(
-      values.email,
-      values.password
-    );
-    if (success) {
-      toast.success(message as string);
-      router.push("/");
-    } else {
-      toast.error(message as string);
-    }
+
+  const { data, error } = await authClient.signIn.email({
+    email: values.email,
+    password: values.password,
+    // if supported in your setup:
+    rememberMe: true,
+  });
+
+  if (error) {
+    toast.error(error.message);
     setLoading(false);
+    return;
   }
+
+  toast.success("Logged in successfully");
+  router.replace("/");
+  router.refresh(); // optional
+  setLoading(false);  }
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>

@@ -1,16 +1,14 @@
+
 "use server";
 
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
 function normalizeAuthError(err: unknown): string {
-  // Better Auth often throws objects / Response-like errors, not always Error
   if (err instanceof Error) return err.message;
-
   if (typeof err === "string") return err;
-
-  // common patterns
   const anyErr = err as any;
   return (
     anyErr?.body?.message ||
@@ -21,50 +19,48 @@ function normalizeAuthError(err: unknown): string {
   );
 }
 
-export async function signUpAction(
-  email: string,
-  password: string,
-  name: string
-) {
+export async function signUpAction(email: string, password: string, name: string) {
   try {
     await auth.api.signUpEmail({
       body: {
-        email: email, // required
-        password: password, // required
-        name: name,
-        callbackURL: "/",
+        email,
+        password,
+        name,
       },
-      // This endpoint requires session cookies.
       headers: await headers(),
     });
-
-    return { success: true, message: "Account created!" };
+    return { success: true, message:"Sign up successful!" };
   } catch (err) {
-    // IMPORTANT: return a string, not an object
     return { success: false, message: normalizeAuthError(err) };
   }
+
 }
+
 export async function signInAction(email: string, password: string) {
   try {
     await auth.api.signInEmail({
       body: {
-        email: email, // required
-        password: password, // required
+        email,
+        password,
         rememberMe: true,
-        callbackURL: "/",
       },
-      // This endpoint requires session cookies.
       headers: await headers(),
     });
-
-    return { success: true, message: "Logged in successfully" };
+    
+    return { success: true, message:"Sign in successful!" };
   } catch (err) {
-    // IMPORTANT: return a string, not an object
     return { success: false, message: normalizeAuthError(err) };
   }
+
 }
 
 export async function signOutAction() {
-  await auth.api.signOut({ headers: await headers() });
-  redirect("/");
+  try {
+    await auth.api.signOut({ headers: await headers() });
+  } catch(err) {
+    // optional: swallow errors and still send them home
+    return { success: false, message: normalizeAuthError(err) };
+  }
+
 }
+

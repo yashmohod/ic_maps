@@ -1,5 +1,3 @@
-// T
-// src/app/NavigationMap.tsx
 "use client";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import Image from "next/image";
@@ -32,12 +30,12 @@ import {
   IconArrowsMinimize,
   IconLogin2,
 } from "@tabler/icons-react";
-import ProfileOptions from "../components/profileOptions"
+import ProfileOptions from "../components/profileOptions";
 import NavModeMap from "../components/NavMode";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { authClient, type Session } from "@/lib/auth-client"
+import { authClient, type Session } from "@/lib/auth-client";
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };
@@ -174,31 +172,22 @@ export default function NavigationMap(): JSX.Element {
 
   const { isDark, toggleTheme } = useAppTheme();
 
-  const {
-    data: session,
-    error, //error object
-  } = authClient.useSession()
-
+  const { data: session, error, refetch, isPending } = authClient.useSession();
 
   // const [curUser, setCurUser] = useState<User>();
 
   async function userInit(userId: string) {
-
-    let resp = await fetch("/api/user/")
-    console.log("resp", resp?.curUser)
+    let resp = await fetch("/api/user/");
+    console.log("resp", resp?.curUser);
     // let temp = await getUser(userId)
     // console.log(temp)
     // setCurUser(temp);
   }
 
-
   useEffect(() => {
-    if (!session || error) return
-    void userInit(session.user.id)
-  }, [session])
-
-
-
+    if (!session || error) return;
+    void userInit(session.user.id);
+  }, [session, refetch]);
 
   const stageDetails =
     STAGE_DETAILS[mapStage] ?? STAGE_DETAILS[MAP_STAGES.IDLE];
@@ -222,7 +211,7 @@ export default function NavigationMap(): JSX.Element {
       userPos.lng,
       userPos.lat,
       Math.max(userPos.accuracy, 5),
-      64
+      64,
     );
   }, [userPos]);
 
@@ -233,7 +222,7 @@ export default function NavigationMap(): JSX.Element {
       source: "loc-accuracy",
       paint: { "fill-color": "#3b82f6", "fill-opacity": 0.15 },
     }),
-    []
+    [],
   );
 
   const accuracyLine = useMemo(
@@ -243,7 +232,7 @@ export default function NavigationMap(): JSX.Element {
       source: "loc-accuracy",
       paint: { "line-color": "#3b82f6", "line-width": 2, "line-opacity": 0.6 },
     }),
-    []
+    [],
   );
 
   /** -------- Camera helpers -------- */
@@ -267,7 +256,7 @@ export default function NavigationMap(): JSX.Element {
 
   function fitToUserAndDest(
     extraCoords: Array<[number, number]> = [],
-    options: { padding?: any; maxZoom?: number; duration?: number } = {}
+    options: { padding?: any; maxZoom?: number; duration?: number } = {},
   ) {
     const map = mapRef.current?.getMap?.();
     if (!map) return;
@@ -287,7 +276,7 @@ export default function NavigationMap(): JSX.Element {
 
     const isMobile =
       typeof window !== "undefined"
-        ? window.matchMedia?.("(max-width: 768px)")?.matches ?? false
+        ? (window.matchMedia?.("(max-width: 768px)")?.matches ?? false)
         : false;
 
     const defaultPadding = isMobile
@@ -304,7 +293,7 @@ export default function NavigationMap(): JSX.Element {
         maxZoom: options.maxZoom ?? 19,
         duration: options.duration ?? 900,
         essential: true,
-      }
+      },
     );
   }
 
@@ -321,7 +310,7 @@ export default function NavigationMap(): JSX.Element {
         padding: { top: 48, bottom: 80, left: 48, right: 48 },
         duration: 900,
         essential: true,
-      }
+      },
     );
     setMapStage(MAP_STAGES.IDLE);
   }
@@ -333,7 +322,7 @@ export default function NavigationMap(): JSX.Element {
       "[geo] secure:",
       window.isSecureContext,
       "UA:",
-      navigator.userAgent
+      navigator.userAgent,
     );
     try {
       if (navigator.permissions?.query) {
@@ -359,7 +348,7 @@ export default function NavigationMap(): JSX.Element {
       }
 
       const handler = (
-        e: DeviceOrientationEvent & { webkitCompassHeading?: number }
+        e: DeviceOrientationEvent & { webkitCompassHeading?: number },
       ) => {
         const heading =
           typeof e.webkitCompassHeading === "number"
@@ -430,7 +419,7 @@ export default function NavigationMap(): JSX.Element {
       (err) => {
         console.log(err.message);
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 },
     );
   }
 
@@ -517,23 +506,23 @@ export default function NavigationMap(): JSX.Element {
 
   function makeLookups(
     markersLocal: MarkerNode[],
-    edgeIndexLocal: EdgeIndexEntry[]
+    edgeIndexLocal: EdgeIndexEntry[],
   ) {
     const nodesById = new Map<string, { lng: number; lat: number }>(
-      markersLocal.map((m) => [String(m.id), { lng: m.lng, lat: m.lat }])
+      markersLocal.map((m) => [String(m.id), { lng: m.lng, lat: m.lat }]),
     );
     const edgesByKey = new Map<string, { from: string; to: string }>(
       edgeIndexLocal.map((e) => [
         String(e.key),
         { from: String(e.from), to: String(e.to) },
-      ])
+      ]),
     );
     return { nodesById, edgesByKey };
   }
 
   function orderNodeIdsFromPathKeys(
     pathKeys: string[],
-    edgesByKey: Map<string, { from: string; to: string }>
+    edgesByKey: Map<string, { from: string; to: string }>,
   ) {
     const adj = new Map<string, Set<string>>();
     const add = (u: string, v: string) => {
@@ -577,7 +566,7 @@ export default function NavigationMap(): JSX.Element {
 
   function nodeIdsToCoords(
     orderedIds: string[],
-    nodesById: Map<string, { lng: number; lat: number }>
+    nodesById: Map<string, { lng: number; lat: number }>,
   ) {
     const coords: Array<[number, number]> = [];
     for (const id of orderedIds) {
@@ -645,7 +634,7 @@ export default function NavigationMap(): JSX.Element {
       zoom = 16,
       pitch = 60,
       duration = 400,
-    }: { zoom?: number; pitch?: number; duration?: number } = {}
+    }: { zoom?: number; pitch?: number; duration?: number } = {},
   ) {
     if (!map) return;
     map.easeTo({
@@ -679,7 +668,7 @@ export default function NavigationMap(): JSX.Element {
         selectedDest,
         userPos.lat,
         userPos.lng,
-        String(curNavMode)
+        String(curNavMode),
       );
       const pathKeys: string[] = Array.isArray(resp?.path)
         ? resp.path
@@ -725,7 +714,7 @@ export default function NavigationMap(): JSX.Element {
         selectedDest,
         userPos.lat,
         userPos.lng,
-        String(curNavMode)
+        String(curNavMode),
       );
     } catch {
       toast.error("Failed to get route");
@@ -772,7 +761,7 @@ export default function NavigationMap(): JSX.Element {
         setUserPos((up) =>
           up
             ? { ...up, lng: longitude, lat: latitude, heading }
-            : { lng: longitude, lat: latitude, heading }
+            : { lng: longitude, lat: latitude, heading },
         );
 
         let brg: number;
@@ -796,7 +785,7 @@ export default function NavigationMap(): JSX.Element {
         toast.error(err.message || "Tracking error");
         stopTracking();
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 },
     );
 
     watchIdRef.current = id;
@@ -894,7 +883,7 @@ export default function NavigationMap(): JSX.Element {
 
   const sheetSnapPoints = useMemo<number[]>(
     () => [0.05, 0.1, 0.4, 0.6, 0.75],
-    []
+    [],
   );
 
   function clamp(value: number, min: number, max: number) {
@@ -940,7 +929,7 @@ export default function NavigationMap(): JSX.Element {
       const nextPos = clamp(
         sheetStartPosRef.current + deltaY / window.innerHeight,
         0,
-        1
+        1,
       );
       setSheetPosition(nextPos);
     }
@@ -1043,8 +1032,6 @@ export default function NavigationMap(): JSX.Element {
 
   const { toggleSidebar } = useSidebar();
 
-
-
   /** ---------------- Render ---------------- */
 
   return (
@@ -1092,15 +1079,14 @@ export default function NavigationMap(): JSX.Element {
               </select>
             </div>
           </div>
-          {session ?
+          {session ? (
             <div
               className={`flex flex-[1] h-full  w-full items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
               transition transform hover:scale-[1.03] active:scale-95`}
             >
               <ProfileOptions session={session} />
             </div>
-
-            :
+          ) : (
             <Link href="/account/login">
               <div
                 className={`flex flex-[1] h-full  w-full items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
@@ -1109,8 +1095,7 @@ export default function NavigationMap(): JSX.Element {
                 <IconLogin2 size={35} />
               </div>
             </Link>
-          }
-
+          )}
         </div>
       </div>
 
@@ -1173,6 +1158,16 @@ export default function NavigationMap(): JSX.Element {
             ].join(" ")}
           >
             {"Building \n Editor"}
+          </button>
+        </Link>
+        <Link href="/customRoute">
+          <button
+            className={[
+              "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
+              `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+            ].join(" ")}
+          >
+            {"Shareable \n Routes"}
           </button>
         </Link>
       </div>
@@ -1406,7 +1401,7 @@ export default function NavigationMap(): JSX.Element {
             >
               <div
                 title={`You are here (${userPos.lat.toFixed(
-                  6
+                  6,
                 )}, ${userPos.lng.toFixed(6)})`}
                 className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
               />
@@ -1424,7 +1419,7 @@ function makeCircleGeoJSON(
   lng: number,
   lat: number,
   radiusMeters: number,
-  points = 64
+  points = 64,
 ): GeoJSONFeatureCollection {
   const coords: Array<[number, number]> = [];
   const d = radiusMeters / 6378137;
@@ -1434,13 +1429,13 @@ function makeCircleGeoJSON(
     const brng = (i * 2 * Math.PI) / points;
     const lat2 = Math.asin(
       Math.sin(latRad) * Math.cos(d) +
-      Math.cos(latRad) * Math.sin(d) * Math.cos(brng)
+      Math.cos(latRad) * Math.sin(d) * Math.cos(brng),
     );
     const lon2 =
       lon +
       Math.atan2(
         Math.sin(brng) * Math.sin(d) * Math.cos(latRad),
-        Math.cos(d) - Math.sin(latRad) * Math.sin(lat2)
+        Math.cos(d) - Math.sin(latRad) * Math.sin(lat2),
       );
     coords.push([toDeg(lon2), toDeg(lat2)]);
   }

@@ -22,7 +22,7 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
+    requireEmailVerification: false,
 
     // ✅ password reset email hook (correct place)
     sendResetPassword: async ({ user, url }) => {

@@ -51,7 +51,7 @@ export const addEdge = async (
   key: string,
   to: string,
   from: string,
-  biDirectional: boolean
+  biDirectional: boolean,
 ) => {
   // old: POST /map/ { key, to, from, type:"edge", biDirectional }
   await apiClient.post("/api/map", {
@@ -66,7 +66,7 @@ export const addEdge = async (
 
 export const deleteFeature = async (
   featureKey: string,
-  featureType: string
+  featureType: string,
 ) => {
   // old: DELETE /map/ with axios { data: {...} }
   await apiClient.del("/api/map", { featureKey, featureType });
@@ -82,7 +82,7 @@ export const addBuilding = async (
   name: string,
   lat: number,
   lng: number,
-  polyGon: any
+  polyGon: any,
 ) => {
   // old: POST /building/
   return apiClient.post("/api/building", { id, name, lat, lng, polyGon });
@@ -110,7 +110,7 @@ export const getAllBuildingNodes = async (id: string) => {
 
 export const attachNodeToBuilding = async (
   buildingId: string,
-  nodeId: string
+  nodeId: string,
 ) => {
   // old: POST /building/nodeadd
   await apiClient.post("/api/building/nodeadd", { buildingId, nodeId });
@@ -119,7 +119,7 @@ export const attachNodeToBuilding = async (
 
 export const detachNodeFromBuilding = async (
   buildingId: string,
-  nodeId: string
+  nodeId: string,
 ) => {
   // old: POST /building/noderemove
   await apiClient.post("/api/building/noderemove", { buildingId, nodeId });
@@ -130,7 +130,7 @@ export const updateBuildingPolyGon = async (
   buildingId: string,
   polygonJson: any,
   lat: number,
-  lng: number
+  lng: number,
 ) => {
   // old: PATCH /building/setpolygon
   return apiClient.patch("/api/building/setpolygon", {
@@ -149,7 +149,7 @@ export const removeBuildingPolyGon = async (buildingId: string) => {
 export const getBuildingPos = async (buildingId: string) => {
   // old: GET /building/buildingpos?id=...
   return apiClient.get(
-    `/api/building/buildingpos?id=${encodeURIComponent(buildingId)}`
+    `/api/building/buildingpos?id=${encodeURIComponent(buildingId)}`,
   );
 };
 
@@ -165,7 +165,7 @@ export const addNavMode = async (name: string, fromThrough: boolean) => {
 export const editNavMode = async (
   id: string,
   name: string,
-  fromThrough: boolean
+  fromThrough: boolean,
 ) => {
   // old: PUT /navmode/
   return apiClient.put("/api/navmode", { id, name, fromThrough });
@@ -185,7 +185,7 @@ export const setNavModeStatus = async (
   id: string,
   value: boolean | number | string,
   featureType: string,
-  navModeId: string
+  navModeId: string,
 ) => {
   // old: PATCH /navmode/setstatus
   await apiClient.patch("/api/navmode/setstatus", {
@@ -200,14 +200,14 @@ export const setNavModeStatus = async (
 export const getAllMapFeaturesNavModeIds = async (navModeId: string) => {
   // old: GET /navmode/allids?navModeId=...
   return apiClient.get(
-    `/api/navmode/allids?navModeId=${encodeURIComponent(navModeId)}`
+    `/api/navmode/allids?navModeId=${encodeURIComponent(navModeId)}`,
   );
 };
 
 export const getAllMapFeaturesNavMode = async (navModeId: string) => {
   // old: GET /navmode/all?navModeId=...
   return apiClient.get(
-    `/api/navmode/all?navModeId=${encodeURIComponent(navModeId)}`
+    `/api/navmode/all?navModeId=${encodeURIComponent(navModeId)}`,
   );
 };
 
@@ -219,7 +219,7 @@ export const getRouteTo = async (
   buildingId: string,
   lat: number,
   lng: number,
-  navMode: string
+  navMode: string,
 ) => {
   // old: GET /map/navigateTo?id=...&lat=...&lng=...&navMode=...
   const qs =
@@ -235,9 +235,65 @@ export const getNearestBlueLightPath = async (lat: number, lng: number) => {
   // old: GET /map/bluelight?lat=...&lng=...
   return apiClient.get(
     `/api/map/bluelight?lat=${encodeURIComponent(
-      String(lat)
-    )}&lng=${encodeURIComponent(String(lng))}`
+      String(lat),
+    )}&lng=${encodeURIComponent(String(lng))}`,
   );
 };
 
+/** -----------------------------
+ *  Shareable Routes
+ *  ----------------------------- */
 
+export const getAllUserRoutes = async (userId: string) => {
+  return apiClient.get(
+    `/api/shareableroute/all?userId=${encodeURIComponent(userId)}`,
+  );
+};
+
+export const AddRoute = async (
+  userId: string,
+  routeName: string,
+  destinationId: string,
+) => {
+  return apiClient.post("/api/shareableroute/", {
+    userId,
+    routeName,
+    destinationId,
+  });
+};
+
+export const EditRoute = async (
+  routeId: number,
+  routeName: string,
+  destinationId: string,
+) => {
+  return apiClient.put("/api/shareableroute", {
+    routeId,
+    routeName,
+    destinationId,
+  });
+};
+
+export const DeleteRoute = async (routeId: number) => {
+  // old: DELETE /navmode/ { id }
+  return apiClient.del("/api/shareableroute", { routeId });
+};
+
+export const RouteNavigate = async (
+  routeId: number,
+  userLat: number,
+  userLng: number,
+  navModeId: number,
+) => {
+  return apiClient.get(
+    `/api/shareableroute/navigate?lat=${encodeURIComponent(
+      String(userLat),
+    )}&lng=${encodeURIComponent(
+      String(userLng)
+    )}&routeId=${encodeURIComponent(
+      String(routeId)
+    )}&lng=${encodeURIComponent(
+      String(navModeId)
+    )}`,
+  );
+};
