@@ -29,7 +29,7 @@ function EditPanel({
       className="
         flex flex-col absolute
         z-10
-        top-3 left-3
+        top-17 left-3
         bg-panel text-panel-foreground
         border border-border backdrop-blur
         px-3 py-2 rounded-xl shadow

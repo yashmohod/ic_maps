@@ -10,11 +10,7 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-//// app/layout.tsx  (or app/page.tsx)
-//export const dynamic = "force-dynamic";
-//export const revalidate = 0;
-//
-//export const fetchCache = "force-no-store";
+
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -31,6 +27,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+
+
+
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -44,6 +44,7 @@ export default function RootLayout({
         >
           <SidebarProvider defaultOpen={false}>
             <ToasterClient />
+
             {children}
           </SidebarProvider>
         </ThemeProvider>

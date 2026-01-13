@@ -19,6 +19,8 @@ import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { getAllNavModes, RouteNavigate } from "@/lib/icmapsApi";
+import { HomeLogoLink } from "@/components/home-logo-link";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 
 // ✅ This is the KEY: load markers + edgeIndex the same way your working pages do
 import NavModeMap from "@/components/NavMode"; // <-- adjust if your path differs
@@ -515,11 +517,16 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curNavMode, userPos?.lat, userPos?.lng, routeIdRaw]);
-
+  const emptyPath = useMemo(() => new Set<string>(), []);
   /** UI */
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
       <Toaster position="top-right" reverseOrder />
+
+      <div className="absolute left-3 top-20 z-40 flex items-center gap-2 md:top-3">
+        <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
+        <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
+      </div>
 
       {/* Top bar */}
       <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[820px] md:-translate-x-1/2">
@@ -641,51 +648,51 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             mapStyle={baseStyle as any}
             onLoad={() => setMapReady(true)}
           >
-          {/* ✅ Load the graph (markers + edgeIndex) exactly like your working pages */}
-          {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the yellow route ourselves) */}
-          <NavModeMap
-            path={useMemo(() => new Set<string>(), [])}
-            navMode={curNavMode}
-            markers={markers}
-            setMarkers={setMarkers}
-            edgeIndex={edgeIndex}
-            setEdgeIndex={setEdgeIndex}
-          />
+            {/* ✅ Load the graph (markers + edgeIndex) exactly like your working pages */}
+            {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the yellow route ourselves) */}
+            <NavModeMap
+              path={emptyPath}
+              navMode={curNavMode}
+              markers={markers}
+              setMarkers={setMarkers}
+              edgeIndex={edgeIndex}
+              setEdgeIndex={setEdgeIndex}
+            />
 
-          {/* accuracy ring */}
-          {accuracyGeoJSON && (
-            <Source id="loc-accuracy" type="geojson" data={accuracyGeoJSON as any}>
-              <Layer {...(accuracyFill as any)} />
-              <Layer {...(accuracyLine as any)} />
-            </Source>
-          )}
+            {/* accuracy ring */}
+            {accuracyGeoJSON && (
+              <Source id="loc-accuracy" type="geojson" data={accuracyGeoJSON as any}>
+                <Layer {...(accuracyFill as any)} />
+                <Layer {...(accuracyLine as any)} />
+              </Source>
+            )}
 
-          {/* route line (segments FC) */}
-          {routeFC && (
-            <Source id="route" type="geojson" data={routeFC as any}>
-              <Layer {...routeLineLayer} />
-            </Source>
-          )}
+            {/* route line (segments FC) */}
+            {routeFC && (
+              <Source id="route" type="geojson" data={routeFC as any}>
+                <Layer {...routeLineLayer} />
+              </Source>
+            )}
 
-          {/* destination pulse */}
-          {destPos && (
-            <Marker longitude={destPos.lng} latitude={destPos.lat} anchor="center">
-              <div className="relative flex items-center justify-center">
-                <div className="absolute h-8 w-8 rounded-full bg-red-600 opacity-40 animate-ping" />
-                <div className="h-4 w-4 rounded-full border-2 border-red-700 bg-brand shadow-lg" />
-              </div>
-            </Marker>
-          )}
+            {/* destination pulse */}
+            {destPos && (
+              <Marker longitude={destPos.lng} latitude={destPos.lat} anchor="center">
+                <div className="relative flex items-center justify-center">
+                  <div className="absolute h-8 w-8 rounded-full bg-red-600 opacity-40 animate-ping" />
+                  <div className="h-4 w-4 rounded-full border-2 border-red-700 bg-brand shadow-lg" />
+                </div>
+              </Marker>
+            )}
 
-          {/* user marker */}
-          {userPos && (
-            <Marker longitude={userPos.lng} latitude={userPos.lat} anchor="center">
-              <div
-                title={`You are here (${userPos.lat.toFixed(6)}, ${userPos.lng.toFixed(6)})`}
-                className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
-              />
-            </Marker>
-          )}
+            {/* user marker */}
+            {userPos && (
+              <Marker longitude={userPos.lng} latitude={userPos.lat} anchor="center">
+                <div
+                  title={`You are here (${userPos.lat.toFixed(6)}, ${userPos.lng.toFixed(6)})`}
+                  className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
+                />
+              </Marker>
+            )}
           </ReactMap>
         )}
       </div>

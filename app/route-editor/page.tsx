@@ -40,6 +40,8 @@ import {
 } from "@/components/ui/dialog";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { HomeLogoLink } from "@/components/home-logo-link";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 
 import {
   getAllMapFeature,
@@ -808,6 +810,11 @@ export default function RouteEditor(): JSX.Element {
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
       <Toaster position="top-right" reverseOrder />
+
+      <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
+        <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
+        <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
+      </div>
 
       {/* Top Toolbar */}
       <div

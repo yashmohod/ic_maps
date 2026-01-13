@@ -23,6 +23,8 @@ import maplibregl from "maplibre-gl";
 import { Button } from "@/components/ui/button";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { HomeLogoLink } from "@/components/home-logo-link";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import {
   IconPlus,
   IconPencil,
@@ -595,6 +597,11 @@ export default function CustomRoutesPage(): JSX.Element {
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
       <Toaster position="top-right" reverseOrder />
+
+      <div className="absolute left-3 top-3 z-40 flex items-center gap-2">
+        <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
+        <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
+      </div>
 
       {/* Routes panel */}
       <div className="absolute left-3 top-20 z-30 w-[380px] max-w-[calc(100vw-24px)]">
@@ -1284,4 +1291,3 @@ export default function CustomRoutesPage(): JSX.Element {
     </div>
   );
 }
-

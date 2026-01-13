@@ -20,13 +20,20 @@ import {
 interface profileOptions {
   session: Session;
 }
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAppTheme } from "@/hooks/use-app-theme";
+import { IconMoon, IconSun } from "@tabler/icons-react";
+
 export default function ProfileOptions({ session }: profileOptions) {
-
-
+  const router = useRouter();
+  const { isDark, toggleTheme } = useAppTheme();
+  const label = isDark ? "Switch to light mode" : "Switch to dark mode";
   useEffect(() => {
     console.log("here in profileOptions")
     console.log(session)
   }, [session])
+
 
 
   return <>
@@ -40,9 +47,13 @@ export default function ProfileOptions({ session }: profileOptions) {
             <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />}
         </Avatar>
       </PopoverTrigger>
-      <PopoverContent className="w-40">
-        <div className="grid gap-2">
-          <Button>Settings <IconSettings /></Button>
+      <PopoverContent className="w-45">
+        <div className="grid gap-2  w-full text-center">
+          <h1 className="mb-2"> Hi {session.user.name} !</h1>
+          <Button onClick={toggleTheme}>{isDark ?
+            <>  Light Mode<IconSun size={18} /></>
+            : <>  Dark Mode<IconMoon size={18} /></>}</Button>
+          <Button onClick={() => { router.replace("/account/setting"); }}>Settings <IconSettings /></Button>
           <Button onClick={async () => { await authClient.signOut(); }}>Logout <IconLogin2 /></Button>
         </div>
       </PopoverContent>

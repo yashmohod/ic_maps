@@ -1,6 +1,5 @@
 "use client";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import Image from "next/image";
 import React, { useRef, useState, useMemo, useEffect, type JSX } from "react";
 import {
   Map as ReactMap,
@@ -14,6 +13,8 @@ import toast, { Toaster } from "react-hot-toast";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { HomeLogoLink } from "@/components/home-logo-link";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import {
   getAllBuildings,
   getAllNavModes,
@@ -163,6 +164,7 @@ export default function NavigationMap(): JSX.Element {
     useState<GeoJSONFeatureCollection | null>(null);
 
   const mapRef = useRef<MapRef | null>(null);
+  const pendingRouteStartRef = useRef(false);
   const watchIdRef = useRef<number | null>(null);
   const deviceHeadingRef = useRef<number | null>(null);
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
@@ -179,19 +181,39 @@ export default function NavigationMap(): JSX.Element {
     return buildings.find((b) => `${b.id}` === `${selectedDest}`) ?? null;
   }, [buildings, selectedDest]);
 
-  const { isDark, toggleTheme } = useAppTheme();
+  const { isDark } = useAppTheme();
 
   const { data: session, error, refetch, isPending } = authClient.useSession();
 
-  async function userInit(userId: string) {
-    let resp = await fetch("/api/user/");
-    console.log("resp", (resp as any)?.curUser);
+  const [isAdmin, setIsAdmin] = useState(false);
+  async function loadIsAdmin(userId: string) {
+    try {
+      const resp = await fetch(`/api/users/${userId}`);
+      if (!resp.ok) return;
+      const data = (await resp.json()) as { user?: { isAdmin: boolean } };
+      setIsAdmin(!!data.user?.isAdmin);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+  const [isIcUser, setIsIcUser] = useState(false);
+  function isICUser(email: string) {
+    let frag = email.split("@");
+    setIsIcUser(frag[frag.length - 1] === "ithaca.edu")
   }
 
   useEffect(() => {
     if (!session || error) return;
-    void userInit(session.user.id);
+    loadIsAdmin(session.user.id);
+    isICUser(session.user.email);
   }, [session, refetch, error]);
+
+  useEffect(() => {
+    if (!pendingRouteStartRef.current) return;
+    if (!userPos || !selectedDest) return;
+    pendingRouteStartRef.current = false;
+    void showRoute();
+  }, [userPos, selectedDest]);
 
   const stageDetails =
     STAGE_DETAILS[mapStage] ?? STAGE_DETAILS[MAP_STAGES.IDLE];
@@ -247,6 +269,7 @@ export default function NavigationMap(): JSX.Element {
   function ensureCenter(lng: number, lat: number, minZoom = 13) {
     const map = mapRef.current?.getMap?.();
     const zoom = Math.max(viewState.zoom ?? 0, minZoom);
+
     if (map && mapReady) {
       map.flyTo({ center: [lng, lat], zoom, essential: true });
     } else {
@@ -479,6 +502,8 @@ export default function NavigationMap(): JSX.Element {
       setPendingPathKeys(null);
 
       setMapStage(MAP_STAGES.BUILDING);
+      const map = mapRef.current?.getMap?.();
+
     } catch (err) {
       console.error("Building lookup failed", err);
       toast.error("Unable to locate that building right now.");
@@ -1092,7 +1117,11 @@ export default function NavigationMap(): JSX.Element {
   async function handelTheButton() {
     if (!selectedDest)
       return toast.error("Please select a destination before starting route.");
-    if (!userPos) return toast.error("Tap Locate Me before looking for a route.");
+    if (!userPos) {
+      pendingRouteStartRef.current = true;
+      await locateOnceRobust(true);
+      return;
+    }
 
     if (!navigating && !tracking) {
       showRoute();
@@ -1103,7 +1132,12 @@ export default function NavigationMap(): JSX.Element {
       if (tracking) {
         setSheetPosition(0);
         stopTracking();
-        showRoute();
+        setTracking(false);
+        setNavigating(false);
+        setPath(new Set());
+        setPathNodeIds(new Set());
+        routeCoordsRef.current = [];
+        setMapStage(MAP_STAGES.BUILDING);
       } else {
         setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
         startTracking();
@@ -1111,7 +1145,6 @@ export default function NavigationMap(): JSX.Element {
     }
   }
 
-  const { toggleSidebar } = useSidebar();
 
   /** ---------------- Render ---------------- */
 
@@ -1124,26 +1157,9 @@ export default function NavigationMap(): JSX.Element {
       {/* Top brand + search bar */}
       <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
         <div className="flex w-full items-stretch gap-2 justify-items-center">
-          <div
-            className={`flex flex-[1] items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
-              transition transform hover:scale-[1.03] active:scale-95`}
-            onClick={toggleTheme}
-          >
-            <Image
-              src="/assets/ic_logo_up.png"
-              alt="Ithaca College logo"
-              width={160}
-              height={40}
-              className="max-h-10 w-auto dark:hidden"
-            />
-            <Image
-              src="/assets/ic_logo_up_dark.png"
-              alt="Ithaca College logo"
-              width={160}
-              height={40}
-              className="hidden max-h-10 w-auto dark:block"
-            />
-          </div>
+          <HomeLogoLink
+            className={`flex flex-[1] rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur transition transform hover:scale-[1.03] active:scale-95`}
+          />
 
           <div
             className={`flex flex-[10] items-center justify-center-safe rounded-[22px] border ${borderMutedClass} ${surfacePanelClass} px-1 py-1 shadow-xl backdrop-blur`}
@@ -1164,6 +1180,7 @@ export default function NavigationMap(): JSX.Element {
               </select>
             </div>
           </div>
+
           {session ? (
             <div
               className={`flex flex-[1] h-full  w-full items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
@@ -1185,77 +1202,86 @@ export default function NavigationMap(): JSX.Element {
       </div>
 
       {/* Nav mode pills */}
-      <div className="absolute inset-x-3 top-21 z-30 space-y-3 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
-        <div className="px-3">
-          <div className="flex justify-center">
-            <span
-              className={`mx-2 w-15 rounded-3xl border ${borderMutedClass} ${surfacePanelClass} text-center text-[13px] font-bold uppercase tracking-wide text-panel-muted-foreground shadow-xl backdrop-blur`}
-            >
-              Modes
-            </span>
-          </div>
-
-          <div className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {navModes.map((mode) => {
-              const active = `${mode.id}` === `${curNavMode}`;
-              return (
-                <button
-                  key={String(mode.id)}
-                  onClick={() => setCurNavMode(mode.id)}
-                  className={[
-                    "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
-                    active
-                      ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
-                      : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-                  ].join(" ")}
-                >
-                  {mode.name}
-                </button>
-              );
-            })}
-            {navModes.length === 0 && (
-              <span className="px-2 text-[10px] text-muted-foreground">
-                Loading navigation modes…
+      {!tracking ?
+        <div className="absolute inset-x-3 top-21 z-30 space-y-3 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
+          <div className="px-3">
+            <div className="flex justify-center">
+              <span
+                className={`mx-2 w-15 rounded-3xl border ${borderMutedClass} ${surfacePanelClass} text-center text-[13px] font-bold uppercase tracking-wide text-panel-muted-foreground shadow-xl backdrop-blur`}
+              >
+                Modes
               </span>
-            )}
+            </div>
+
+            <div className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {navModes.map((mode) => {
+                const active = `${mode.id}` === `${curNavMode}`;
+                return (
+                  <button
+                    key={String(mode.id)}
+                    onClick={() => {
+                      setCurNavMode(mode.id)
+
+
+                    }}
+                    className={[
+                      "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
+                      active
+                        ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                        : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+                    ].join(" ")}
+                  >
+                    {mode.name}
+                  </button>
+                );
+              })}
+              {navModes.length === 0 && (
+                <span className="px-2 text-[10px] text-muted-foreground">
+                  Loading navigation modes…
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        </div> : null}
 
       {/* admin pages (moved fully to left) */}
       <div className="absolute left-3 top-40 z-30 flex flex-col space-y-3">
-        <Link href="/route-editor">
-          <button
-            className={[
-              "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
-              `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-            ].join(" ")}
-          >
-            {"Route \n Editor"}
-          </button>
-        </Link>
+        {isAdmin ?
+          <>
+            <Link href="/route-editor">
+              <button
+                className={[
+                  "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
+                  `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+                ].join(" ")}
+              >
+                {"Route \n Editor"}
+              </button>
+            </Link>
 
-        <Link href="/building-editor">
-          <button
-            className={[
-              "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
-              `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-            ].join(" ")}
-          >
-            {"Building \n Editor"}
-          </button>
-        </Link>
-
-        <Link href="/customRoute">
-          <button
-            className={[
-              "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
-              `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-            ].join(" ")}
-          >
-            {"Shareable \n Routes"}
-          </button>
-        </Link>
+            <Link href="/building-editor">
+              <button
+                className={[
+                  "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
+                  `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+                ].join(" ")}
+              >
+                {"Building \n Editor"}
+              </button>
+            </Link></>
+          : null}
+        {isIcUser ?
+          <Link href="/customRoute">
+            <button
+              className={[
+                "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
+                `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+              ].join(" ")}
+            >
+              {"Shareable \n Routes"}
+            </button>
+          </Link>
+          : null}
       </div>
 
       {/* Bottom sheet wrapper */}

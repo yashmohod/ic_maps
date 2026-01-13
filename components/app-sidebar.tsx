@@ -1,10 +1,9 @@
 import {
   PencilRuler,
   Building,
-  Home,
-  Inbox,
-  Search,
   Settings,
+  UserCog,
+  UserRound,
 } from "lucide-react";
 
 import {
@@ -19,26 +18,22 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
+
 // Menu items.
 export function AppSidebar() {
 
-const items = [
-  {
-    title: "Route Editor",
-    url: "/route-editor",
-    icon: PencilRuler,
-  },
-  {
-    title: "Building Editor",
-    url: "building-editor",
-    icon: Building,
-  },
-  {
-    title: "Settings",
-    url: "setting",
-    icon: Settings,
-  },
-];
+  const items = [
+    {
+      title: "Account Management",
+      url: "/account/setting#account-management",
+      icon: UserCog,
+    },
+    {
+      title: "Profile Info",
+      url: "/account/setting#profile-info",
+      icon: UserRound,
+    },
+  ];
 
 
 

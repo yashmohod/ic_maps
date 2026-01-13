@@ -223,9 +223,6 @@
   }
 }
 
-
-
-
 /* --- MapLibre Draw: make toolbar adapt to Tailwind dark mode --- */
 
 /* Panel styling */
@@ -271,8 +268,6 @@
   background-color: rgba(255, 255, 255, 0.16) !important;
 }
 
-
-
 /* ===========================
    MapLibre / Mapbox Draw toolbar
    Token-consistent (light/dark)
@@ -310,7 +305,6 @@
 :where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group) button:active {
   background: var(--panel-muted) !important;
 }
-
 
 /* icons: invert in dark mode so they become white */
 .dark :where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group) .mapbox-gl-draw_ctrl-draw-btn {

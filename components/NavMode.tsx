@@ -4,6 +4,7 @@ import React, { useMemo, useEffect, useRef } from "react";
 import { Source, Layer } from "@vis.gl/react-maplibre";
 import type { LayerProps } from "@vis.gl/react-maplibre";
 import { getAllMapFeature, getAllMapFeaturesNavMode } from "@/lib/icmapsApi";
+import { useAppTheme } from "@/hooks/use-app-theme";
 
 /** -------- Types -------- */
 
@@ -45,6 +46,7 @@ export default function NavMode({
   setEdgeIndex,
   showBaseGraph = true,
 }: Props) {
+  const { isDark } = useAppTheme();
   const featureCacheRef = useRef<Map<string, CachedFeatures>>(new Map());
 
   function isInPath(id: string | number) {
@@ -95,18 +97,18 @@ export default function NavMode({
         "line-color": [
           "case",
           ["boolean", ["get", "path"], false],
-          "#111827",
-          "#000000",
+          isDark ? "#facc15" : "#1f2937",
+          isDark ? "#e2e8f0" : "#374151",
         ],
         "line-opacity": [
           "case",
           ["boolean", ["get", "path"], false],
           0.95,
-          0.4,
+          0.35,
         ],
       },
     }),
-    [],
+    [isDark],
   );
 
   useEffect(() => {

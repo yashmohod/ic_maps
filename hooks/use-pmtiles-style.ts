@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import { PMTiles, Protocol } from "pmtiles";
@@ -88,8 +88,6 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
     cachedStyle?.vectorSourceId ?? "openmaptiles",
   );
 
-  const pmtilesInitRef = useRef(false);
-
   useEffect(() => {
     const cached = styleCache.get(stylePath);
     if (cached) {
@@ -99,10 +97,8 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
   }, [stylePath]);
 
   useEffect(() => {
-    if (pmtilesInitRef.current) return;
-    pmtilesInitRef.current = true;
-
     let cancelled = false;
+    setPmtilesReady(false);
 
     (async () => {
       try {

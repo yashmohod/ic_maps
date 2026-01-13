@@ -18,6 +18,8 @@ import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { getNearestBlueLightPath } from "@/lib/icmapsApi";
 import NavModeMap from "../../components/NavMode";
+import { HomeLogoLink } from "@/components/home-logo-link";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 
 /** ---------------- Types ---------------- */
 
@@ -535,21 +537,9 @@ export default function NavigationMapBlueLight(): JSX.Element {
       {/* Top brand bar */}
       <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
         <div className="flex w-full items-stretch gap-2">
-          <div
-            className={`flex flex-[1] items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
-              transition transform hover:scale-[1.03] active:scale-95`}
-          >
-            <img
-              src="/assets/ic_logo_up.png"
-              alt="Ithaca College logo"
-              className="max-h-10 dark:hidden"
-            />
-            <img
-              src="/assets/ic_logo_up_dark.png"
-              alt="Ithaca College logo"
-              className="hidden max-h-10 dark:block"
-            />
-          </div>
+          <HomeLogoLink
+            className={`flex flex-[1] rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur transition transform hover:scale-[1.03] active:scale-95`}
+          />
 
           <div
             className={`flex flex-[10] items-center justify-center-safe rounded-[22px] border ${borderMutedClass} ${surfacePanelClass} px-4 py-2 shadow-xl backdrop-blur`}
@@ -568,6 +558,9 @@ export default function NavigationMapBlueLight(): JSX.Element {
               </span>
             </div>
           </div>
+          <ThemeToggleButton
+            className="flex flex-[1] h-full rounded-[25px] px-2 py-1 shadow-xl backdrop-blur transition transform hover:scale-[1.03] active:scale-95"
+          />
         </div>
       </div>
 
