@@ -1,15 +1,29 @@
 import "server-only";
 
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { schema } from "./schema";
 import { eq } from "drizzle-orm";
+import { Pool } from "pg";
 
-const url = process.env.DATABASE_URL!;
-const filePath = url.startsWith("file:") ? url.slice("file:".length) : url;
+declare global {
+  // eslint-disable-next-line no-var
+  var __pgPool: Pool | undefined;
+}
 
-const sqlite = new Database(filePath);
-export const db = drizzle(sqlite, { schema });
+const pool =
+  globalThis.__pgPool ??
+  new Pool({
+    connectionString: process.env.DATABASE_URL!,
+    // Good defaults for a single app instance:
+    max: 10,                 // max connections in the pool
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    // ssl: false, // typical for local/docker; set true only if your DB requires it
+  });
+
+if (process.env.NODE_ENV !== "production") globalThis.__pgPool = pool;
+
+export const db = drizzle({ client: pool });
 
 export async function getUser(userId: string) {
   const rows = await db
