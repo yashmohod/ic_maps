@@ -1,6 +1,6 @@
 // src/components/MapEditor.tsx
 "use client";
-
+import apiClient from "@/lib/apiClient";
 import React, { useMemo, useRef, useState, useEffect, type JSX } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import {
@@ -44,7 +44,6 @@ import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 
 import {
-  getAllMapFeature,
   addNode,
   addEdge,
   editNode,
@@ -171,7 +170,7 @@ export default function RouteEditor(): JSX.Element {
 
   /** ---------------- Helpers ---------------- */
 
-  const edgeKey = (a: string, b: string) => [a, b].sort().join("__");
+  const edgeKey = (a: string, b: string) => [a, b].join("__");
 
   const findMarker = (id: string) => markers.find((m) => m.id === id) ?? null;
 
@@ -288,7 +287,13 @@ export default function RouteEditor(): JSX.Element {
     const key = edgeKey(a, b);
     if (edgeIndex.some((e) => e.key === key)) return;
 
-    const ok = await addEdge(key, b, a, biDirectionalEdges);
+    const ok = await apiClient.post("/api/map", {
+      key,
+      a,
+      b,
+      type: "edge",
+      biDirectionalEdges,
+    });
     if (ok) {
       setEdgeIndex((list) => [
         ...list,
@@ -300,7 +305,7 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function deleteNode(id: string) {
-    const ok = await deleteFeature(id, "node");
+    const ok = await apiClient.del("/api/map", { featureKey: id, featureType: "node" });
     if (!ok) return toast.error("Feature could not be deleted.");
 
     setMarkers((prev) => prev.filter((m) => m.id !== id));
@@ -333,7 +338,7 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function deleteEdgeByKey(key: string) {
-    const ok = await deleteFeature(key, "edge");
+    const ok = await apiClient.del("/api/map", { featureKey: key, featureType: "edge" });
     if (!ok) return toast.error("Feature could not be deleted.");
 
     setEdgeIndex((list) => list.filter((e) => e.key !== key));
@@ -427,7 +432,7 @@ export default function RouteEditor(): JSX.Element {
 
   async function handelBuildingSelect(id: string | number) {
     setCurrentBuilding(id);
-    const resp: any = await getAllBuildingNodes(String(id));
+    const resp: any = await apiClient.get(`/api/building/nodesget?id=${encodeURIComponent(id)}`);
 
     const ids: string[] = (resp?.nodes || [])
       .map((n: any) => (typeof n === "string" ? n : n?.id))
@@ -444,10 +449,7 @@ export default function RouteEditor(): JSX.Element {
     const isSelected = curBuildingNodes.has(nodeId);
 
     if (isSelected) {
-      const resp = await detachNodeFromBuilding(
-        String(currentBuilding),
-        nodeId
-      );
+      const resp = await apiClient.post("/api/building/noderemove", { buildingId: String(currentBuilding), nodeId });
       if (!resp) return toast.error("Failed to detach node.");
 
       setCurBuildingNodes((prev) => {
@@ -457,7 +459,7 @@ export default function RouteEditor(): JSX.Element {
       });
       setCurBuildingOrder((prev) => prev.filter((id) => id !== nodeId));
     } else {
-      const resp = await attachNodeToBuilding(String(currentBuilding), nodeId);
+      const resp = await apiClient.post("/api/building/nodeadd", { buildingId: String(currentBuilding), nodeId });
       if (!resp) return toast.error("Failed to attach node.");
 
       setCurBuildingNodes((prev) => {
@@ -476,7 +478,7 @@ export default function RouteEditor(): JSX.Element {
 
     const ids = Array.from(curBuildingNodes);
     const results = await Promise.allSettled(
-      ids.map((nid) => detachNodeFromBuilding(String(currentBuilding), nid))
+      ids.map((nid) => apiClient.post("/api/building/noderemove", { buildingId: String(currentBuilding), nid }))
     );
 
     const succeeded = ids.filter(
@@ -504,7 +506,7 @@ export default function RouteEditor(): JSX.Element {
     if (!cur) return;
 
     const nextValue = !Boolean(cur.isBlueLight);
-    const resp = await setBlueLight(id, nextValue);
+    const resp = await apiClient.post("/api/map/bluelight", { nodeId: id, isBlueLight: nextValue });
 
     if (resp) {
       setMarkers((prev) =>
@@ -521,7 +523,7 @@ export default function RouteEditor(): JSX.Element {
     if ((e.originalEvent as MouseEvent | undefined)?.altKey) {
       const { lng, lat } = e.lngLat;
       const id = `n-${Date.now()}`;
-      const ok = await addNode(id, lng, lat);
+      const ok = await apiClient.post("/api/map", { id, lng, lat, type: "node" });
       if (ok) setMarkers((prev) => [...prev, { id, lng, lat }]);
       else toast.error("Node could not be added.");
       return;
@@ -557,7 +559,7 @@ export default function RouteEditor(): JSX.Element {
 
   async function handleMarkerDragEnd(e: any, id: string) {
     const { lng, lat } = e.lngLat as LngLat;
-    const ok = await editNode(id, lng, lat);
+    const ok = await apiClient.put("/api/map", { id, lng, lat });
     if (ok) {
       setMarkers((prev) =>
         prev.map((m) => (m.id === id ? { ...m, lng, lat } : m))
@@ -601,8 +603,8 @@ export default function RouteEditor(): JSX.Element {
   /** ---------------- Data loading ---------------- */
 
   async function getAllFeature() {
-    const resp: any = await getAllMapFeature();
-
+    const resp: any = await apiClient.get("/api/map/all");;
+    console.log(resp)
     setMarkers(
       (resp?.nodes ?? []).map((n: any) => ({
         id: String(n.id),
@@ -623,13 +625,13 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function getBuildingsList() {
-    const resp: any = await getAllBuildings();
+    const resp: any = await apiClient.get("/api/building");
     if (resp) setBuildings(resp.buildings || []);
     else toast.error("Buildings did not load!");
   }
 
   async function getNavModesList() {
-    const resp: any = await getAllNavModes();
+    const resp: any = await apiClient.get("/api/navmode");
     const curNavModes: NavMode[] = resp?.NavModes ?? [];
     setNavModes(curNavModes);
     if (curNavModes.length > 0) {
@@ -639,7 +641,9 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function getNavModeFeatures(navModeId: string | number) {
-    const resp: any = await getAllMapFeaturesNavModeIds(String(navModeId));
+    const resp: any = await apiClient.get(
+      `/api/navmode/allids?navModeId=${encodeURIComponent(String(navModeId))}`,
+    );
     setCurNavModeEdges(new Set((resp?.edges ?? []).map((x: any) => String(x))));
     setCurNavModeNodes(new Set((resp?.nodes ?? []).map((x: any) => String(x))));
   }
@@ -647,7 +651,7 @@ export default function RouteEditor(): JSX.Element {
   useEffect(() => {
     void getAllFeature();
     void getBuildingsList();
-    void getNavModesList();
+    //void getNavModesList();
     return () => {
       const map = mapRef.current?.getMap?.();
       if (!map) return;
@@ -823,66 +827,60 @@ export default function RouteEditor(): JSX.Element {
         <span className="text-sm font-medium">Mode:</span>
 
         <button
-          className={`px-2 py-1 rounded ${
-            mode === "select"
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-          }`}
+          className={`px-2 py-1 rounded ${mode === "select"
+            ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground"
+            }`}
           onClick={() => setMode("select")}
         >
           Draw
         </button>
 
         <button
-          className={`px-2 py-1 rounded ${
-            mode === "edit"
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-          }`}
+          className={`px-2 py-1 rounded ${mode === "edit"
+            ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground"
+            }`}
           onClick={() => setMode("edit")}
         >
           Edit
         </button>
 
         <button
-          className={`px-2 py-1 rounded ${
-            mode === "delete"
-              ? "bg-destructive text-white"
-              : "bg-secondary text-secondary-foreground"
-          }`}
+          className={`px-2 py-1 rounded ${mode === "delete"
+            ? "bg-destructive text-white"
+            : "bg-secondary text-secondary-foreground"
+            }`}
           onClick={() => setMode("delete")}
         >
           Delete
         </button>
 
         <button
-          className={`px-2 py-1 rounded ${
-            mode === "navMode"
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-          }`}
+          className={`px-2 py-1 rounded ${mode === "navMode"
+            ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground"
+            }`}
           onClick={() => setMode("navMode")}
         >
           Map Mode Select
         </button>
 
         <button
-          className={`px-2 py-1 rounded ${
-            mode === "buildingGroup"
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-          }`}
+          className={`px-2 py-1 rounded ${mode === "buildingGroup"
+            ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground"
+            }`}
           onClick={() => setMode("buildingGroup")}
         >
           Building Select
         </button>
 
         <button
-          className={`px-2 py-1 rounded ${
-            mode === "blueLight"
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-          }`}
+          className={`px-2 py-1 rounded ${mode === "blueLight"
+            ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground"
+            }`}
           onClick={() => setMode("blueLight")}
         >
           Blue Light
@@ -926,11 +924,10 @@ export default function RouteEditor(): JSX.Element {
             onClick={() => {
               setBiDirectionalEdges(!biDirectionalEdges);
             }}
-            className={`px-2 py-1 rounded ${
-              !biDirectionalEdges
-                ? "bg-destructive text-white"
-                : "bg-secondary text-secondary-foreground"
-            }`}
+            className={`px-2 py-1 rounded ${!biDirectionalEdges
+              ? "bg-destructive text-white"
+              : "bg-secondary text-secondary-foreground"
+              }`}
           >
             {biDirectionalEdges ? "On" : "Off"}
           </button>
@@ -965,11 +962,10 @@ export default function RouteEditor(): JSX.Element {
           />
 
           <button
-            className={`px-2 py-1 rounded ${
-              showOnlyNavMode
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
+            className={`px-2 py-1 rounded ${showOnlyNavMode
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-secondary-foreground"
+              }`}
             onClick={() => setShowOnlyNavMode((v) => !v)}
             title={
               showOnlyNavMode ? "Show all edges" : "Show only selected edges"
@@ -1057,8 +1053,8 @@ export default function RouteEditor(): JSX.Element {
               const colorClass = isBuildingSel
                 ? "bg-amber-500"
                 : isNavModeSel || isDrawSel || isBlueLightSel
-                ? "bg-destructive"
-                : "bg-brand";
+                  ? "bg-destructive"
+                  : "bg-brand";
 
               return (
                 <Marker

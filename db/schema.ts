@@ -1,5 +1,18 @@
 import { relations, InferSelectModel } from "drizzle-orm";
-import { pgTable, text, boolean, timestamp, index, serial,doublePrecision } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  boolean,
+  timestamp,
+  index,
+  serial,
+  doublePrecision,
+  geometry,
+  varchar,
+  integer,
+  unique,
+  primaryKey,
+} from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -14,9 +27,7 @@ export const user = pgTable("user", {
 
   image: text("image"),
 
-  createdAt: timestamp("created_at", { mode: "date" })
-    .notNull()
-    .defaultNow(),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()
@@ -32,9 +43,7 @@ export const session = pgTable(
     expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
     token: text("token").notNull().unique(),
 
-    createdAt: timestamp("created_at", { mode: "date" })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
@@ -67,15 +76,17 @@ export const account = pgTable(
     refreshToken: text("refresh_token"),
     idToken: text("id_token"),
 
-    accessTokenExpiresAt: timestamp("access_token_expires_at", { mode: "date" }),
-    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { mode: "date" }),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", {
+      mode: "date",
+    }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+      mode: "date",
+    }),
 
     scope: text("scope"),
     password: text("password"),
 
-    createdAt: timestamp("created_at", { mode: "date" })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
@@ -95,9 +106,7 @@ export const verification = pgTable(
 
     expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
 
-    createdAt: timestamp("created_at", { mode: "date" })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
@@ -120,37 +129,148 @@ export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, { fields: [account.userId], references: [user.id] }),
 }));
 
-
-
+//nodes type
+export const nodeType = pgTable("node_type", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 256 }).notNull().unique(),
+});
 
 //nodes
-export const nodes = pgtable('nodes',{
-  id:serial().primaryKey(),
-  lat: doublePrecision().notNull(),
-  lng: doublePrecision().notNull(),
-})
+export const node = pgTable(
+  "node",
+  {
+    id: serial("id").primaryKey(),
+    lat: doublePrecision("lat").notNull(),
+    lng: doublePrecision("lng").notNull(),
+    nodeType: integer("node_type")
+      .notNull()
+      .references(() => nodeType.id, { onDelete: "restrict" }),
 
+    blueLight: boolean("blue_light").notNull().default(false),
+    // PostGIS point: x = lng, y = lat
+    location: geometry("location", {
+      type: "point",
+      mode: "xy",
+      srid: 4326,
+    }).notNull(),
+  },
+  (t) => [
+    // spatial index for fast nearest/within queries
+    index("node_location_gist").using("gist", t.location),
+  ],
+);
 
 //edges
+export const edge = pgTable(
+  "edge",
+  {
+    id: serial("id").primaryKey(),
+    nodeAId: integer("node_a_id")  // min
+      .notNull()
+      .references(() => node.id, { onDelete: "cascade" }),
+    nodeBId: integer("node_b_id")  // max
+      .notNull()
+      .references(() => node.id, { onDelete: "cascade" }),
+    biDirectional: boolean("bi_directional").notNull().default(true),
+    direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
+    distance: doublePrecision("distance").notNull(), // meters
+  },
+  (t) => [
+    unique("edge_pair_unique").on(t.nodeAId, t.nodeBId),
+    index("idx_edge_a").on(t.nodeAId),
+    index("idx_edge_b").on(t.nodeBId),
+  ],
+);
+
 //navmodes
+export const navMode = pgTable("nav_mode", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 256 }).notNull().unique(),
+  throughBuilding: boolean("through_building").notNull().default(false),
+});
+
 //buildings
+export const destination = pgTable("destination", {
+  id: serial("id").primaryKey(),
+  lat: doublePrecision("lat").notNull(),
+  lng: doublePrecision("lng").notNull(),
+  name: varchar("name", { length: 256 }).notNull().unique(),
+  polygon: text("polygon"),
+});
+
 //routes
+export const route = pgTable(
+  "route",
+  {
+    id: serial("id").primaryKey(),
+    destinationId: integer("destination_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 256 }).notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    description: text("description"),
+  },
+  (t) => [unique("route_user_name_unique").on(t.userId, t.name)],
+);
 
+//join table: edge <-> navmode
+export const edgeNavMode = pgTable(
+  "edge_nav_mode",
+  {
+    edgeId: integer("edge_id")
+      .notNull()
+      .references(() => edge.id, { onDelete: "cascade" }),
+    navModeId: integer("nav_mode_id")
+      .notNull()
+      .references(() => navMode.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.edgeId, t.navModeId] }),
+    index("idx_edge_nav_mode_edge").on(t.edgeId),
+    index("idx_edge_nav_mode_mode").on(t.navModeId),
+  ],
+);
 
+//join table: destination <-> nodes
+export const destinationNode = pgTable(
+  "destination_node",
+  {
+    destinationId: integer("destination_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+    nodeId: integer("node_id")
+      .notNull()
+      .references(() => node.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.destinationId, t.nodeId] }),
+    index("idx_destination_node_dest").on(t.destinationId),
+    index("idx_destination_node_node").on(t.nodeId),
+  ],
+);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-export const schema = { user, session, account, verification };
-
+export const schema = {
+  user,
+  session,
+  account,
+  verification,
+  nodeType,
+  node,
+  edge,
+  navMode,
+  destination,
+  route,
+  edgeNavMode,
+  destinationNode,
+};
 export type User = InferSelectModel<typeof user>;
+export type NodeType = InferSelectModel<typeof nodeType>;
+export type Node = InferSelectModel<typeof node>;
+export type Edge = InferSelectModel<typeof edge>;
+export type NavMode = InferSelectModel<typeof navMode>;
+export type Destination = InferSelectModel<typeof destination>;
+export type Route = InferSelectModel<typeof route>;
+export type EdgeNavMode = InferSelectModel<typeof edgeNavMode>;
+export type DestinationNode = InferSelectModel<typeof destinationNode>;

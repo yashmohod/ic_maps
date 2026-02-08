@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-
+import { sql } from "drizzle-orm";
+import { db } from "@/db/index";
 const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const { params } = new URL(req.url);
+  const nodeId: number = Number(params.get("nodeId"));
+  const isBlueLight: boolean = Boolean(params.get("isBlueLight"));
 
-  const res = await fetch(`${BACKEND}/map/bluelight`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  await db.execute(sql<Node>`UPDATE node SET blue_light=${isBlueLight} WHERE id=${nodeId} `);
 
-  return NextResponse.json(await res.json(), { status: res.status });
+
+  return NextResponse.json({}, { status: 200 });
 }
 
 export async function GET(req: Request) {

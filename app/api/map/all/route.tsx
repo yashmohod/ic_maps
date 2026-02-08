@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-
-const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
+import { sql } from "drizzle-orm";
+import { db } from "@/db/index";
+import { node, edge } from "@/db/schema";
+import type { Node, Edge } from "@/db/schema";
 
 export async function GET(req: Request) {
-  const qs = new URL(req.url).search;
-  const res = await fetch(`${BACKEND}/map/all${qs}`);
+  console.log(req.url);
+  // Postgres-style result: { rows: [...] }
+  const nodesResult = await db.execute(sql<Node>`SELECT * FROM ${node}`);
+  const edgesResult = await db.execute(sql<Edge>`SELECT * FROM ${edge}`);
 
-  const text = await res.text();
-  return new NextResponse(text, {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  const nodes = nodesResult.rows;
+  const edges = edgesResult.rows;
+
+  return NextResponse.json({ nodes, edges }, { status: 200 });
 }

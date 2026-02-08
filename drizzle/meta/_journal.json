@@ -1,12 +1,19 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1767825720544,
-      "tag": "0000_productive_hannibal_king",
+      "version": "7",
+      "when": 1770524066878,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1770524238912,
+      "tag": "0001_postgis",
       "breakpoints": true
     }
   ]
