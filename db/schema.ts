@@ -147,6 +147,7 @@ export const node = pgTable(
       .references(() => nodeType.id, { onDelete: "restrict" }),
 
     blueLight: boolean("blue_light").notNull().default(false),
+
     // PostGIS point: x = lng, y = lat
     location: geometry("location", {
       type: "point",
@@ -174,6 +175,7 @@ export const edge = pgTable(
     biDirectional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
     distance: doublePrecision("distance").notNull(), // meters
+
   },
   (t) => [
     unique("edge_pair_unique").on(t.nodeAId, t.nodeBId),

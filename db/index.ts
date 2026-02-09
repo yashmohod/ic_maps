@@ -2,9 +2,8 @@ import "server-only";
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema } from "./schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Pool } from "pg";
-
 declare global {
   // eslint-disable-next-line no-var
   var __pgPool: Pool | undefined;
@@ -24,6 +23,7 @@ const pool =
 if (process.env.NODE_ENV !== "production") globalThis.__pgPool = pool;
 
 export const db = drizzle({ client: pool });
+export {pool};
 
 export async function getUser(userId: string) {
   const rows = await db
@@ -34,4 +34,6 @@ export async function getUser(userId: string) {
 
   return rows[0];
 }
+
+
 
