@@ -1,5 +1,5 @@
 {
-  "id": "aea74c84-0266-4cc4-a9f9-cb64a932d436",
+  "id": "b06188d7-e3af-490f-9db1-d4ba7579e657",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -141,13 +141,15 @@
           "name": "lat",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": 0
         },
         "lng": {
           "name": "lng",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": 0
         },
         "name": {
           "name": "name",
@@ -159,7 +161,8 @@
           "name": "polygon",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "default": "''"
         }
       },
       "indexes": {},
@@ -188,16 +191,16 @@
           "primaryKey": false,
           "notNull": true
         },
-        "node_id": {
-          "name": "node_id",
+        "node_outside_id": {
+          "name": "node_outside_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
         }
       },
       "indexes": {
-        "idx_destination_node_dest": {
-          "name": "idx_destination_node_dest",
+        "destination_node_destination_id_idx": {
+          "name": "destination_node_destination_id_idx",
           "columns": [
             {
               "expression": "destination_id",
@@ -211,11 +214,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_destination_node_node": {
-          "name": "idx_destination_node_node",
+        "destination_node_node_outside_id_idx": {
+          "name": "destination_node_node_outside_id_idx",
           "columns": [
             {
-              "expression": "node_id",
+              "expression": "node_outside_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -241,12 +244,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "destination_node_node_id_node_id_fk": {
-          "name": "destination_node_node_id_node_id_fk",
+        "destination_node_node_outside_id_node_outside_id_fk": {
+          "name": "destination_node_node_outside_id_node_outside_id_fk",
           "tableFrom": "destination_node",
-          "tableTo": "node",
+          "tableTo": "node_outside",
           "columnsFrom": [
-            "node_id"
+            "node_outside_id"
           ],
           "columnsTo": [
             "id"
@@ -256,11 +259,11 @@
         }
       },
       "compositePrimaryKeys": {
-        "destination_node_destination_id_node_id_pk": {
-          "name": "destination_node_destination_id_node_id_pk",
+        "destination_node_destination_id_node_outside_id_pk": {
+          "name": "destination_node_destination_id_node_outside_id_pk",
           "columns": [
             "destination_id",
-            "node_id"
+            "node_outside_id"
           ]
         }
       },
@@ -269,8 +272,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.edge": {
-      "name": "edge",
+    "public.edge_inside": {
+      "name": "edge_inside",
       "schema": "",
       "columns": {
         "id": {
@@ -305,16 +308,42 @@
           "notNull": true,
           "default": true
         },
+        "stairs": {
+          "name": "stairs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "elevator": {
+          "name": "elevator",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "distance": {
           "name": "distance",
           "type": "double precision",
           "primaryKey": false,
           "notNull": true
+        },
+        "incline": {
+          "name": "incline",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_id": {
+          "name": "destination_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
         }
       },
       "indexes": {
-        "idx_edge_a": {
-          "name": "idx_edge_a",
+        "idx_edge_inside_a": {
+          "name": "idx_edge_inside_a",
           "columns": [
             {
               "expression": "node_a_id",
@@ -328,8 +357,189 @@
           "method": "btree",
           "with": {}
         },
-        "idx_edge_b": {
-          "name": "idx_edge_b",
+        "idx_edge_inside_b": {
+          "name": "idx_edge_inside_b",
+          "columns": [
+            {
+              "expression": "node_b_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "edge_inside_destination_id_idx": {
+          "name": "edge_inside_destination_id_idx",
+          "columns": [
+            {
+              "expression": "destination_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "edge_inside_node_a_id_node_inside_id_fk": {
+          "name": "edge_inside_node_a_id_node_inside_id_fk",
+          "tableFrom": "edge_inside",
+          "tableTo": "node_inside",
+          "columnsFrom": [
+            "node_a_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "edge_inside_node_b_id_node_inside_id_fk": {
+          "name": "edge_inside_node_b_id_node_inside_id_fk",
+          "tableFrom": "edge_inside",
+          "tableTo": "node_inside",
+          "columnsFrom": [
+            "node_b_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "edge_inside_destination_id_destination_id_fk": {
+          "name": "edge_inside_destination_id_destination_id_fk",
+          "tableFrom": "edge_inside",
+          "tableTo": "destination",
+          "columnsFrom": [
+            "destination_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "edge_inside_pair_unique": {
+          "name": "edge_inside_pair_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "node_a_id",
+            "node_b_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.edge_outside": {
+      "name": "edge_outside",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "node_a_id": {
+          "name": "node_a_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node_b_id": {
+          "name": "node_b_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bi_directional": {
+          "name": "bi_directional",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "direction": {
+          "name": "direction",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "stairs": {
+          "name": "stairs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "elevator": {
+          "name": "elevator",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_pedestrian": {
+          "name": "is_pedestrian",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_vehicular": {
+          "name": "is_vehicular",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "distance": {
+          "name": "distance",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "incline": {
+          "name": "incline",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "idx_edge_outside_a": {
+          "name": "idx_edge_outside_a",
+          "columns": [
+            {
+              "expression": "node_a_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_edge_outside_b": {
+          "name": "idx_edge_outside_b",
           "columns": [
             {
               "expression": "node_b_id",
@@ -345,10 +555,10 @@
         }
       },
       "foreignKeys": {
-        "edge_node_a_id_node_id_fk": {
-          "name": "edge_node_a_id_node_id_fk",
-          "tableFrom": "edge",
-          "tableTo": "node",
+        "edge_outside_node_a_id_node_outside_id_fk": {
+          "name": "edge_outside_node_a_id_node_outside_id_fk",
+          "tableFrom": "edge_outside",
+          "tableTo": "node_outside",
           "columnsFrom": [
             "node_a_id"
           ],
@@ -358,10 +568,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "edge_node_b_id_node_id_fk": {
-          "name": "edge_node_b_id_node_id_fk",
-          "tableFrom": "edge",
-          "tableTo": "node",
+        "edge_outside_node_b_id_node_outside_id_fk": {
+          "name": "edge_outside_node_b_id_node_outside_id_fk",
+          "tableFrom": "edge_outside",
+          "tableTo": "node_outside",
           "columnsFrom": [
             "node_b_id"
           ],
@@ -374,8 +584,8 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "edge_pair_unique": {
-          "name": "edge_pair_unique",
+        "edge_outside_pair_unique": {
+          "name": "edge_outside_pair_unique",
           "nullsNotDistinct": false,
           "columns": [
             "node_a_id",
@@ -383,97 +593,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.edge_nav_mode": {
-      "name": "edge_nav_mode",
-      "schema": "",
-      "columns": {
-        "edge_id": {
-          "name": "edge_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nav_mode_id": {
-          "name": "nav_mode_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "idx_edge_nav_mode_edge": {
-          "name": "idx_edge_nav_mode_edge",
-          "columns": [
-            {
-              "expression": "edge_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_edge_nav_mode_mode": {
-          "name": "idx_edge_nav_mode_mode",
-          "columns": [
-            {
-              "expression": "nav_mode_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "edge_nav_mode_edge_id_edge_id_fk": {
-          "name": "edge_nav_mode_edge_id_edge_id_fk",
-          "tableFrom": "edge_nav_mode",
-          "tableTo": "edge",
-          "columnsFrom": [
-            "edge_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "edge_nav_mode_nav_mode_id_nav_mode_id_fk": {
-          "name": "edge_nav_mode_nav_mode_id_nav_mode_id_fk",
-          "tableFrom": "edge_nav_mode",
-          "tableTo": "nav_mode",
-          "columnsFrom": [
-            "nav_mode_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "edge_nav_mode_edge_id_nav_mode_id_pk": {
-          "name": "edge_nav_mode_edge_id_nav_mode_id_pk",
-          "columns": [
-            "edge_id",
-            "nav_mode_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -518,8 +637,94 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.node": {
-      "name": "node",
+    "public.node_inside": {
+      "name": "node_inside",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "node_outside_id": {
+          "name": "node_outside_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "x": {
+          "name": "x",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "y": {
+          "name": "y",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_id": {
+          "name": "destination_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "node_inside_destination_id_idx": {
+          "name": "node_inside_destination_id_idx",
+          "columns": [
+            {
+              "expression": "destination_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "node_inside_node_outside_id_node_outside_id_fk": {
+          "name": "node_inside_node_outside_id_node_outside_id_fk",
+          "tableFrom": "node_inside",
+          "tableTo": "node_outside",
+          "columnsFrom": [
+            "node_outside_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "node_inside_destination_id_destination_id_fk": {
+          "name": "node_inside_destination_id_destination_id_fk",
+          "tableFrom": "node_inside",
+          "tableTo": "destination",
+          "columnsFrom": [
+            "destination_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.node_outside": {
+      "name": "node_outside",
       "schema": "",
       "columns": {
         "id": {
@@ -540,11 +745,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "node_type": {
-          "name": "node_type",
-          "type": "integer",
+        "blue_light": {
+          "name": "blue_light",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": false
+        },
+        "is_pedestrian": {
+          "name": "is_pedestrian",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_vehicular": {
+          "name": "is_vehicular",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "location": {
           "name": "location",
@@ -570,56 +790,9 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "node_node_type_node_type_id_fk": {
-          "name": "node_node_type_node_type_id_fk",
-          "tableFrom": "node",
-          "tableTo": "node_type",
-          "columnsFrom": [
-            "node_type"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.node_type": {
-      "name": "node_type",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "node_type_name_unique": {
-          "name": "node_type_name_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "name"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

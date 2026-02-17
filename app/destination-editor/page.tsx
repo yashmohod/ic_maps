@@ -1,6 +1,6 @@
 // src/components/BuildingEditor.tsx
 "use client";
-
+import apiClient from "@/lib/apiClient"
 import React, {
   useState,
   useEffect,
@@ -40,6 +40,9 @@ import {
   updateBuildingPolyGon,
   deleteBuilding,
 } from "@/lib/icmapsApi";
+import { error } from "console";
+import { ConsoleLogWriter } from "drizzle-orm";
+import { CornerDownLeft } from "lucide-react";
 
 /** ---------------- Types ---------------- */
 
@@ -50,11 +53,11 @@ type ViewStateLite = {
 };
 
 type BuildingRow = {
-  id: string;
+  id: number;
   name: string;
   lat: number;
   lng: number;
-  polyGon: string; // JSON string of a GeoJSON Feature
+  polygon: string; // JSON string of a GeoJSON Feature
 };
 
 type DrawEvent = {
@@ -92,6 +95,8 @@ const MapSection = React.memo(function MapSection({
   onSelectionChange,
   onModeChange,
 }: MapSectionProps) {
+
+
   return (
     <ReactMap
       ref={mapRef}
@@ -132,6 +137,8 @@ export default function BuildingEditor(): JSX.Element {
     Array<Feature<Polygon, GeoJsonProperties>>
   >([]);
 
+
+
   const [currentBuilding, setCurrentBuilding] = useState<Partial<BuildingRow>>(
     {},
   );
@@ -153,36 +160,38 @@ export default function BuildingEditor(): JSX.Element {
     [],
   );
 
-  /** Load buildings once */
-  useEffect(() => {
-    async function load() {
-      const resp: any = await getAllBuildings();
-      if (!resp) {
-        toast.error("Buildings failed to load");
-        return;
-      }
-
-      const list: BuildingRow[] = resp.buildings || [];
-      setBuildings(list);
-      buildingsRef.current = list;
-
-      if (list.length > 0) {
-        const features = list
-          .map((b) => {
-            try {
-              return JSON.parse(b.polyGon) as Feature<
-                Polygon,
-                GeoJsonProperties
-              >;
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean) as Array<Feature<Polygon, GeoJsonProperties>>;
-        setPolys(features);
-      }
+  async function loadDestinations() {
+    const resp: any = await apiClient.get("/api/destination").then((r) => r.json());
+    if (!resp) {
+      toast.error("Buildings failed to load");
+      return;
     }
-    void load();
+
+    const list: BuildingRow[] = resp.destinations || [];
+    setBuildings(list);
+    buildingsRef.current = list;
+
+    if (list.length > 0) {
+      const features = list
+        .map((b) => {
+          try {
+            const polyJ = JSON.parse(b.polygon) as Feature<
+              Polygon,
+              GeoJsonProperties
+            >;
+            return polyJ
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean) as Array<Feature<Polygon, GeoJsonProperties>>;
+      setPolys(features);
+    }
+  }
+
+
+  useEffect(() => {
+    loadDestinations();
   }, []);
 
   /** Handlers */
@@ -196,126 +205,123 @@ export default function BuildingEditor(): JSX.Element {
     setcurEditName("");
   }, []);
 
-  const onCreate = useCallback(async (e: DrawEvent) => {
+  const onCreate = useCallback(async (e: DrawEvent, draw?: any) => {
     const feature = e.features?.[0] as
       | Feature<Polygon, GeoJsonProperties>
       | undefined;
     if (!feature) return;
-
+    const drawId = String((feature as any).id);
     const name = `B-${Date.now()}`;
 
     const ring = feature.geometry?.coordinates?.[0];
-    if (!ring || ring.length === 0) return;
+    if (!ring || ring.length < 2) return;
 
     let lat = 0;
     let lng = 0;
-    for (const pt of ring) {
+    for (const pt of ring.slice(0, -1)) {
       lng += pt[0];
       lat += pt[1];
     }
-    lat /= ring.length;
-    lng /= ring.length;
+    lat /= ring.length - 1;
+    lng /= ring.length - 1;
 
-    // MapboxDraw ids can be string|number; normalize to string
-    const buildingId = String(
-      (feature as any).id ?? feature.properties?.id ?? "",
-    );
-    const polyGon = JSON.stringify({ ...feature, id: buildingId });
 
-    const resp: any = await addBuilding(buildingId, name, lat, lng, polyGon);
-    if (resp?.status !== 200) {
-      toast.error("Could not add building");
+    const req: any = await apiClient.post("/api/destination",
+      { name, lat, lng, polygon: JSON.stringify(feature) });
+
+    const resp = await req.json();
+
+
+    if (req.status !== 201) {
+      toast.error(resp?.error);
+      console.log(resp?.detail);
       return;
     }
 
+    draw?.setFeatureProperty?.(drawId, "destId", Number(resp.id));
+    draw?.setFeatureProperty?.(drawId, "name", name);
     const normalizedFeature = {
       ...(feature as any),
-      id: buildingId,
+      properties: { destId: resp.id, name: name }
     } as Feature<Polygon, GeoJsonProperties>;
+    const polygon = JSON.stringify(normalizedFeature);
+
 
     setPolys((p) => [...p, normalizedFeature]);
     setBuildings((prev) => {
       const newList: BuildingRow[] = [
         ...prev,
-        { id: buildingId, name, lat, lng, polyGon },
+        { id: Number(resp.id), name, lat, lng, polygon },
       ];
       buildingsRef.current = newList;
       return newList;
     });
-
-    setCurrentBuilding({ id: buildingId, name, lat, lng, polyGon });
+    // loadDestinations();
+    setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon });
     setcurEditName(name);
   }, []);
 
-  const onUpdate = useCallback(async (e: DrawEvent) => {
-    const f = e.features?.[0] as
+  const onUpdate = useCallback(async (e: DrawEvent, draw?: any) => {
+    const feature = e.features?.[0] as
       | Feature<Polygon, GeoJsonProperties>
       | undefined;
-    if (!f) return;
-
-    const ring = f.geometry?.coordinates?.[0];
-    if (!ring || ring.length === 0) return;
+    if (!feature) return;
+    const ring = feature.geometry?.coordinates?.[0];
+    if (!ring || ring.length < 2) return;
 
     let lat = 0;
     let lng = 0;
-    for (const pt of ring) {
+    for (const pt of ring.slice(0, -1)) {
       lng += pt[0];
       lat += pt[1];
     }
-    lat /= ring.length;
-    lng /= ring.length;
+    lat /= ring.length - 1;
+    lng /= ring.length - 1;
 
-    const id = String((f as any).id ?? f.properties?.id ?? "");
-    const updated: Feature<Polygon, GeoJsonProperties> = {
-      ...(f as any),
-      id,
-    };
-    const polyGon = JSON.stringify(updated);
-    console.log(polyGon)
 
-    const resp: any = await updateBuildingPolyGon(id, polyGon, lat, lng);
+    const polygon = JSON.stringify(feature);
+
+    const req: any = await apiClient.put("/api/destination", { id: feature?.properties?.destId, name: feature?.properties?.name, polygon, lat, lng });
+    const resp = await req.json();
     if (resp) {
       setPolys((old) =>
-        old.map((p) => (String((p as any).id) === id ? updated : p)),
+        old.map((p) => (Number(p.properties?.destId) === feature?.properties?.destId ? feature : p)),
       );
+      setCurrentBuilding({ id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon });
     } else {
-      toast.error(resp?.message ?? "Failed to update polygon");
+      toast.error(resp?.error ?? "Failed to update polygon");
+      console.log(resp.detail)
     }
   }, []);
 
   const onDelete = useCallback(
-    async (e: DrawEvent) => {
-      const f = e.features?.[0] as Feature | undefined;
-      if (!f) return;
+    async (e: DrawEvent, draw?: any) => {
+      // const f = e.features?.[0] as Feature | undefined;
+      // if (!f) return;
 
-      const id = String((f as any).id ?? f.properties?.id ?? "");
-      const resp: any = await deleteBuilding(id);
+      // const id = String(f.properties?.id ?? "");
+      // const resp: any = await deleteBuilding(id);
 
-      if (resp) {
-        setPolys((old) => old.filter((p) => String((p as any).id) !== id));
-        if (String(currentBuilding.id ?? "") === id) {
-          setCurrentBuilding({});
-          setcurEditName("");
-        }
-      } else {
-        toast.error(resp?.message ?? "Failed to delete building");
-      }
+      // if (resp) {
+      //   setPolys((old) => old.filter((p) => String((p.properties?.id) !== id)));
+      //   if (String(currentBuilding.id ?? "") === id) {
+      //     setCurrentBuilding({});
+      //     setcurEditName("");
+      //   }
+      // } else {
+      //   toast.error(resp?.message ?? "Failed to delete building");
+      // }
     },
     [currentBuilding.id],
   );
 
-  const onSelectionChange = useCallback((e: DrawEvent) => {
+  const onSelectionChange = useCallback((e: DrawEvent, draw?: any) => {
     if (!e.features || e.features.length === 0) return;
-    const id = String(
-      (e.features[0] as any).id ?? e.features[0].properties?.id ?? "",
-    );
-    const b = buildingsRef.current.find((x) => String(x.id) === id);
+    const id = Number(e.features[0].properties?.destId);
+    const b = buildingsRef.current.find((x) => Number(x.id) === id);
     if (b) {
       setCurrentBuilding(b);
-      setcurEditName(b.name);
-    } else {
-      // Not fatal; Draw can have features not yet in backend
-      console.log("building not found!");
+      setcurEditName(b.name ?? "");
     }
   }, []);
 
@@ -323,10 +329,9 @@ export default function BuildingEditor(): JSX.Element {
 
   const buildingInfoSave = async () => {
     if (!currentBuilding.id) return toast.error("Select a building first.");
-    const resp: any = await editBuildingName(
-      String(currentBuilding.id),
-      curEditName,
-    );
+    let curBuildingCopy = currentBuilding;
+    curBuildingCopy.name = curEditName;
+    const resp: any = await apiClient.put("/api/destination", { ...curBuildingCopy })
     if (resp) {
       toast.success("Name Updated!");
       // keep local list in sync
