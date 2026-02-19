@@ -35,8 +35,6 @@ CREATE TABLE "edge_inside" (
 	"node_b_id" integer NOT NULL,
 	"bi_directional" boolean DEFAULT true NOT NULL,
 	"direction" boolean DEFAULT true NOT NULL,
-	"stairs" boolean DEFAULT false NOT NULL,
-	"elevator" boolean DEFAULT false NOT NULL,
 	"distance" double precision NOT NULL,
 	"incline" double precision NOT NULL,
 	"destination_id" integer NOT NULL,
@@ -49,10 +47,6 @@ CREATE TABLE "edge_outside" (
 	"node_b_id" integer NOT NULL,
 	"bi_directional" boolean DEFAULT true NOT NULL,
 	"direction" boolean DEFAULT true NOT NULL,
-	"stairs" boolean DEFAULT false NOT NULL,
-	"elevator" boolean DEFAULT false NOT NULL,
-	"is_pedestrian" boolean DEFAULT false NOT NULL,
-	"is_vehicular" boolean DEFAULT false NOT NULL,
 	"distance" double precision NOT NULL,
 	"incline" double precision DEFAULT 0 NOT NULL,
 	CONSTRAINT "edge_outside_pair_unique" UNIQUE("node_a_id","node_b_id")
@@ -70,6 +64,8 @@ CREATE TABLE "node_inside" (
 	"node_outside_id" integer NOT NULL,
 	"x" double precision NOT NULL,
 	"y" double precision NOT NULL,
+	"is_elevator" boolean DEFAULT false NOT NULL,
+	"is_stairs" boolean DEFAULT false NOT NULL,
 	"destination_id" integer NOT NULL
 );
 --> statement-breakpoint
@@ -77,9 +73,11 @@ CREATE TABLE "node_outside" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"lat" double precision NOT NULL,
 	"lng" double precision NOT NULL,
-	"blue_light" boolean DEFAULT false NOT NULL,
 	"is_pedestrian" boolean DEFAULT false NOT NULL,
 	"is_vehicular" boolean DEFAULT false NOT NULL,
+	"is_elevator" boolean DEFAULT false NOT NULL,
+	"is_stairs" boolean DEFAULT false NOT NULL,
+	"is_blue_light" boolean DEFAULT false NOT NULL,
 	"location" geometry(point) NOT NULL
 );
 --> statement-breakpoint

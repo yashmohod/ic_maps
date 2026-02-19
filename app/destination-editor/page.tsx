@@ -33,17 +33,6 @@ import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 
-import {
-  getAllBuildings,
-  addBuilding,
-  editBuildingName,
-  updateBuildingPolyGon,
-  deleteBuilding,
-} from "@/lib/icmapsApi";
-import { error } from "console";
-import { ConsoleLogWriter } from "drizzle-orm";
-import { CornerDownLeft } from "lucide-react";
-
 /** ---------------- Types ---------------- */
 
 type ViewStateLite = {

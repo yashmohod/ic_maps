@@ -3,40 +3,12 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { EdgeOutside, NodeOutside } from "@/db/schema";
 import { calcDistance } from "@/lib/navigation";
+import { jsonError,isFiniteNumber,isValidLatLng,parseId } from "@/lib/utils";
 
-// Include `detail` only in development (recommended).
-const includeDetail = process.env.NODE_ENV !== "production";
 
-function jsonError(message: string, status: number, detail?: unknown) {
-  return NextResponse.json(
-    {
-      error: message,
-      ...(includeDetail && detail != null ? { detail: String(detail) } : {}),
-    },
-    { status },
-  );
-}
 
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
 
-function isValidLatLng(lat: unknown, lng: unknown) {
-  return (
-    isFiniteNumber(lat) &&
-    isFiniteNumber(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
-}
 
-function parseId(id: unknown): number | null {
-  const n = typeof id === "number" ? id : Number(id);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
 
 export async function POST(req: Request) {
   try {
@@ -83,7 +55,7 @@ export async function PUT(req: Request) {
     if (!nid) return jsonError("Invalid id", 400);
 
     if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
-
+    console.log(id)
     const result = await db.execute(sql`
       UPDATE node_outside
       SET
@@ -93,8 +65,8 @@ export async function PUT(req: Request) {
       WHERE id = ${nid}
 
     `);
-
-    if (result.rows.length === 0) {
+      console.log(result)
+    if (result.rowCount === 0) {
       return jsonError("Node not found", 404);
     }
 
@@ -150,16 +122,37 @@ export async function GET(req: Request) {
       const nid = parseId(idParam);
       if (!nid) return jsonError("Invalid id", 400);
 
-      const result = await db.execute(sql`
-        SELECT * FROM node_outside WHERE id = ${nid};
+      const result = await db.execute(sql<NodeOutside>`
+        SELECT
+          id,
+          lat,
+          lng,
+          is_blue_light AS "isBlueLight",
+          is_pedestrian AS "isPedestrian",
+          is_vehicular AS "isVehicular",
+          is_elevator AS "isElevator",
+          is_stairs AS "isStairs",
+          location
+        FROM node_outside
+        WHERE id = ${nid};
       `);
 
       if (result.rows.length === 0) return jsonError("Node not found", 404);
       return NextResponse.json({ row: result.rows[0] }, { status: 200 });
     }
 
-    const result = await db.execute(sql`
-      SELECT * FROM node_outside;
+    const result = await db.execute(sql<NodeOutside>`
+      SELECT
+        id,
+        lat,
+        lng,
+        is_blue_light AS "isBlueLight",
+        is_pedestrian AS "isPedestrian",
+        is_vehicular AS "isVehicular",
+        is_elevator AS "isElevator",
+        is_stairs AS "isStairs",
+        location
+      FROM node_outside;
     `);
 
     return NextResponse.json({ rows: result.rows }, { status: 200 });

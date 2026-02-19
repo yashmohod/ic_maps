@@ -1,5 +1,5 @@
 {
-  "id": "b06188d7-e3af-490f-9db1-d4ba7579e657",
+  "id": "a01d9870-4380-4442-b7ae-6b03779bc526",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -308,20 +308,6 @@
           "notNull": true,
           "default": true
         },
-        "stairs": {
-          "name": "stairs",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "elevator": {
-          "name": "elevator",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "distance": {
           "name": "distance",
           "type": "double precision",
@@ -480,34 +466,6 @@
           "notNull": true,
           "default": true
         },
-        "stairs": {
-          "name": "stairs",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "elevator": {
-          "name": "elevator",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "is_pedestrian": {
-          "name": "is_pedestrian",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "is_vehicular": {
-          "name": "is_vehicular",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "distance": {
           "name": "distance",
           "type": "double precision",
@@ -665,6 +623,20 @@
           "primaryKey": false,
           "notNull": true
         },
+        "is_elevator": {
+          "name": "is_elevator",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_stairs": {
+          "name": "is_stairs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "destination_id": {
           "name": "destination_id",
           "type": "integer",
@@ -745,13 +717,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "blue_light": {
-          "name": "blue_light",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "is_pedestrian": {
           "name": "is_pedestrian",
           "type": "boolean",
@@ -761,6 +726,27 @@
         },
         "is_vehicular": {
           "name": "is_vehicular",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_elevator": {
+          "name": "is_elevator",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_stairs": {
+          "name": "is_stairs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_blue_light": {
+          "name": "is_blue_light",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

@@ -139,6 +139,8 @@ export const nodeInside = pgTable(
 
     x: doublePrecision("x").notNull(),
     y: doublePrecision("y").notNull(),
+    isElevator: boolean("is_elevator").notNull().default(false),
+    isStairs: boolean("is_stairs").notNull().default(false),
 
     destinationId: integer("destination_id")
       .notNull()
@@ -163,10 +165,6 @@ export const edgeInside = pgTable(
     biDirectional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
 
-    // edge type
-    isStairs: boolean("stairs").notNull().default(false),
-    isElevator: boolean("elevator").notNull().default(false),
-
     distance: doublePrecision("distance").notNull(), // meters
     incline: doublePrecision("incline").notNull(), // meters
 
@@ -189,11 +187,14 @@ export const nodeOutside = pgTable(
     id: serial("id").primaryKey(),
     lat: doublePrecision("lat").notNull(),
     lng: doublePrecision("lng").notNull(),
-    isBlueLight: boolean("blue_light").notNull().default(false),
 
     // nav mode
     isPedestrian: boolean("is_pedestrian").notNull().default(false),
     isVehicular: boolean("is_vehicular").notNull().default(false),
+    isElevator: boolean("is_elevator").notNull().default(false),
+    isStairs: boolean("is_stairs").notNull().default(false),
+    isBlueLight: boolean("is_blue_light").notNull().default(false),
+
 
     // PostGIS point: x = lng, y = lat
     location: geometry("location", {
@@ -223,15 +224,6 @@ export const edgeOutside = pgTable(
     // direction
     biDirectional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
-
-    // edge type
-    isStairs: boolean("stairs").notNull().default(false),
-    isElevator: boolean("elevator").notNull().default(false),
-
-    // navMode
-    isPedestrian: boolean("is_pedestrian").notNull().default(false),
-    isVehicular: boolean("is_vehicular").notNull().default(false),
-
     distance: doublePrecision("distance").notNull(), // meters
     incline: doublePrecision("incline").notNull().default(0), // meters
   },

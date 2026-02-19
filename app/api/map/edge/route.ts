@@ -3,7 +3,6 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { EdgeOutside, NodeOutside } from "@/db/schema";
 import { calcDistance } from "@/lib/navigation";
-import { Edge } from "@xyflow/react";
 
 // Include `detail` only in development (recommended).
 const includeDetail = process.env.NODE_ENV !== "production";
@@ -76,7 +75,7 @@ export async function POST(req: Request) {
 
     const result = await db.execute(sql`
       INSERT INTO edge_outside (node_a_id, node_b_id, bi_directional, direction, distance)
-      VALUES ( ${a}, ${b}, ${biDirectionalEdges}, ${direction}, ${distance})
+      VALUES (${a}, ${b}, ${biDirectionalEdges}, ${direction}, ${distance})
       RETURNING id;
     `);
 
@@ -84,8 +83,9 @@ export async function POST(req: Request) {
     if (!inserted?.id) {
       return jsonError("Insert failed", 500, "Insert did not return an id");
     }
-
-    return NextResponse.json({ id: inserted.id, a, b }, { status: 201 });
+    const ff = direction ? a : b;
+    const tt = direction ? b : a;
+    return NextResponse.json({ id: inserted.id, a:ff, b:tt }, { status: 201 });
   } catch (err: any) {
     return jsonError("Insert failed", 500, err?.message ?? err);
   }
@@ -106,7 +106,7 @@ export async function DELETE(req: Request) {
       WHERE id = ${nid}
     `);
 
-    if (result.rows.length === 0) {
+    if (result.rowCount === 0) {
       return jsonError("Edge not found", 404);
     }
 
@@ -127,8 +127,17 @@ export async function GET(req: Request) {
       const nid = parseId(idParam);
       if (!nid) return jsonError("Invalid id", 400);
 
-      const result = await db.execute(sql`
-        SELECT * FROM edge_outside WHERE id = ${nid};
+      const result = await db.execute(sql<EdgeOutside>`
+        SELECT
+          id,
+          node_a_id AS "nodeAId",
+          node_b_id AS "nodeBId",
+          bi_directional AS "biDirectional",
+          direction,
+          distance,
+          incline
+        FROM edge_outside
+        WHERE id = ${nid};
       `);
 
       if (result.rows.length === 0) return jsonError("Edge not found", 404);
@@ -138,26 +147,24 @@ export async function GET(req: Request) {
       );
     }
 
-    const result = await db
-      .execute(
-        sql`
-      SELECT * FROM edge_outside;
-    `,
-      )
-      .then((res) => {
-        return res.rows as EdgeOutside[];
-      });
+    const result = await db.execute(sql<EdgeOutside>`
+      SELECT
+        id,
+        node_a_id AS "nodeAId",
+        node_b_id AS "nodeBId",
+        bi_directional AS "biDirectional",
+        direction,
+        distance,
+        incline
+      FROM edge_outside;
+    `);
 
-    let rows = result.map((curedge) => {
+    let rows = result.rows.map((curedge) => {
       return {
         key: curedge.id,
         from: curedge.direction ? curedge.nodeAId : curedge.nodeBId,
         to: curedge.direction ? curedge.nodeBId : curedge.nodeAId,
         biDirectional: curedge.biDirectional,
-        isPedestrian: curedge.isPedestrian,
-        isVehicular: curedge.isVehicular,
-        isStairs: curedge.isStairs,
-        isElevator: curedge.isElevator,
         incline: curedge.incline,
       };
     });
