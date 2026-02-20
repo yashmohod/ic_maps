@@ -31,19 +31,11 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
-import { Rewind } from "lucide-react";
-import { boolean, string } from "zod";
-import { totalmem } from "os";
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };
@@ -60,7 +52,7 @@ type MarkerNode = {
 };
 
 type EdgeIndexEntry = {
-  key: number;
+  id: number;
   from: number;
   to: number;
   biDirectional: boolean;
@@ -82,7 +74,6 @@ type ViewStateLite = {
   zoom: number;
 };
 
-type DragState = { draggingId: string | null };
 
 type GeoJSONFeatureCollection = {
   type: "FeatureCollection";
@@ -117,12 +108,16 @@ export default function RouteEditor(): JSX.Element {
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
   const [biDirectionalEdges, setBiDirectionalEdges] = useState<boolean>(true);
 
+  const [markersToNormalize, setMarkersToNormalize] = useState<number[]>([]);
+
   const curEdgeIndexRef = useRef<EdgeIndexEntry[]>(edgeIndex);
   useEffect(() => {
     curEdgeIndexRef.current = edgeIndex;
   }, [edgeIndex]);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
+  const [inclineInput, setInclineInput] = useState<string>("0");
 
 
 
@@ -159,7 +154,8 @@ export default function RouteEditor(): JSX.Element {
     | "edit"
     | "delete"
     | "navMode"
-    | "destination";
+    | "destination"
+    ;
   const [mode, setMode] = useState<EditorMode>("select");
   const [showNodes, setShowNodes] = useState<boolean>(true);
 
@@ -190,10 +186,11 @@ export default function RouteEditor(): JSX.Element {
       let nmc = false;
       if (mode == "navMode" && a[navModes[curNavMode].param] && b[navModes[curNavMode].param]) nmc = true;
 
+      const edgeId = e.id ?? (e as { key?: number }).key;
       features.push({
         type: "Feature",
         properties: {
-          key: e.key,
+          key: edgeId,
           from: e.from,
           to: e.to,
           ada: nmc,
@@ -275,11 +272,10 @@ export default function RouteEditor(): JSX.Element {
       setEdgeIndex((list) => [
         ...list,
         {
-          key: resp?.id ?? "", from: resp?.a ?? "", to: resp?.b ?? "", biDirectional: biDirectionalEdges,
-          isPedestrian: false,
-          isElevator: false,
-          isStairs: false,
-          isVehicular: false,
+          id: resp?.id ?? "",
+          from: resp?.a ?? "",
+          to: resp?.b ?? "",
+          biDirectional: biDirectionalEdges,
           incline: 0,
         },
       ]);
@@ -306,13 +302,34 @@ export default function RouteEditor(): JSX.Element {
     if (selectedRef.current === id) setSelectedId(null);
   }
 
-  async function deleteEdgeByKey(key: number) {
-    const req = await apiClient.del("/api/map/edge", { id: key });
+  async function deleteEdgeByKey(id: number) {
+    const req = await apiClient.del("/api/map/edge", { id });
     if (req.status !== 200) return toast.error("Feature could not be deleted.");
 
-    setEdgeIndex((list) => list.filter((e) => e.key !== key));
-
+    setEdgeIndex((list) =>
+      list.filter(
+        (e) => e.id !== id && (e as { key?: number }).key !== id,
+      ),
+    );
   }
+
+  async function setEdgeIncline(edgeId: number, incline: number) {
+    const req = await apiClient.post("/api/map/incline", { id: edgeId, incline });
+    if (req.status !== 200) {
+      toast.error("Could not update incline.");
+      return;
+    }
+    setEdgeIndex((list) =>
+      list.map((e) =>
+        e.id === edgeId || (e as { key?: number }).key === edgeId
+          ? { ...e, id: e.id ?? edgeId, incline }
+          : e,
+      ),
+    );
+    toast.success("Incline updated.");
+  }
+
+
 
   /** ---------------- NavMode ops (Sets) ---------------- */
 
@@ -325,7 +342,7 @@ export default function RouteEditor(): JSX.Element {
 
     let nextValue = !cur[nm.param];
     console.log(id, nm.param)
-    const req = await apiClient.post("/api/map/setFeatureStatus", { id, value: nextValue, featureType: "node_outside", navMode: nm.param })
+    const req = await apiClient.post("/api/map/setFeatureStatus", { id, value: nextValue, navMode: nm.param })
     const resp = await req.json();
     console.log(req, resp)
 
@@ -422,8 +439,9 @@ export default function RouteEditor(): JSX.Element {
       return;
     }
 
-    if (modeRef.current === "select" && selectedRef.current !== null) {
-      setSelectedId(null);
+    if (modeRef.current === "select") {
+      if (selectedRef.current !== null) setSelectedId(null);
+      setSelectedEdgeId(null);
     }
   }
 
@@ -433,7 +451,6 @@ export default function RouteEditor(): JSX.Element {
     if (modeRef.current === "delete") return void deleteNode(id);
     if (modeRef.current === "destination") return void addToBuildingGroup(id);
     if (modeRef.current === "navMode") return void setNavModeNode(id);
-
 
     if (modeRef.current === "select") {
       const cur = selectedRef.current;
@@ -462,6 +479,10 @@ export default function RouteEditor(): JSX.Element {
     const key = f?.properties?.key as number | undefined;
     if (!key) return;
     if (modeRef.current === "delete") return void deleteEdgeByKey(key);
+    if (modeRef.current === "select") {
+      setSelectedEdgeId(key);
+      return;
+    }
   }
 
   function handleEdgeEnter() {
@@ -520,6 +541,21 @@ export default function RouteEditor(): JSX.Element {
 
 
 
+
+  // Selected edge for toolbox (support both id and key from API)
+  const selectedEdge =
+    selectedEdgeId === null
+      ? null
+      : edgeIndex.find((e) => e.id === selectedEdgeId) ??
+      edgeIndex.find((e) => (e as { key?: number }).key === selectedEdgeId);
+
+  useEffect(() => {
+    if (selectedEdgeId === null) return;
+    const edge =
+      edgeIndex.find((e) => e.id === selectedEdgeId) ??
+      edgeIndex.find((e) => (e as { key?: number }).key === selectedEdgeId);
+    setInclineInput(String(edge?.incline ?? 0));
+  }, [selectedEdgeId, edgeIndex]);
 
   useEffect(() => {
     void getAllFeature();
@@ -634,6 +670,7 @@ export default function RouteEditor(): JSX.Element {
           Building Select
         </button>
 
+
         <div className="mx-2 w-px h-5 bg-border" />
 
         {/* <button
@@ -663,6 +700,8 @@ export default function RouteEditor(): JSX.Element {
         </button>
       </div>
 
+
+
       {mode === "select" && (
         <div
           className={`absolute z-20 top-16 left-3 rounded-xl px-3 py-2 flex items-center gap-3 ${panelClass}`}
@@ -689,6 +728,47 @@ export default function RouteEditor(): JSX.Element {
               </span>
             </>
           ) : null}
+        </div>
+      )}
+
+      {/* Edge incline toolbox: shown in select mode when an edge is selected */}
+      {mode === "select" && selectedEdgeId !== null && (
+        <div
+          className={`absolute z-20 top-40 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
+        >
+          <span className="text-sm font-medium">Edge incline (m)</span>
+          <Input
+            type="number"
+            step="0.1"
+            min="-100"
+            max="100"
+            value={inclineInput}
+            onChange={(e) => setInclineInput(e.target.value)}
+            className="w-24 h-8"
+            placeholder="0"
+          />
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              const value = Number.parseFloat(inclineInput);
+              if (!Number.isFinite(value)) {
+                toast.error("Enter a valid number.");
+                return;
+              }
+              void setEdgeIncline(selectedEdgeId, value);
+            }}
+          >
+            Set incline
+          </Button>
+          <button
+            type="button"
+            className="text-sm text-muted-foreground hover:text-foreground"
+            onClick={() => setSelectedEdgeId(null)}
+            aria-label="Close"
+          >
+            Close
+          </button>
         </div>
       )}
 
@@ -793,7 +873,6 @@ export default function RouteEditor(): JSX.Element {
               const isNavModeSet =
                 mode === "navMode" && Boolean(m[navModes[curNavMode].param]);
               const isDrawSel = mode === "select" && m.id === selectedId;
-
               if (mode === "navMode" && false)
                 return null;
 

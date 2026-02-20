@@ -4,13 +4,6 @@ import { db } from "@/db/index";
 
 const includeDetail = process.env.NODE_ENV !== "production";
 
-type FeatureType = "node" | "node_outside";
-
-const featureTableMap: Record<FeatureType, "node_outside"> = {
-  node: "node_outside",
-  node_outside: "node_outside",
-};
-
 const navModeColumnMap = {
   isPedestrian: "is_pedestrian",
   isVehicular: "is_vehicular",
@@ -60,16 +53,14 @@ export async function POST(req: Request) {
     const value = parseBoolean(body.value);
     if (value == null) return jsonError("Invalid value (must be boolean)", 400);
 
-    const featureTypeRaw = String(body.featureType ?? "").trim() as FeatureType;
-    const table = featureTableMap[featureTypeRaw];
-    if (!table) return jsonError("Unsupported featureType", 400);
+
 
     const navModeRaw = String(body.navMode ?? "").trim() as keyof typeof navModeColumnMap;
     const column = navModeColumnMap[navModeRaw];
     if (!column) return jsonError("Unsupported navMode", 400);
 
     const result = await db.execute(sql`
-      UPDATE ${sql.identifier(table)}
+      UPDATE node_outside
       SET ${sql.identifier(column)} = ${value}
       WHERE id = ${id}
       RETURNING id;

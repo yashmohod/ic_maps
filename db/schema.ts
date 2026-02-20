@@ -12,6 +12,7 @@ import {
   integer,
   unique,
   primaryKey,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -134,19 +135,35 @@ export const nodeInside = pgTable(
   {
     id: serial("id").primaryKey(),
     nodeOutsideId: integer("node_outside_id")
-      .notNull()
       .references(() => nodeOutside.id, { onDelete: "cascade" }),
+    parentNodeInsideId: integer("parent_node_inside_id"),
 
     x: doublePrecision("x").notNull(),
     y: doublePrecision("y").notNull(),
+    isEntry: boolean("is_entry").notNull().default(false),
+    isExit: boolean("is_exit").notNull().default(false),
     isElevator: boolean("is_elevator").notNull().default(false),
     isStairs: boolean("is_stairs").notNull().default(false),
+    isRamp: boolean("is_ramp").notNull().default(false),
+    isGroup: boolean("is_group").notNull().default(false),
+    imageUrl: text("image_url"),
+    incline: doublePrecision("incline"),
+    width: doublePrecision("width"),
+    height: doublePrecision("height"),
 
     destinationId: integer("destination_id")
       .notNull()
       .references(() => destination.id, { onDelete: "cascade" }),
   },
-  (t) => [index("node_inside_destination_id_idx").on(t.destinationId)],
+  (t) => [
+    index("node_inside_destination_id_idx").on(t.destinationId),
+    index("node_inside_parent_idx").on(t.parentNodeInsideId),
+    foreignKey({
+      columns: [t.parentNodeInsideId],
+      foreignColumns: [t.id],
+      name: "node_inside_parent_fk",
+    }).onDelete("set null"),
+  ],
 );
 
 //edges inside
@@ -161,12 +178,10 @@ export const edgeInside = pgTable(
       .notNull()
       .references(() => nodeInside.id, { onDelete: "cascade" }),
 
-    // direction
     biDirectional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
-
-    distance: doublePrecision("distance").notNull(), // meters
-    incline: doublePrecision("incline").notNull(), // meters
+    sourceHandle: text("source_handle"), // which handle on source node: top | right | bottom | left
+    targetHandle: text("target_handle"), // which handle on target node
 
     destinationId: integer("destination_id")
       .notNull()

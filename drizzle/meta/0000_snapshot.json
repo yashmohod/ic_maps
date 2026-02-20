@@ -1,5 +1,5 @@
 {
-  "id": "a01d9870-4380-4442-b7ae-6b03779bc526",
+  "id": "bfc0d763-4f45-44ca-9335-83d8142cc892",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -308,17 +308,17 @@
           "notNull": true,
           "default": true
         },
-        "distance": {
-          "name": "distance",
-          "type": "double precision",
+        "source_handle": {
+          "name": "source_handle",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "incline": {
-          "name": "incline",
-          "type": "double precision",
+        "target_handle": {
+          "name": "target_handle",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "destination_id": {
           "name": "destination_id",
@@ -609,7 +609,13 @@
           "name": "node_outside_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "parent_node_inside_id": {
+          "name": "parent_node_inside_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "x": {
           "name": "x",
@@ -622,6 +628,20 @@
           "type": "double precision",
           "primaryKey": false,
           "notNull": true
+        },
+        "is_entry": {
+          "name": "is_entry",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_exit": {
+          "name": "is_exit",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "is_elevator": {
           "name": "is_elevator",
@@ -637,6 +657,44 @@
           "notNull": true,
           "default": false
         },
+        "is_ramp": {
+          "name": "is_ramp",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_group": {
+          "name": "is_group",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "image_url": {
+          "name": "image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "incline": {
+          "name": "incline",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "width": {
+          "name": "width",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "height": {
+          "name": "height",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
         "destination_id": {
           "name": "destination_id",
           "type": "integer",
@@ -650,6 +708,21 @@
           "columns": [
             {
               "expression": "destination_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "node_inside_parent_idx": {
+          "name": "node_inside_parent_idx",
+          "columns": [
+            {
+              "expression": "parent_node_inside_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -686,6 +759,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "node_inside_parent_fk": {
+          "name": "node_inside_parent_fk",
+          "tableFrom": "node_inside",
+          "tableTo": "node_inside",
+          "columnsFrom": [
+            "parent_node_inside_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

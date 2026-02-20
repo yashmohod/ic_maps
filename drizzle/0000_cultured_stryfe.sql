@@ -35,8 +35,8 @@ CREATE TABLE "edge_inside" (
 	"node_b_id" integer NOT NULL,
 	"bi_directional" boolean DEFAULT true NOT NULL,
 	"direction" boolean DEFAULT true NOT NULL,
-	"distance" double precision NOT NULL,
-	"incline" double precision NOT NULL,
+	"source_handle" text,
+	"target_handle" text,
 	"destination_id" integer NOT NULL,
 	CONSTRAINT "edge_inside_pair_unique" UNIQUE("node_a_id","node_b_id")
 );
@@ -61,11 +61,20 @@ CREATE TABLE "nav_mode" (
 --> statement-breakpoint
 CREATE TABLE "node_inside" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"node_outside_id" integer NOT NULL,
+	"node_outside_id" integer,
+	"parent_node_inside_id" integer,
 	"x" double precision NOT NULL,
 	"y" double precision NOT NULL,
+	"is_entry" boolean DEFAULT false NOT NULL,
+	"is_exit" boolean DEFAULT false NOT NULL,
 	"is_elevator" boolean DEFAULT false NOT NULL,
 	"is_stairs" boolean DEFAULT false NOT NULL,
+	"is_ramp" boolean DEFAULT false NOT NULL,
+	"is_group" boolean DEFAULT false NOT NULL,
+	"image_url" text,
+	"incline" double precision,
+	"width" double precision,
+	"height" double precision,
 	"destination_id" integer NOT NULL
 );
 --> statement-breakpoint
@@ -134,6 +143,7 @@ ALTER TABLE "edge_outside" ADD CONSTRAINT "edge_outside_node_a_id_node_outside_i
 ALTER TABLE "edge_outside" ADD CONSTRAINT "edge_outside_node_b_id_node_outside_id_fk" FOREIGN KEY ("node_b_id") REFERENCES "public"."node_outside"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_node_outside_id_node_outside_id_fk" FOREIGN KEY ("node_outside_id") REFERENCES "public"."node_outside"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_parent_fk" FOREIGN KEY ("parent_node_inside_id") REFERENCES "public"."node_inside"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "route" ADD CONSTRAINT "route_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "route" ADD CONSTRAINT "route_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -146,6 +156,7 @@ CREATE INDEX "edge_inside_destination_id_idx" ON "edge_inside" USING btree ("des
 CREATE INDEX "idx_edge_outside_a" ON "edge_outside" USING btree ("node_a_id");--> statement-breakpoint
 CREATE INDEX "idx_edge_outside_b" ON "edge_outside" USING btree ("node_b_id");--> statement-breakpoint
 CREATE INDEX "node_inside_destination_id_idx" ON "node_inside" USING btree ("destination_id");--> statement-breakpoint
+CREATE INDEX "node_inside_parent_idx" ON "node_inside" USING btree ("parent_node_inside_id");--> statement-breakpoint
 CREATE INDEX "node_location_gist" ON "node_outside" USING gist ("location");--> statement-breakpoint
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
