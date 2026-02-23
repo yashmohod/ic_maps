@@ -1,17 +1,34 @@
 import { NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
-import { db } from "@/db/index";
-import { node, edge } from "@/db/schema";
-import type { Node, Edge } from "@/db/schema";
 
-export async function GET(req: Request) {
-  console.log(req.url);
-  // Postgres-style result: { rows: [...] }
-  const nodesResult = await db.execute(sql<Node>`SELECT * FROM ${node}`);
-  const edgesResult = await db.execute(sql<Edge>`SELECT * FROM ${edge}`);
+const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
 
-  const nodes = nodesResult.rows;
-  const edges = edgesResult.rows;
-
-  return NextResponse.json({ nodes, edges }, { status: 200 });
+/**
+ * Proxy to Java backend GET /map/all.
+ * Backend returns { nodes: NodeDTO[], edges: EdgeDTO[] } where:
+ *   NodeDTO: { id: string, lat: number, lng: number, isBlueLight: boolean }
+ *   EdgeDTO: { key: string, from: string, to: string, distance: number, biDirectional: boolean }
+ */
+export async function GET() {
+  try {
+    const res = await fetch(`${BACKEND}/map/all`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[api/map/all] backend error:", res.status, text);
+      return NextResponse.json(
+        { error: "Backend map/all failed", status: res.status },
+        { status: res.status }
+      );
+    }
+    const data = await res.json();
+    return NextResponse.json(data, { status: 200 });
+  } catch (err) {
+    console.error("[api/map/all] fetch failed:", err);
+    return NextResponse.json(
+      { error: "Failed to reach backend", nodes: [], edges: [] },
+      { status: 502 }
+    );
+  }
 }

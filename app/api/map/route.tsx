@@ -4,13 +4,14 @@ const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
 
 
 export async function POST(req: Request) {
-
   const body = await req.json();
-  console.log(req.url);
-  console.log(body);
-
-
-  return NextResponse.json({}, { status: 200 });
+  const res = await fetch(`${BACKEND}/map/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return NextResponse.json(data, { status: res.status });
 }
 
 

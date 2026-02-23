@@ -1,6 +1,5 @@
 // src/components/MapEditor.tsx
 "use client";
-import apiClient from "@/lib/apiClient";
 import React, { useMemo, useRef, useState, useEffect, type JSX } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import {
@@ -49,6 +48,7 @@ import {
   editNode,
   deleteFeature,
   setNavModeStatus,
+  getAllMapFeature,
   getAllBuildings,
   getAllBuildingNodes,
   attachNodeToBuilding,
@@ -287,13 +287,7 @@ export default function RouteEditor(): JSX.Element {
     const key = edgeKey(a, b);
     if (edgeIndex.some((e) => e.key === key)) return;
 
-    const ok = await apiClient.post("/api/map", {
-      key,
-      a,
-      b,
-      type: "edge",
-      biDirectionalEdges,
-    });
+    const ok = await addEdge(key, b, a, biDirectionalEdges);
     if (ok) {
       setEdgeIndex((list) => [
         ...list,
@@ -305,7 +299,7 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function deleteNode(id: string) {
-    const ok = await apiClient.del("/api/map", { featureKey: id, featureType: "node" });
+    const ok = await deleteFeature(id, "node");
     if (!ok) return toast.error("Feature could not be deleted.");
 
     setMarkers((prev) => prev.filter((m) => m.id !== id));
@@ -338,7 +332,7 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function deleteEdgeByKey(key: string) {
-    const ok = await apiClient.del("/api/map", { featureKey: key, featureType: "edge" });
+    const ok = await deleteFeature(key, "edge");
     if (!ok) return toast.error("Feature could not be deleted.");
 
     setEdgeIndex((list) => list.filter((e) => e.key !== key));
@@ -432,7 +426,7 @@ export default function RouteEditor(): JSX.Element {
 
   async function handelBuildingSelect(id: string | number) {
     setCurrentBuilding(id);
-    const resp: any = await apiClient.get(`/api/building/nodesget?id=${encodeURIComponent(id)}`);
+    const resp: any = await getAllBuildingNodes(String(id));
 
     const ids: string[] = (resp?.nodes || [])
       .map((n: any) => (typeof n === "string" ? n : n?.id))
@@ -449,9 +443,11 @@ export default function RouteEditor(): JSX.Element {
     const isSelected = curBuildingNodes.has(nodeId);
 
     if (isSelected) {
-      const resp = await apiClient.post("/api/building/noderemove", { buildingId: String(currentBuilding), nodeId });
-      if (!resp) return toast.error("Failed to detach node.");
-
+      try {
+        await detachNodeFromBuilding(String(currentBuilding), nodeId);
+      } catch {
+        return toast.error("Failed to detach node.");
+      }
       setCurBuildingNodes((prev) => {
         const next = new Set(prev);
         next.delete(nodeId);
@@ -459,9 +455,11 @@ export default function RouteEditor(): JSX.Element {
       });
       setCurBuildingOrder((prev) => prev.filter((id) => id !== nodeId));
     } else {
-      const resp = await apiClient.post("/api/building/nodeadd", { buildingId: String(currentBuilding), nodeId });
-      if (!resp) return toast.error("Failed to attach node.");
-
+      try {
+        await attachNodeToBuilding(String(currentBuilding), nodeId);
+      } catch {
+        return toast.error("Failed to attach node.");
+      }
       setCurBuildingNodes((prev) => {
         const next = new Set(prev);
         next.add(nodeId);
@@ -478,7 +476,7 @@ export default function RouteEditor(): JSX.Element {
 
     const ids = Array.from(curBuildingNodes);
     const results = await Promise.allSettled(
-      ids.map((nid) => apiClient.post("/api/building/noderemove", { buildingId: String(currentBuilding), nid }))
+      ids.map((nid) => detachNodeFromBuilding(String(currentBuilding), nid))
     );
 
     const succeeded = ids.filter(
@@ -506,13 +504,12 @@ export default function RouteEditor(): JSX.Element {
     if (!cur) return;
 
     const nextValue = !Boolean(cur.isBlueLight);
-    const resp = await apiClient.post("/api/map/bluelight", { nodeId: id, isBlueLight: nextValue });
-
-    if (resp) {
+    try {
+      await setBlueLight(id, nextValue);
       setMarkers((prev) =>
         prev.map((m) => (m.id === id ? { ...m, isBlueLight: nextValue } : m))
       );
-    } else {
+    } catch {
       toast.error("Could not set marker as Blue Light.");
     }
   }
@@ -523,7 +520,7 @@ export default function RouteEditor(): JSX.Element {
     if ((e.originalEvent as MouseEvent | undefined)?.altKey) {
       const { lng, lat } = e.lngLat;
       const id = `n-${Date.now()}`;
-      const ok = await apiClient.post("/api/map", { id, lng, lat, type: "node" });
+      const ok = await addNode(id, lng, lat);
       if (ok) setMarkers((prev) => [...prev, { id, lng, lat }]);
       else toast.error("Node could not be added.");
       return;
@@ -559,7 +556,7 @@ export default function RouteEditor(): JSX.Element {
 
   async function handleMarkerDragEnd(e: any, id: string) {
     const { lng, lat } = e.lngLat as LngLat;
-    const ok = await apiClient.put("/api/map", { id, lng, lat });
+    const ok = await editNode(id, lng, lat);
     if (ok) {
       setMarkers((prev) =>
         prev.map((m) => (m.id === id ? { ...m, lng, lat } : m))
@@ -603,8 +600,8 @@ export default function RouteEditor(): JSX.Element {
   /** ---------------- Data loading ---------------- */
 
   async function getAllFeature() {
-    const resp: any = await apiClient.get("/api/map/all");;
-    console.log(resp)
+    const resp: any = await getAllMapFeature();
+    console.log(resp);
     setMarkers(
       (resp?.nodes ?? []).map((n: any) => ({
         id: String(n.id),
@@ -625,13 +622,13 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function getBuildingsList() {
-    const resp: any = await apiClient.get("/api/building");
+    const resp: any = await getAllBuildings();
     if (resp) setBuildings(resp.buildings || []);
     else toast.error("Buildings did not load!");
   }
 
   async function getNavModesList() {
-    const resp: any = await apiClient.get("/api/navmode");
+    const resp: any = await getAllNavModes();
     const curNavModes: NavMode[] = resp?.NavModes ?? [];
     setNavModes(curNavModes);
     if (curNavModes.length > 0) {
@@ -641,9 +638,7 @@ export default function RouteEditor(): JSX.Element {
   }
 
   async function getNavModeFeatures(navModeId: string | number) {
-    const resp: any = await apiClient.get(
-      `/api/navmode/allids?navModeId=${encodeURIComponent(String(navModeId))}`,
-    );
+    const resp: any = await getAllMapFeaturesNavModeIds(String(navModeId));
     setCurNavModeEdges(new Set((resp?.edges ?? []).map((x: any) => String(x))));
     setCurNavModeNodes(new Set((resp?.nodes ?? []).map((x: any) => String(x))));
   }
@@ -651,7 +646,7 @@ export default function RouteEditor(): JSX.Element {
   useEffect(() => {
     void getAllFeature();
     void getBuildingsList();
-    //void getNavModesList();
+    void getNavModesList();
     return () => {
       const map = mapRef.current?.getMap?.();
       if (!map) return;
