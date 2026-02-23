@@ -39,8 +39,8 @@ export const auth = betterAuth({
   },
 
   emailVerification: {
-    // ✅ send verification email right after signup
-    sendOnSignUp: true,
+    // Disabled: Resend not in use. Set sendOnSignUp: true when RESEND_API_KEY is set.
+    sendOnSignUp: false,
 
     sendVerificationEmail: async ({ user, url }) => {
       await sendDevEmail({

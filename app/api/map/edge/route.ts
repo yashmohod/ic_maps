@@ -3,40 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { EdgeOutside, NodeOutside } from "@/db/schema";
 import { calcDistance } from "@/lib/navigation";
-
-// Include `detail` only in development (recommended).
-const includeDetail = process.env.NODE_ENV !== "production";
-
-function jsonError(message: string, status: number, detail?: unknown) {
-  return NextResponse.json(
-    {
-      error: message,
-      ...(includeDetail && detail != null ? { detail: String(detail) } : {}),
-    },
-    { status },
-  );
-}
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-function isValidLatLng(lat: unknown, lng: unknown) {
-  return (
-    isFiniteNumber(lat) &&
-    isFiniteNumber(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
-}
-
-function parseId(id: unknown): number | null {
-  const n = typeof id === "number" ? id : Number(id);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
+import { jsonError, parseId } from "@/lib/utils";
 
 export async function POST(req: Request) {
   try {

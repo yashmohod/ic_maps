@@ -41,12 +41,13 @@ type ViewStateLite = {
   zoom: number;
 };
 
-type BuildingRow = {
+export type BuildingRow = {
   id: number;
   name: string;
   lat: number;
   lng: number;
   polygon: string; // JSON string of a GeoJSON Feature
+  isParkingLot: boolean;
 };
 
 type DrawEvent = {
@@ -128,10 +129,16 @@ export default function BuildingEditor(): JSX.Element {
 
 
 
-  const [currentBuilding, setCurrentBuilding] = useState<Partial<BuildingRow>>(
-    {},
+  const [currentBuilding, setCurrentBuilding] = useState<BuildingRow>(
+    {
+      id: -1,
+      name: "",
+      lat: -1,
+      lng: -1,
+      polygon: "", // JSON string of a GeoJSON Feature
+      isParkingLot: false,
+    }
   );
-  const [curEditName, setcurEditName] = useState<string>("");
 
   const stylePath = isDark
     ? "/styles/osm-bright/style-local-dark.json"
@@ -177,7 +184,20 @@ export default function BuildingEditor(): JSX.Element {
       setPolys(features);
     }
   }
+  async function onChangeIsParkingLot(v: boolean) {
+    if (!currentBuilding) return;
+    const req = await apiClient.post("/api/destination/setParkingLot", { id: currentBuilding.id, isParkingLot: v })
+    if (req.status !== 200) {
+      const resp = await req.json();
+      toast.error(resp.error);
+      console.log(resp.detail)
+    }
 
+    setCurrentBuilding((prev) => {
+      prev.isParkingLot = v;
+      return prev;
+    })
+  }
 
   useEffect(() => {
     loadDestinations();
@@ -190,8 +210,15 @@ export default function BuildingEditor(): JSX.Element {
   }, []);
 
   const onMapClick = useCallback((_e: MapMouseEvent) => {
-    setCurrentBuilding({});
-    setcurEditName("");
+    setCurrentBuilding({
+      id: -1,
+      name: "",
+      lat: -1,
+      lng: -1,
+      polygon: "", // JSON string of a GeoJSON Feature
+      isParkingLot: false,
+    });
+
   }, []);
 
   const onCreate = useCallback(async (e: DrawEvent, draw?: any) => {
@@ -240,14 +267,14 @@ export default function BuildingEditor(): JSX.Element {
     setBuildings((prev) => {
       const newList: BuildingRow[] = [
         ...prev,
-        { id: Number(resp.id), name, lat, lng, polygon },
+        { id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false },
       ];
       buildingsRef.current = newList;
       return newList;
     });
     // loadDestinations();
-    setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon });
-    setcurEditName(name);
+    setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false });
+
   }, []);
 
   const onUpdate = useCallback(async (e: DrawEvent, draw?: any) => {
@@ -276,7 +303,7 @@ export default function BuildingEditor(): JSX.Element {
       setPolys((old) =>
         old.map((p) => (Number(p.properties?.destId) === feature?.properties?.destId ? feature : p)),
       );
-      setCurrentBuilding({ id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon });
+      setCurrentBuilding((prev) => { return { ...prev, id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon } });
     } else {
       toast.error(resp?.error ?? "Failed to update polygon");
       console.log(resp.detail)
@@ -310,7 +337,6 @@ export default function BuildingEditor(): JSX.Element {
     const b = buildingsRef.current.find((x) => Number(x.id) === id);
     if (b) {
       setCurrentBuilding(b);
-      setcurEditName(b.name ?? "");
     }
   }, []);
 
@@ -319,21 +345,11 @@ export default function BuildingEditor(): JSX.Element {
   const buildingInfoSave = async () => {
     if (!currentBuilding.id) return toast.error("Select a building first.");
     let curBuildingCopy = currentBuilding;
-    curBuildingCopy.name = curEditName;
     const resp: any = await apiClient.put("/api/destination", { ...curBuildingCopy })
     if (resp) {
       toast.success("Name Updated!");
       // keep local list in sync
-      setBuildings((prev) => {
-        const next = prev.map((b) =>
-          String(b.id) === String(currentBuilding.id)
-            ? { ...b, name: curEditName }
-            : b,
-        );
-        buildingsRef.current = next;
-        return next;
-      });
-      setCurrentBuilding((prev) => ({ ...prev, name: curEditName }));
+
     } else {
       toast.error(resp?.message ?? "Name could not be updated!");
     }
@@ -350,10 +366,10 @@ export default function BuildingEditor(): JSX.Element {
       </div>
 
       <EditPanel
-        curEditName={curEditName}
         currentBuilding={currentBuilding}
-        setcurEditName={setcurEditName}
+        setCurrentBuilding={setCurrentBuilding}
         submitName={buildingInfoSave}
+        onChangeIsParkingLot={onChangeIsParkingLot}
       />
 
       <div className="w-full h-full">

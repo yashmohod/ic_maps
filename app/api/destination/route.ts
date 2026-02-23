@@ -1,80 +1,13 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
-
-// ✅ Include `detail` only in development (recommended).
-// If you truly want the opposite, flip this to: process.env.NODE_ENV === "production"
-const includeDetail = process.env.NODE_ENV !== "production";
-
-function jsonError(message: string, status: number, detail?: unknown) {
-  return NextResponse.json(
-    {
-      error: message,
-      ...(includeDetail && detail != null ? { detail: String(detail) } : {}),
-    },
-    { status },
-  );
-}
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-function isValidLatLng(lat: unknown, lng: unknown) {
-  return (
-    isFiniteNumber(lat) &&
-    isFiniteNumber(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
-}
-
-function parseId(id: unknown): number | null {
-  const n = typeof id === "number" ? id : Number(id);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
-
-function isNonEmptyString(v: unknown, maxLen = 256): v is string {
-  return typeof v === "string" && v.trim().length > 0 && v.length <= maxLen;
-}
-
-/**
- * Validates polygon payload.
- * Accepts:
- * - stringified JSON (what you're sending now)
- * - or an object (more ergonomic for future)
- *
- * Returns a canonical stringified GeoJSON + parsed object.
- */
-function parsePolygon(polygon: unknown): { polyObj: any; polyStr: string } | null {
-  try {
-    const obj =
-      typeof polygon === "string"
-        ? JSON.parse(polygon)
-        : typeof polygon === "object" && polygon != null
-          ? polygon
-          : null;
-
-    if (!obj || typeof obj !== "object") return null;
-
-    // Light validation (enough to avoid obvious garbage):
-    // You can tighten this later (Feature/Polygon only, etc).
-    const type = (obj as any).type;
-    if (typeof type !== "string") return null;
-
-    // Ensure properties exists (we overwrite/merge below anyway)
-    if (!(obj as any).properties || typeof (obj as any).properties !== "object") {
-      (obj as any).properties = {};
-    }
-
-    return { polyObj: obj, polyStr: JSON.stringify(obj) };
-  } catch {
-    return null;
-  }
-}
+import {
+  jsonError,
+  isNonEmptyString,
+  isValidLatLng,
+  parseId,
+  parsePolygon,
+} from "@/lib/utils";
 
 export async function POST(req: Request) {
   try {
@@ -222,7 +155,13 @@ export async function GET(_req: Request) {
       SELECT * FROM destination;
     `);
 
-    return NextResponse.json({ destinations: result.rows }, { status: 200 });
+    const rows = result.rows as Array<Record<string, unknown>>;
+    const destinations = rows.map((row) => {
+      const { is_parking_lot, ...rest } = row;
+      return { ...rest, isParkingLot: is_parking_lot };
+    });
+
+    return NextResponse.json({ destinations }, { status: 200 });
   } catch (err: any) {
     return jsonError("Could not fetch destinations", 500, err?.message ?? err);
   }

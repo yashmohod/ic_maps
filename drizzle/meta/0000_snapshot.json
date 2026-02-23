@@ -1,5 +1,5 @@
 {
-  "id": "bfc0d763-4f45-44ca-9335-83d8142cc892",
+  "id": "4dfea4be-e502-4a34-8c7b-1ccc920feec6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -163,6 +163,13 @@
           "primaryKey": false,
           "notNull": false,
           "default": "''"
+        },
+        "is_parking_lot": {
+          "name": "is_parking_lot",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},

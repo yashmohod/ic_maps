@@ -134,8 +134,9 @@ export const nodeInside = pgTable(
   "node_inside",
   {
     id: serial("id").primaryKey(),
-    nodeOutsideId: integer("node_outside_id")
-      .references(() => nodeOutside.id, { onDelete: "cascade" }),
+    nodeOutsideId: integer("node_outside_id").references(() => nodeOutside.id, {
+      onDelete: "cascade",
+    }),
     parentNodeInsideId: integer("parent_node_inside_id"),
 
     x: doublePrecision("x").notNull(),
@@ -210,7 +211,6 @@ export const nodeOutside = pgTable(
     isStairs: boolean("is_stairs").notNull().default(false),
     isBlueLight: boolean("is_blue_light").notNull().default(false),
 
-
     // PostGIS point: x = lng, y = lat
     location: geometry("location", {
       type: "point",
@@ -263,6 +263,7 @@ export const destination = pgTable("destination", {
   lng: doublePrecision("lng").notNull().default(0),
   name: varchar("name", { length: 256 }).notNull().unique(),
   polygon: text("polygon").default(""),
+  isParkingLot: boolean("is_parking_lot").notNull().default(false),
 });
 
 //routes

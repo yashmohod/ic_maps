@@ -1,5 +1,27 @@
 "use client";
 
+/**
+ * Floorplan Editor Page
+ * ---------------------
+ * This page lets you build and edit indoor floor plans for a chosen destination (building).
+ * It uses React Flow for the canvas: nodes are rooms/floors, doors, stairs, elevators, ramps;
+ * edges are connections (e.g. corridors) between them. Data is persisted via the
+ * /api/destination/floorplan/* APIs.
+ *
+ * How the code is structured:
+ * 1. Types & constants – shapes for API data and React Flow nodes/edges.
+ * 2. Node components – SmallIconNode, RampNode, FloorGroupNode (custom React Flow node UIs).
+ * 3. Helpers – edge styling, node ordering (parent-before-child), insert/move helpers.
+ * 4. FloorPlanContext – provides putNode(id, payload) so nodes can PATCH themselves (resize, ramp angle, etc.).
+ * 5. FloorPlanInner – main state, data loading (destinations, nodes, edges), and all handlers.
+ * 6. Handlers – onConnect (new edge), onNodeDragStop (move/resize + parent change), onAdd* (new node/floor),
+ *    onDelete (remove selection or floor group), onUploadFloorplan (image for a floor).
+ * 7. Bottom map – when a "door" node (linked to an outside node) is selected, shows that door’s lat/lng on a map.
+ *
+ * Data flow: Load destination list → pick destination → load nodes/edges for it → render React Flow.
+ * Changes (add/move/connect/delete) call the API then update local nodes/edges state.
+ */
+
 import {
     createContext,
     useCallback,
@@ -36,6 +58,9 @@ import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 
+// -----------------------------------------------------------------------------
+// Types: React Flow uses string ids; API uses numeric ids. NodeData carries kind and optional link to "outside" (door).
+// -----------------------------------------------------------------------------
 type NodeKind = "generic" | "door" | "stairs" | "elevator" | "ramp";
 type NodeData = {
     label: string;
@@ -45,11 +70,11 @@ type NodeData = {
     isEntry?: boolean;
     isExit?: boolean;
 };
-type AppNode = Node<NodeData>; // includes group + normal nodes
+type AppNode = Node<NodeData>; // includes group nodes (floors) and normal nodes (smallIcon, ramp)
 type AppEdge = Edge;
 type DestinationOption = { id: number; name: string };
 
-/** API node_inside row (camelCase) */
+/** API node_inside row (camelCase) – matches backend schema for one node */
 type ApiNode = {
     id: number;
     nodeOutsideId: number | null;
@@ -78,6 +103,9 @@ type ApiEdge = {
     targetHandle: string | null;
 };
 
+// -----------------------------------------------------------------------------
+// Layout constants: default sizes for floor groups, small nodes, ramps; edge styling.
+// -----------------------------------------------------------------------------
 const BASE_GROUP_WIDTH = 420;
 const BASE_GROUP_HEIGHT = 280;
 const BASE_SMALL_NODE_SIZE = 24;
@@ -88,6 +116,7 @@ const EDGE_Z_INDEX = 10;
 const EDGE_STROKE_DEFAULT = "#475569";
 const EDGE_STROKE_CROSS_FLOOR = "#2563eb";
 
+/** Edge color/thickness: cross-floor edges (different parent) are blue and thicker for visibility. */
 function getEdgeStyle(
     parentOf: (nodeId: string) => string | number | null | undefined,
     sourceId: string,
@@ -101,7 +130,7 @@ function getEdgeStyle(
         : { stroke: EDGE_STROKE_DEFAULT, strokeWidth: 2 };
 }
 
-/** Four connection points: top, right, bottom, left. Each has both source and target handle. */
+/** Four connection points: top, right, bottom, left. Each has both source and target handle so edges can attach from any side. */
 const HANDLE_POSITIONS = [
     { id: "top" as const, position: Position.Top },
     { id: "right" as const, position: Position.Right },
@@ -109,6 +138,7 @@ const HANDLE_POSITIONS = [
     { id: "left" as const, position: Position.Left },
 ];
 
+/** Renders 8 handles (4 source + 4 target) so edges can connect from any of the four sides. */
 function FourHandles() {
     return (
         <>
@@ -120,6 +150,7 @@ function FourHandles() {
     );
 }
 
+/** Base style for floor (group) nodes: size, border, optional background image (uploaded floorplan). */
 const groupNodeStyle = (imageUrl?: string, width = BASE_GROUP_WIDTH, height = BASE_GROUP_HEIGHT) => ({
     width,
     height,
@@ -133,6 +164,7 @@ const groupNodeStyle = (imageUrl?: string, width = BASE_GROUP_WIDTH, height = BA
 
 const ICON_SIZE = 12;
 
+/** Display label, color, and short letter for each node kind (used in legend and small nodes). */
 const NODE_KIND_META: Record<NodeKind, { label: string; color: string; text: string }> = {
     generic: { label: "Generic Node", color: "#60a5fa", text: "N" },
     door: { label: "Door", color: "#34d399", text: "D" },
@@ -141,6 +173,7 @@ const NODE_KIND_META: Record<NodeKind, { label: string; color: string; text: str
     ramp: { label: "Ramp", color: "#8b5cf6", text: "R" },
 };
 
+/** Renders the small icon (circle, door, layers, etc.) for a given node kind. */
 function NodeKindIcon({ kind }: { kind: NodeKind }) {
     const color = "#0f172a";
     const common = { size: ICON_SIZE, color, strokeWidth: 2.5 };
@@ -160,6 +193,7 @@ function NodeKindIcon({ kind }: { kind: NodeKind }) {
     }
 }
 
+/** Inline styles for the circular small nodes (generic, door, stairs, elevator) – color from NODE_KIND_META. */
 function smallNodeStyle(kind: NodeKind): CSSProperties {
     return {
         width: 24,
@@ -183,6 +217,11 @@ const SELECTED_STYLE: CSSProperties = {
     boxShadow: "0 0 0 1px #2563eb",
 };
 
+// -----------------------------------------------------------------------------
+// Node components: custom React Flow node types. Each calls floorPlan.putNode() on resize/drag to persist.
+// -----------------------------------------------------------------------------
+
+/** Generic/door/stairs/elevator node: resizable circle with icon and four handles. Resize end → putNode(width, height, x, y). */
 function SmallIconNode({ id, data, selected }: NodeProps<Node<NodeData>>) {
     const { getNode, setNodes } = useReactFlow();
     const floorPlan = useFloorPlan();
@@ -236,6 +275,7 @@ function SmallIconNode({ id, data, selected }: NodeProps<Node<NodeData>>) {
     );
 }
 
+/** Ramp node: same as small node but with a range slider for incline (0–90°). Resize and incline changes → putNode. */
 function RampNode({ id, data, selected }: NodeProps<Node<NodeData>>) {
     const { getNode, setNodes } = useReactFlow();
     const floorPlan = useFloorPlan();
@@ -330,6 +370,7 @@ function RampNode({ id, data, selected }: NodeProps<Node<NodeData>>) {
     );
 }
 
+/** Floor (group) node: large resizable rectangle, optional background image. Children nodes use parentId so they move with the floor. */
 function FloorGroupNode({ id }: NodeProps<Node<NodeData>>) {
     const { getNode, setNodes } = useReactFlow();
     const floorPlan = useFloorPlan();
@@ -390,6 +431,10 @@ function FloorGroupNode({ id }: NodeProps<Node<NodeData>>) {
     );
 }
 
+// -----------------------------------------------------------------------------
+// Node list helpers: React Flow expects parents to appear before children in the nodes array so dragging a floor moves its children correctly.
+// -----------------------------------------------------------------------------
+
 /** Insert newNode into the list; if it has parentId, place it right after the parent so React Flow keeps parent-before-child order (children move with parent). */
 function insertNodeWithParent<T extends { id: string; parentId?: string }>(
     nodes: T[],
@@ -438,6 +483,9 @@ function moveNodeAfterParent<T extends { id: string }>(
 const initialNodes: AppNode[] = [];
 const initialEdges: AppEdge[] = [];
 
+// -----------------------------------------------------------------------------
+// FloorPlan context: nodes (SmallIconNode, RampNode, FloorGroupNode) call putNode(id, payload) to persist position, size, parent, incline, isEntry, isExit.
+// -----------------------------------------------------------------------------
 type FloorPlanContextValue = {
     putNode: (id: string, payload: Record<string, unknown>) => Promise<void>;
 };
@@ -448,6 +496,7 @@ function useFloorPlan() {
     return ctx;
 }
 
+/** Map API node flags (isStairs, isElevator, isRamp, nodeOutsideId) to our NodeKind for display and node type. */
 function apiNodeToKind(row: ApiNode): NodeKind {
     if (row.isStairs) return "stairs";
     if (row.isElevator) return "elevator";
@@ -456,6 +505,9 @@ function apiNodeToKind(row: ApiNode): NodeKind {
     return "generic";
 }
 
+// -----------------------------------------------------------------------------
+// FloorPlanInner: main component. Holds all state, loads destinations and floorplan data, and wires React Flow to API.
+// -----------------------------------------------------------------------------
 function FloorPlanInner() {
     const [nodes, setNodes, onNodesChange] = useNodesState<AppNode>(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState<AppEdge>(initialEdges);
@@ -472,6 +524,7 @@ function FloorPlanInner() {
     const uploadInputRef = useRef<HTMLInputElement | null>(null);
     const flowContainerRef = useRef<HTMLDivElement | null>(null);
 
+    // Map style (dark/light) and view state; when a door is selected we pan to its outside node lat/lng.
     const { isDark } = useAppTheme();
     const stylePath = isDark
         ? "/styles/osm-bright/style-local-dark.json"
@@ -494,6 +547,7 @@ function FloorPlanInner() {
         }
     }, [selectedOutsideNodePos]);
 
+    // Custom node types for React Flow: ramp, floor (group), smallIcon (generic/door/stairs/elevator).
     const nodeTypes = useMemo(
         () => ({
             ramp: RampNode,
@@ -505,7 +559,7 @@ function FloorPlanInner() {
 
     const rf = useReactFlow();
 
-    /** Flow position at the center of the visible viewport */
+    /** Flow position at the center of the visible viewport (used when adding a node/floor with no selected floor). */
     const getCenterFlowPosition = useCallback((): { x: number; y: number } => {
         const el = flowContainerRef.current;
         if (!el) return { x: 100, y: 300 };
@@ -536,6 +590,11 @@ function FloorPlanInner() {
         [selectedGroupId, nodes, getCenterFlowPosition]
     );
 
+    /**
+     * Persist a single node update to the API (PUT /api/destination/floorplan/nodes) and then update local state.
+     * Payload can include: x, y, width, height, parentNodeInsideId, imageUrl, incline, isEntry, isExit, etc.
+     * Used by: node resize end, drag stop, ramp slider, door entry/exit toggles, floorplan image upload.
+     */
     const putNode = useCallback(
         async (id: string, payload: Record<string, unknown>) => {
             const numId = Number(id);
@@ -593,6 +652,7 @@ function FloorPlanInner() {
         [destinations]
     );
 
+    // Load destination list once on mount (for the Building dropdown).
     useEffect(() => {
         let cancelled = false;
 
@@ -624,7 +684,7 @@ function FloorPlanInner() {
         };
     }, []);
 
-    // Load nodes and edges for the selected destination
+    // When selectedDestinationId changes: fetch nodes and edges for that destination, convert API shape to React Flow shape, sort parents before children.
     useEffect(() => {
         if (selectedDestinationId == null) {
             setNodes([]);
@@ -723,6 +783,7 @@ function FloorPlanInner() {
 
                 setNodes(sortNodesParentBeforeChild(flowNodes));
 
+                // Build edges: map API direction/handles to React Flow edge; style by same-floor vs cross-floor.
                 const apiEdges = (edgesPayload?.edges ?? []) as ApiEdge[];
                 const parentFromApi = (nodeId: string) =>
                     apiNodes.find((n) => String(n.id) === nodeId)?.parentNodeInsideId ?? null;
@@ -756,6 +817,7 @@ function FloorPlanInner() {
         };
     }, [selectedDestinationId, setNodes, setEdges]);
 
+    /** User connects two nodes: POST new edge to API, then add edge to state (or update handle if same source–target already exists). */
     const onConnect = useCallback(
         async (connection: Connection) => {
             if (selectedDestinationId == null) return;
@@ -804,6 +866,7 @@ function FloorPlanInner() {
         [selectedDestinationId, nodes, setEdges]
     );
 
+    /** Double-click an edge: DELETE edge via API and remove from state. */
     const onEdgeDoubleClick = useCallback(
         async (_evt: unknown, edge: AppEdge) => {
             if (selectedDestinationId == null) return;
@@ -818,6 +881,7 @@ function FloorPlanInner() {
         [selectedDestinationId, setEdges]
     );
 
+    /** Wrap React Flow's onNodesChange: when a node is removed, also remove any edges that referenced it. */
     const onNodesChangeWithEdgeCleanup = useCallback(
         (changes: Parameters<typeof onNodesChange>[0]) => {
             const removedIds = new Set(
@@ -838,7 +902,11 @@ function FloorPlanInner() {
         [onNodesChange, setEdges]
     );
 
-    // Drag in/out of floor (group); persist position and parent for persisted nodes.
+    /**
+     * When the user stops dragging a node: compute which floor (if any) it's over; update parentId and position (relative if inside floor);
+     * then persist via putNode (x, y, parentNodeInsideId, width, height). Floor nodes only persist their own position/size.
+     * Uses setTimeout(0) so our parent/position update runs after React Flow's internal onNodesChange.
+     */
     // Defer our update so it runs after React Flow's onNodesChange (position) so we don't get overwritten.
     const onNodeDragStop = useCallback(
         (_evt: unknown, node: AppNode) => {
@@ -962,6 +1030,7 @@ function FloorPlanInner() {
         [rf, setNodes, putNode]
     );
 
+    /** Add a generic small node: POST to nodes API with position (center or selected floor center), then insert into nodes list. */
     const onAddNode = useCallback(async () => {
         if (selectedDestinationId == null) return;
         const { x, y, parentId } = getAddNodePosition(24, 24);
@@ -994,6 +1063,7 @@ function FloorPlanInner() {
         setNodes((nds) => insertNodeWithParent(nds, newNode));
     }, [selectedDestinationId, setNodes, getAddNodePosition]);
 
+    /** Add a new floor (group) node at viewport center; POST with isGroup: true. Then set it as selected group for upload. */
     const onAddGroup = useCallback(async () => {
         if (selectedDestinationId == null) return;
         const position = getCenterFlowPosition();
@@ -1030,6 +1100,7 @@ function FloorPlanInner() {
         setSelectedGroupId(id);
     }, [selectedDestinationId, setNodes, getCenterFlowPosition]);
 
+    /** Open file picker for floorplan image (triggered by "Upload Floorplan" button; uses hidden input). */
     const onPickFloorplan = useCallback(() => {
         if (!selectedDestinationId) {
             window.alert("Select a destination first.");
@@ -1042,6 +1113,7 @@ function FloorPlanInner() {
         uploadInputRef.current?.click();
     }, [selectedDestinationId, selectedGroupId]);
 
+    /** Upload chosen file: POST to floorplan API, then PUT node imageUrl for selected group and update local node style. */
     const onUploadFloorplan = useCallback(
         async (evt: ChangeEvent<HTMLInputElement>) => {
             const file = evt.target.files?.[0];
@@ -1112,6 +1184,7 @@ function FloorPlanInner() {
         [selectedDestinationId, selectedGroupId, setNodes]
     );
 
+    /** Add stairs node (same as Add Node but with isStairs: true and kind "stairs"). */
     const onAddStairs = useCallback(async () => {
         if (selectedDestinationId == null) return;
         const { x, y, parentId } = getAddNodePosition(24, 24);
@@ -1145,6 +1218,7 @@ function FloorPlanInner() {
         setNodes((nds) => insertNodeWithParent(nds, newNode));
     }, [selectedDestinationId, setNodes, getAddNodePosition]);
 
+    /** Add elevator node (same pattern with isElevator: true). */
     const onAddElevator = useCallback(async () => {
         if (selectedDestinationId == null) return;
         const { x, y, parentId } = getAddNodePosition(24, 24);
@@ -1178,6 +1252,7 @@ function FloorPlanInner() {
         setNodes((nds) => insertNodeWithParent(nds, newNode));
     }, [selectedDestinationId, setNodes, getAddNodePosition]);
 
+    /** Add ramp node: larger default size, incline 0, type "ramp". */
     const onAddRamp = useCallback(async () => {
         if (selectedDestinationId == null) return;
         const { x, y, parentId } = getAddNodePosition(88, 40);
@@ -1212,6 +1287,10 @@ function FloorPlanInner() {
         setNodes((nds) => insertNodeWithParent(nds, newNode));
     }, [selectedDestinationId, setNodes, getAddNodePosition]);
 
+    /**
+     * Delete: (1) If nodes/edges are selected on canvas → delete those (door nodes are only unparented, not deleted).
+     * (2) Else if a floor is selected in dropdown → delete that floor and all its non-door children; door children are unparented.
+     */
     const onDelete = useCallback(async () => {
         const groupId =
             selectedGroupId && selectedGroupId !== "None" ? selectedGroupId : null;
@@ -1376,6 +1455,7 @@ function FloorPlanInner() {
         }
     }, [selectedGroupId, nodes, edges, setNodes, setEdges, rf, putNode]);
 
+    /** The single selected node, if it's a door (has nodeOutsideId). Used for Entry/Exit toggles and map marker. */
     const selectedDoorNode = useMemo(() => {
         const sel = nodes.filter((n) => n.selected);
         if (sel.length !== 1) return null;
@@ -1383,7 +1463,7 @@ function FloorPlanInner() {
         return n.data?.nodeOutsideId != null ? n : null;
     }, [nodes]);
 
-    // When a door node (inside node with nodeOutsideId) is selected, fetch its outside node position for the map
+    // When a door node is selected, fetch the corresponding "outside" node's lat/lng from /api/map/node and show it on the bottom map.
     useEffect(() => {
         const outsideId = selectedDoorNode?.data?.nodeOutsideId;
         if (outsideId == null) {
@@ -1419,6 +1499,7 @@ function FloorPlanInner() {
         };
     }, [selectedDoorNode?.data?.nodeOutsideId]);
 
+    // --- UI: toolbar, legend, React Flow canvas, hidden file input, bottom map ---
     return (
         <FloorPlanContext.Provider value={{ putNode }}>
             <div className="flex flex-col h-screen w-full bg-background text-foreground">
@@ -1497,6 +1578,7 @@ function FloorPlanInner() {
                         Delete
                     </button>
                 </div>
+                {/* Door options panel: show when exactly one door node is selected; Entry/Exit checkboxes call putNode. */}
                 {selectedDoorNode && (
                     <div
                         className={`absolute z-20 top-24 right-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 ${panelClass}`}
@@ -1548,6 +1630,7 @@ function FloorPlanInner() {
                 ))}
                 </div>
 
+                {/* connectOnClick: click source then target to create edge. deleteKeyCode: Backspace/Delete remove selected nodes/edges. */}
                 <ReactFlow<AppNode, AppEdge>
                 nodeTypes={nodeTypes}
                 nodes={nodes}

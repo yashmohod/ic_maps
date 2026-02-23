@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
+import { parsePositiveInt } from "@/lib/utils";
 
 export const runtime = "nodejs";
 
@@ -32,13 +33,6 @@ function sanitizeBaseFileName(fileName: string): string {
   const rawBase = path.basename(fileName, path.extname(fileName));
   const safe = rawBase.replace(/[^a-zA-Z0-9_-]/g, "_");
   return safe.length > 0 ? safe.slice(0, 50) : "floorplan";
-}
-
-function parsePositiveInt(raw: FormDataEntryValue | null): number | null {
-  if (typeof raw !== "string") return null;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
 }
 
 export async function POST(req: Request) {

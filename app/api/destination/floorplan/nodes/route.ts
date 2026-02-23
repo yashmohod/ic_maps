@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { jsonError, parseId } from "@/lib/utils";
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
+import { isFiniteNumber, jsonError, parseId } from "@/lib/utils";
 
 export async function GET(req: Request) {
   try {

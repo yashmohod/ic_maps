@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
-
-const includeDetail = process.env.NODE_ENV !== "production";
+import { jsonError, parseBoolean, parseId } from "@/lib/utils";
 
 const navModeColumnMap = {
   isPedestrian: "is_pedestrian",
@@ -10,37 +9,9 @@ const navModeColumnMap = {
   isElevator: "is_elevator",
   isStairs: "is_stairs",
   isBlueLight: "is_blue_light",
-  // Backward compatible aliases.
   isBluelight: "is_blue_light",
   is_blue_light: "is_blue_light",
 } as const;
-
-function jsonError(message: string, status: number, detail?: unknown) {
-  return NextResponse.json(
-    {
-      error: message,
-      ...(includeDetail && detail != null ? { detail: String(detail) } : {}),
-    },
-    { status },
-  );
-}
-
-function parseId(id: unknown): number | null {
-  const n = typeof id === "number" ? id : Number(id);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
-
-function parseBoolean(v: unknown): boolean | null {
-  if (typeof v === "boolean") return v;
-  if (typeof v === "number" && (v === 0 || v === 1)) return Boolean(v);
-  if (typeof v === "string") {
-    const s = v.trim().toLowerCase();
-    if (s === "true") return true;
-    if (s === "false") return false;
-  }
-  return null;
-}
 
 export async function POST(req: Request) {
   try {

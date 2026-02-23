@@ -3,30 +3,43 @@
 import React, { useMemo, useEffect, useRef } from "react";
 import { Source, Layer } from "@vis.gl/react-maplibre";
 import type { LayerProps } from "@vis.gl/react-maplibre";
-import { getAllMapFeature, getAllMapFeaturesNavMode } from "@/lib/icmapsApi";
 import { useAppTheme } from "@/hooks/use-app-theme";
+import apiClient from "@/lib/apiClient";
+import toast from "react-hot-toast";
 
 /** -------- Types -------- */
-
-export type MarkerNode = {
-  id: string | number;
+type MarkerNode = {
+  id: number;
   lng: number;
   lat: number;
+  isBlueLight: boolean;
+  isPedestrian: boolean;
+  isVehicular: boolean;
+  isStairs: boolean;
+  isElevator: boolean;
 };
 
-export type EdgeIndexEntry = {
-  key: string;
-  from: string | number;
-  to: string | number;
+type EdgeIndexEntry = {
+  id: number;
+  from: number;
+  to: number;
+  biDirectional: boolean;
+  incline: number;
 };
+type NavMode = {
+  id: number;
+  name: string;
+  param: string;
+}
+
 
 type FeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry, any>;
 
 type Props = {
   path: Set<string>;
-  navMode: string | number | null;
+  navModes: NavMode[];
+  curNavMode: number;
   markers: MarkerNode[];
-  setMarkers: React.Dispatch<React.SetStateAction<MarkerNode[]>>;
   edgeIndex: EdgeIndexEntry[];
   setEdgeIndex: React.Dispatch<React.SetStateAction<EdgeIndexEntry[]>>;
   showBaseGraph?: boolean;
@@ -39,42 +52,42 @@ type CachedFeatures = {
 
 export default function NavMode({
   path,
-  navMode,
+  navModes,
+  curNavMode,
   markers,
-  setMarkers,
   edgeIndex,
   setEdgeIndex,
   showBaseGraph = true,
 }: Props) {
   const { isDark } = useAppTheme();
-  const featureCacheRef = useRef<Map<string, CachedFeatures>>(new Map());
+  const featureCacheRef = useRef<Map<number, CachedFeatures>>(new Map());
 
   function isInPath(id: string | number) {
     return path.has(String(id));
   }
 
+
   const edgesGeoJSON = useMemo<FeatureCollection>(() => {
-    const coord = new Map<string, [number, number]>(
-      markers.map((m) => [String(m.id), [m.lng, m.lat]]),
-    );
 
     const features: GeoJSON.Feature[] = edgeIndex
-      .map(({ key, from, to }) => {
-        const a = coord.get(String(from));
-        const b = coord.get(String(to));
+      .map(({ id, from, to }) => {
+        const a = markers.find((cur) => cur.id === from);
+        const b = markers.find((cur) => cur.id === to);
         if (!a || !b) return null;
-
+        if (!Boolean(a[navModes[curNavMode].param as keyof MarkerNode]) || !Boolean(b[navModes[curNavMode].param as keyof MarkerNode])) {
+          return null;
+        }
         return {
           type: "Feature",
           properties: {
-            key: String(key),
+            key: String(id),
             from: String(from),
             to: String(to),
-            path: isInPath(key), // key can be string|number, isInPath handles it
+            path: isInPath(id), // key can be string|number, isInPath handles it
           },
           geometry: {
             type: "LineString",
-            coordinates: [a, b],
+            coordinates: [[a.lng, a.lat], [b.lng, b.lat]],
           },
         } as GeoJSON.Feature;
       })
@@ -84,7 +97,7 @@ export default function NavMode({
       type: "FeatureCollection",
       features,
     };
-  }, [markers, edgeIndex, path]);
+  }, [markers, edgeIndex, path, curNavMode]);
 
   const lineLayer = useMemo<LayerProps>(
     () => ({
@@ -111,46 +124,8 @@ export default function NavMode({
     [isDark],
   );
 
-  useEffect(() => {
-    let isActive = true;
-    const cacheKey = String(navMode ?? "default");
 
-    async function loadFeatures() {
-      const cached = featureCacheRef.current.get(cacheKey);
-      if (cached) {
-        setMarkers(cached.nodes ?? []);
-        setEdgeIndex(cached.edges ?? []);
-        return;
-      }
 
-      try {
-        const resp =
-          navMode != null
-            ? await getAllMapFeaturesNavMode(navMode)
-            : await getAllMapFeature();
-
-        // Support axios-style {data} OR fetch-style direct JSON
-        const data: CachedFeatures =
-          (resp as any)?.data ?? (resp as any) ?? ({} as CachedFeatures);
-
-        featureCacheRef.current.set(cacheKey, data);
-        if (!isActive) return;
-
-        setMarkers(data.nodes ?? []);
-        setEdgeIndex(data.edges ?? []);
-      } catch (err) {
-        console.error("Failed to load nav mode features", err);
-        if (!isActive) return;
-        setMarkers([]);
-        setEdgeIndex([]);
-      }
-    }
-
-    loadFeatures();
-    return () => {
-      isActive = false;
-    };
-  }, [navMode, setMarkers, setEdgeIndex]);
 
   if (!showBaseGraph) return null;
 

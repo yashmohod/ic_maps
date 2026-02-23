@@ -65,6 +65,7 @@ type Destination = {
   lat: number;
   lng: number;
   polygon: string; // JSON string of a GeoJSON Feature
+  isParkingLot: boolean;
 };
 
 

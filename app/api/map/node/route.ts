@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { EdgeOutside, NodeOutside } from "@/db/schema";
 import { calcDistance } from "@/lib/navigation";
-import { jsonError,isFiniteNumber,isValidLatLng,parseId } from "@/lib/utils";
+import { jsonError, isValidLatLng, parseId } from "@/lib/utils";
 
 
 

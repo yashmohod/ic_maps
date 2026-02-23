@@ -20,6 +20,7 @@ CREATE TABLE "destination" (
 	"lng" double precision DEFAULT 0 NOT NULL,
 	"name" varchar(256) NOT NULL,
 	"polygon" text DEFAULT '',
+	"is_parking_lot" boolean DEFAULT false NOT NULL,
 	CONSTRAINT "destination_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint

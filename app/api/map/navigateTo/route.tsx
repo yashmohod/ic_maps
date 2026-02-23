@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
+import { jsonError } from "@/lib/utils";
 
-const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => null);
+    if (!body) return jsonError("Invalid JSON body", 400);
 
-export async function GET(req: Request) {
-  const qs = new URL(req.url).search;
-  const res = await fetch(`${BACKEND}/map/navigateTo${qs}`);
+    const { destId, lat, lng, navMode } = body as { destId: number, lat: number; lng: number, navMode: number };
 
-  const text = await res.text();
-  return new NextResponse(text, {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
+
+
+  } catch (err: any) {
+    jsonError("Could not find a route!", 500, err?.message ?? err);
+  }
+
 }
