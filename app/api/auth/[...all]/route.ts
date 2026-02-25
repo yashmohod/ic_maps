@@ -1,4 +1,16 @@
-import { auth } from "@/lib/auth"; // path to your auth file
-import { toNextJsHandler } from "better-auth/next-js";
+import { NextResponse } from "next/server";
 
-export const { POST, GET } = toNextJsHandler(auth);
+function disabled() {
+  return NextResponse.json(
+    { error: "Better Auth endpoint disabled for Java-backend mode." },
+    { status: 410 },
+  );
+}
+
+export async function GET() {
+  return disabled();
+}
+
+export async function POST() {
+  return disabled();
+}
