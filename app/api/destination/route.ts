@@ -22,7 +22,11 @@ export async function POST(req: Request) {
     };
 
     if (!isNonEmptyString(name, 256)) {
-      return jsonError("Invalid name", 400, "name must be a non-empty string (<=256 chars)");
+      return jsonError(
+        "Invalid name",
+        400,
+        "name must be a non-empty string (<=256 chars)",
+      );
     }
     if (!isValidLatLng(lat, lng)) {
       return jsonError("Invalid lat/lng", 400);
@@ -30,7 +34,11 @@ export async function POST(req: Request) {
 
     const parsed = parsePolygon(polygon);
     if (!parsed) {
-      return jsonError("Invalid polygon", 400, "polygon must be valid JSON (string or object)");
+      return jsonError(
+        "Invalid polygon",
+        400,
+        "polygon must be valid JSON (string or object)",
+      );
     }
 
     // Insert first (polygon will be updated with destId/name in properties)
@@ -72,19 +80,25 @@ export async function PUT(req: Request) {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
-    const { id, name, lat, lng, polygon } = body as {
+    const { id, name, lat, lng, polygon, openTime, closeTime } = body as {
       id: unknown;
       name: unknown;
       lat: unknown;
       lng: unknown;
       polygon: unknown;
+      openTime: unknown;
+      closeTime: unknown;
     };
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
 
     if (!isNonEmptyString(name, 256)) {
-      return jsonError("Invalid name", 400, "name must be a non-empty string (<=256 chars)");
+      return jsonError(
+        "Invalid name",
+        400,
+        "name must be a non-empty string (<=256 chars)",
+      );
     }
     if (!isValidLatLng(lat, lng)) {
       return jsonError("Invalid lat/lng", 400);
@@ -92,7 +106,11 @@ export async function PUT(req: Request) {
 
     const parsed = parsePolygon(polygon);
     if (!parsed) {
-      return jsonError("Invalid polygon", 400, "polygon must be valid JSON (string or object)");
+      return jsonError(
+        "Invalid polygon",
+        400,
+        "polygon must be valid JSON (string or object)",
+      );
     }
 
     // Keep polygon properties consistent
@@ -104,12 +122,31 @@ export async function PUT(req: Request) {
     };
     const polyWithProps = JSON.stringify(polyObj);
 
+    const openTimeStr =
+      openTime != null &&
+      typeof openTime === "string" &&
+      /^\d{1,2}:\d{2}(:\d{2})?$/.test(openTime)
+        ? openTime.length === 5
+          ? `${openTime}:00`
+          : openTime
+        : "00:00:00";
+    const closeTimeStr =
+      closeTime != null &&
+      typeof closeTime === "string" &&
+      /^\d{1,2}:\d{2}(:\d{2})?$/.test(closeTime)
+        ? closeTime.length === 5
+          ? `${closeTime}:00`
+          : closeTime
+        : "23:59:59";
+
     const result = await db.execute(sql`
       UPDATE destination
       SET name = ${name},
           lat = ${lat as number},
           lng = ${lng as number},
-          polygon = ${polyWithProps}
+          polygon = ${polyWithProps},
+          open_time = ${openTimeStr},
+          close_time = ${closeTimeStr}
       WHERE id = ${nid}
       RETURNING id;
     `);
@@ -157,8 +194,17 @@ export async function GET(_req: Request) {
 
     const rows = result.rows as Array<Record<string, unknown>>;
     const destinations = rows.map((row) => {
-      const { is_parking_lot, ...rest } = row;
-      return { ...rest, isParkingLot: is_parking_lot };
+      const { is_parking_lot, open_time, close_time, ...rest } = row;
+      const openStr =
+        open_time != null ? String(open_time).slice(0, 8) : "00:00:00";
+      const closeStr =
+        close_time != null ? String(close_time).slice(0, 8) : "23:59:59";
+      return {
+        ...rest,
+        isParkingLot: is_parking_lot,
+        openTime: openStr,
+        closeTime: closeStr,
+      };
     });
 
     return NextResponse.json({ destinations }, { status: 200 });

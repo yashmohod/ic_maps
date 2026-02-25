@@ -48,6 +48,8 @@ export type BuildingRow = {
   lng: number;
   polygon: string; // JSON string of a GeoJSON Feature
   isParkingLot: boolean;
+  openTime: string;
+  closeTime: string;
 };
 
 type DrawEvent = {
@@ -137,6 +139,8 @@ export default function BuildingEditor(): JSX.Element {
       lng: -1,
       polygon: "", // JSON string of a GeoJSON Feature
       isParkingLot: false,
+      openTime: "00:00:00",
+      closeTime: "23:59:59",
     }
   );
 
@@ -195,6 +199,10 @@ export default function BuildingEditor(): JSX.Element {
 
     setCurrentBuilding((prev) => {
       prev.isParkingLot = v;
+      if (v) {
+        prev.openTime = "00:00:00";
+        prev.closeTime = "23:59:59";
+      }
       return prev;
     })
   }
@@ -217,8 +225,9 @@ export default function BuildingEditor(): JSX.Element {
       lng: -1,
       polygon: "", // JSON string of a GeoJSON Feature
       isParkingLot: false,
+      openTime: "00:00:00",
+      closeTime: "23:59:59",
     });
-
   }, []);
 
   const onCreate = useCallback(async (e: DrawEvent, draw?: any) => {
@@ -267,13 +276,13 @@ export default function BuildingEditor(): JSX.Element {
     setBuildings((prev) => {
       const newList: BuildingRow[] = [
         ...prev,
-        { id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false },
+        { id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" },
       ];
       buildingsRef.current = newList;
       return newList;
     });
     // loadDestinations();
-    setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false });
+    setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" });
 
   }, []);
 
@@ -345,6 +354,7 @@ export default function BuildingEditor(): JSX.Element {
   const buildingInfoSave = async () => {
     if (!currentBuilding.id) return toast.error("Select a building first.");
     let curBuildingCopy = currentBuilding;
+    console.log(curBuildingCopy)
     const resp: any = await apiClient.put("/api/destination", { ...curBuildingCopy })
     if (resp) {
       toast.success("Name Updated!");

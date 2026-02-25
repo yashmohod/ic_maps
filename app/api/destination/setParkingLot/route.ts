@@ -10,12 +10,21 @@ export async function POST(req: Request) {
     const { id, isParkingLot } = body as { id: unknown; isParkingLot: boolean };
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
-    const result = await db.execute(sql`
-        UPDATE destination
-        SET
-        is_parking_lot=${isParkingLot}
-        WHERE id=${nid};
+
+    const result = isParkingLot
+      ? await db.execute(sql`
+          UPDATE destination
+          SET is_parking_lot = true,
+              open_time = ${"00:00:00"},
+              close_time = ${"23:59:59"}
+          WHERE id = ${nid};
+        `)
+      : await db.execute(sql`
+          UPDATE destination
+          SET is_parking_lot = false
+          WHERE id = ${nid};
         `);
+
     if (result.rowCount === 0) return jsonError("DB did not update", 400);
 
     return NextResponse.json({}, { status: 200 });

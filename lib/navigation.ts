@@ -8,12 +8,14 @@ import {
   type NodeInside,
   type EdgeInside,
 } from "@/db/schema"; // adapt to your schema
+import { MinHeap } from "./minHeap";
 
+/** Closest outdoor node to a (lat, lng) point (for outdoor routing). */
 export async function closestNode(lat: number, lng: number) {
   const result = await db.execute(
     sql<{
       id: number;
-    }>`SELECT id FROM node ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1;`,
+    }>`SELECT id FROM node_outside ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
   );
   return result.rows[0]?.id ?? -1;
 }
@@ -40,6 +42,16 @@ export function calcDistance(
 
   return R * c;
 }
+
+function heuristic(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  return Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lng1 - lng2, 2));
+}
+
 ///////////////////////////////// --  Graph -- ////////////////////////////////////////
 
 export type Graph = {
@@ -179,13 +191,116 @@ export async function reloadGraph(): Promise<Graph> {
   return g;
 }
 
-/**
- * Example “incremental” update helper (optional).
- * Use this only if you really want immediate in-memory changes without full rebuild.
- */
-export function addNodeToGraphInMemory(node: Node) {
-  if (!store.graph) throw new Error("Graph not loaded yet");
-  store.graph.nodes.set(node.id, node);
-  if (!store.graph.adj.has(node.id)) store.graph.adj.set(node.id, []);
-  store.graph.version += 1;
+export async function navigate(
+  start: number,
+  destinationId: number,
+  navConditions: string[],
+) {
+  const graph = await getGraph();
+  const startNode = graph.nodesOutside.get(start) as NodeOutside;
+  const endNodes = await db
+    .execute(
+      sql`SELECT node_outside_id AS FROM destination_node WHERE destination_id = ${destinationId}`,
+    )
+    .then((res) => {
+      return new Set(res.rows.map((row) => row.id as number));
+    });
+  const destniationPos = await db
+    .execute(sql`SELECT lng,lat FROM destination WHERE id=${destinationId};`)
+    .then((res) => res.rows[0] as { lng: number; lat: number });
+  if (!startNode || !endNodes) {
+    throw new Error("Start or end node not found");
+  }
+  const pathTree: Map<number, number> | null = await aStar(
+    graph,
+    startNode.id,
+    destniationPos,
+    endNodes,
+    navConditions,
+  );
+
+  if (!pathTree) return null;
+  let pathStart: null | number = null;
+  for (const endnode of endNodes) {
+    if (pathTree.has(endnode)) {
+      pathStart = endnode;
+      break;
+    }
+  }
+  if (!pathStart) return null;
+  const path: number[] = [];
+  while (pathStart !== start) {
+    path.push(pathStart);
+    pathStart = pathTree.get(pathStart)!;
+  }
+  path.push(start);
+  return path;
+}
+
+type AStarNode = { f: number; g: number; id: number };
+
+async function aStar(
+  graph: Graph,
+  startNode: number,
+  destinaitonPos: { lat: number; lng: number },
+  endNodes: Set<number>,
+  navConditions: string[],
+) {
+  const pathTree = new Map<number, number>();
+  const gScore = new Map<number, number>();
+  gScore.set(startNode, 0);
+  const openSet = new MinHeap<AStarNode>((a, b) => a.f - b.f);
+
+  const startPos = graph.nodesOutside.get(startNode);
+  if (!startPos) return null;
+  const h0 = heuristic(
+    startPos.lat,
+    startPos.lng,
+    destinaitonPos.lat,
+    destinaitonPos.lng,
+  );
+  openSet.add({ f: h0, g: 0, id: startNode });
+
+  while (openSet.size() > 0) {
+    const cur = openSet.remove();
+    if (!cur) continue;
+    const curNode = graph.nodesOutside.get(cur.id);
+    if (!curNode) continue;
+    if (endNodes.has(cur.id)) {
+      return pathTree;
+    }
+
+    const neighbors = graph.adjOutside.get(cur.id);
+    if (!neighbors) continue;
+
+    for (const neighbor of neighbors) {
+      const neighborNode = graph.nodesOutside.get(neighbor.to);
+      if (!neighborNode) continue;
+
+      let check = true;
+      for (const condition of navConditions) {
+        const key = condition as keyof NodeOutside;
+        if (key in neighborNode) {
+          check = Boolean(neighborNode[key]) && check;
+        }
+      }
+      if (!check) continue;
+
+      const gNew = cur.g + neighbor.distance;
+      const bestG = gScore.get(neighbor.to);
+      if (bestG !== undefined && gNew >= bestG) continue;
+
+      pathTree.set(neighbor.to, cur.id);
+      gScore.set(neighbor.to, gNew);
+      const h = heuristic(
+        neighborNode.lat,
+        neighborNode.lng,
+        destinaitonPos.lat,
+        destinaitonPos.lng,
+      );
+      openSet.add({ f: gNew + h, g: gNew, id: neighbor.to });
+    }
+  }
+
+  return null;
 }

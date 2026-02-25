@@ -64,6 +64,33 @@ function EditPanel({
           </Field>
         </FieldGroup>
       </div>
+
+      {!currentBuilding.isParkingLot && currentBuilding.id >= 0 && (
+        <div className="flex flex-col gap-2 w-full">
+          <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+            <FieldLabel className="text-sm shrink-0">Open</FieldLabel>
+            <Input
+              type="time"
+              value={(currentBuilding.openTime ?? "00:00:00").slice(0, 5)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCurrentBuilding((prev) => ({ ...prev, openTime: v ? `${v}:00` : "00:00:00" }));
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+            <FieldLabel className="text-sm shrink-0">Close</FieldLabel>
+            <Input
+              type="time"
+              value={(currentBuilding.closeTime ?? "23:59:59").slice(0, 5)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCurrentBuilding((prev) => ({ ...prev, closeTime: v ? `${v}:00` : "23:59:59" }));
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

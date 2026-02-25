@@ -21,6 +21,8 @@ CREATE TABLE "destination" (
 	"name" varchar(256) NOT NULL,
 	"polygon" text DEFAULT '',
 	"is_parking_lot" boolean DEFAULT false NOT NULL,
+	"open_time" time(6) with time zone DEFAULT '00:00:00' NOT NULL,
+	"close_time" time(6) with time zone DEFAULT '23:59:59' NOT NULL,
 	CONSTRAINT "destination_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint

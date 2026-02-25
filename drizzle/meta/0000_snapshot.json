@@ -1,5 +1,5 @@
 {
-  "id": "b935bc19-dab9-4317-b70a-b8f4be01a682",
+  "id": "8f003690-0018-406c-834c-c53cc8b197bf",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -170,6 +170,20 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "open_time": {
+          "name": "open_time",
+          "type": "time(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'00:00:00'"
+        },
+        "close_time": {
+          "name": "close_time",
+          "type": "time(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'23:59:59'"
         }
       },
       "indexes": {},

@@ -13,7 +13,9 @@ import {
   unique,
   primaryKey,
   foreignKey,
+  time,
 } from "drizzle-orm/pg-core";
+import { config } from "process";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -264,6 +266,12 @@ export const destination = pgTable("destination", {
   name: varchar("name", { length: 256 }).notNull().unique(),
   polygon: text("polygon").default(""),
   isParkingLot: boolean("is_parking_lot").notNull().default(false),
+  openTime: time("open_time", { precision: 6, withTimezone: true })
+    .notNull()
+    .default("00:00:00"),
+  closeTime: time("close_time", { precision: 6, withTimezone: true })
+    .notNull()
+    .default("23:59:59"),
 });
 
 //routes
