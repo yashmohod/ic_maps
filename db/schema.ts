@@ -15,8 +15,6 @@ import {
   foreignKey,
   time,
 } from "drizzle-orm/pg-core";
-import { config } from "process";
-
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
 
@@ -136,33 +134,33 @@ export const nodeInside = pgTable(
   "node_inside",
   {
     id: serial("id").primaryKey(),
-    nodeOutsideId: integer("node_outside_id").references(() => nodeOutside.id, {
+    node_outside_id: integer("node_outside_id").references(() => nodeOutside.id, {
       onDelete: "cascade",
     }),
-    parentNodeInsideId: integer("parent_node_inside_id"),
+    parent_node_inside_id: integer("parent_node_inside_id"),
 
     x: doublePrecision("x").notNull(),
     y: doublePrecision("y").notNull(),
-    isEntry: boolean("is_entry").notNull().default(false),
-    isExit: boolean("is_exit").notNull().default(false),
-    isElevator: boolean("is_elevator").notNull().default(false),
-    isStairs: boolean("is_stairs").notNull().default(false),
-    isRamp: boolean("is_ramp").notNull().default(false),
-    isGroup: boolean("is_group").notNull().default(false),
-    imageUrl: text("image_url"),
+    is_entry: boolean("is_entry").notNull().default(false),
+    is_exit: boolean("is_exit").notNull().default(false),
+    is_elevator: boolean("is_elevator").notNull().default(false),
+    is_stairs: boolean("is_stairs").notNull().default(false),
+    is_ramp: boolean("is_ramp").notNull().default(false),
+    is_group: boolean("is_group").notNull().default(false),
+    image_url: text("image_url"),
     incline: doublePrecision("incline"),
     width: doublePrecision("width"),
     height: doublePrecision("height"),
 
-    destinationId: integer("destination_id")
+    destination_id: integer("destination_id")
       .notNull()
       .references(() => destination.id, { onDelete: "cascade" }),
   },
   (t) => [
-    index("node_inside_destination_id_idx").on(t.destinationId),
-    index("node_inside_parent_idx").on(t.parentNodeInsideId),
+    index("node_inside_destination_id_idx").on(t.destination_id),
+    index("node_inside_parent_idx").on(t.parent_node_inside_id),
     foreignKey({
-      columns: [t.parentNodeInsideId],
+      columns: [t.parent_node_inside_id],
       foreignColumns: [t.id],
       name: "node_inside_parent_fk",
     }).onDelete("set null"),
@@ -174,27 +172,27 @@ export const edgeInside = pgTable(
   "edge_inside",
   {
     id: serial("id").primaryKey(),
-    nodeAId: integer("node_a_id") // min
+    node_a_id: integer("node_a_id") // min
       .notNull()
       .references(() => nodeInside.id, { onDelete: "cascade" }),
-    nodeBId: integer("node_b_id") // max
+    node_b_id: integer("node_b_id") // max
       .notNull()
       .references(() => nodeInside.id, { onDelete: "cascade" }),
 
-    biDirectional: boolean("bi_directional").notNull().default(true),
+    bi_directional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
-    sourceHandle: text("source_handle"), // which handle on source node: top | right | bottom | left
-    targetHandle: text("target_handle"), // which handle on target node
+    source_handle: text("source_handle"), // which handle on source node: top | right | bottom | left
+    target_handle: text("target_handle"), // which handle on target node
 
-    destinationId: integer("destination_id")
+    destination_id: integer("destination_id")
       .notNull()
       .references(() => destination.id, { onDelete: "cascade" }),
   },
   (t) => [
-    unique("edge_inside_pair_unique").on(t.nodeAId, t.nodeBId),
-    index("idx_edge_inside_a").on(t.nodeAId),
-    index("idx_edge_inside_b").on(t.nodeBId),
-    index("edge_inside_destination_id_idx").on(t.destinationId),
+    unique("edge_inside_pair_unique").on(t.node_a_id, t.node_b_id),
+    index("idx_edge_inside_a").on(t.node_a_id),
+    index("idx_edge_inside_b").on(t.node_b_id),
+    index("edge_inside_destination_id_idx").on(t.destination_id),
   ],
 );
 
@@ -207,11 +205,11 @@ export const nodeOutside = pgTable(
     lng: doublePrecision("lng").notNull(),
 
     // nav mode
-    isPedestrian: boolean("is_pedestrian").notNull().default(false),
-    isVehicular: boolean("is_vehicular").notNull().default(false),
-    isElevator: boolean("is_elevator").notNull().default(false),
-    isStairs: boolean("is_stairs").notNull().default(false),
-    isBlueLight: boolean("is_blue_light").notNull().default(false),
+    is_pedestrian: boolean("is_pedestrian").notNull().default(false),
+    is_vehicular: boolean("is_vehicular").notNull().default(false),
+    is_elevator: boolean("is_elevator").notNull().default(false),
+    is_stairs: boolean("is_stairs").notNull().default(false),
+    is_blue_light: boolean("is_blue_light").notNull().default(false),
 
     // PostGIS point: x = lng, y = lat
     location: geometry("location", {
@@ -231,23 +229,23 @@ export const edgeOutside = pgTable(
   "edge_outside",
   {
     id: serial("id").primaryKey(),
-    nodeAId: integer("node_a_id") // min
+    node_a_id: integer("node_a_id") // min
       .notNull()
       .references(() => nodeOutside.id, { onDelete: "cascade" }),
-    nodeBId: integer("node_b_id") // max
+    node_b_id: integer("node_b_id") // max
       .notNull()
       .references(() => nodeOutside.id, { onDelete: "cascade" }),
 
     // direction
-    biDirectional: boolean("bi_directional").notNull().default(true),
+    bi_directional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
     distance: doublePrecision("distance").notNull(), // meters
     incline: doublePrecision("incline").notNull().default(0), // meters
   },
   (t) => [
-    unique("edge_outside_pair_unique").on(t.nodeAId, t.nodeBId),
-    index("idx_edge_outside_a").on(t.nodeAId),
-    index("idx_edge_outside_b").on(t.nodeBId),
+    unique("edge_outside_pair_unique").on(t.node_a_id, t.node_b_id),
+    index("idx_edge_outside_a").on(t.node_a_id),
+    index("idx_edge_outside_b").on(t.node_b_id),
   ],
 );
 
@@ -255,7 +253,7 @@ export const edgeOutside = pgTable(
 export const navMode = pgTable("nav_mode", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 256 }).notNull().unique(),
-  throughBuilding: boolean("through_building").notNull().default(false),
+  through_building: boolean("through_building").notNull().default(false),
 });
 
 //buildings
@@ -265,11 +263,11 @@ export const destination = pgTable("destination", {
   lng: doublePrecision("lng").notNull().default(0),
   name: varchar("name", { length: 256 }).notNull().unique(),
   polygon: text("polygon").default(""),
-  isParkingLot: boolean("is_parking_lot").notNull().default(false),
-  openTime: time("open_time", { precision: 6, withTimezone: true })
+  is_parking_lot: boolean("is_parking_lot").notNull().default(false),
+  open_time: time("open_time", { precision: 6, withTimezone: true })
     .notNull()
     .default("00:00:00"),
-  closeTime: time("close_time", { precision: 6, withTimezone: true })
+  close_time: time("close_time", { precision: 6, withTimezone: true })
     .notNull()
     .default("23:59:59"),
 });
@@ -279,33 +277,33 @@ export const route = pgTable(
   "route",
   {
     id: serial("id").primaryKey(),
-    destinationId: integer("destination_id")
+    destination_id: integer("destination_id")
       .notNull()
       .references(() => destination.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 256 }).notNull(),
-    userId: text("user_id")
+    user_id: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     description: text("description"),
   },
-  (t) => [unique("route_user_name_unique").on(t.userId, t.name)],
+  (t) => [unique("route_user_name_unique").on(t.user_id, t.name)],
 );
 
 //join table: destination <-> nodes
 export const destinationNode = pgTable(
   "destination_node",
   {
-    destinationId: integer("destination_id")
+    destination_id: integer("destination_id")
       .notNull()
       .references(() => destination.id, { onDelete: "cascade" }),
-    nodeOutsideId: integer("node_outside_id")
+    node_outside_id: integer("node_outside_id")
       .notNull()
       .references(() => nodeOutside.id, { onDelete: "cascade" }),
   },
   (t) => [
-    primaryKey({ columns: [t.destinationId, t.nodeOutsideId] }),
-    index("destination_node_destination_id_idx").on(t.destinationId),
-    index("destination_node_node_outside_id_idx").on(t.nodeOutsideId),
+    primaryKey({ columns: [t.destination_id, t.node_outside_id] }),
+    index("destination_node_destination_id_idx").on(t.destination_id),
+    index("destination_node_node_outside_id_idx").on(t.node_outside_id),
   ],
 );
 

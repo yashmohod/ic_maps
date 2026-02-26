@@ -6,7 +6,7 @@ import type { LayerProps } from "@vis.gl/react-maplibre";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import apiClient from "@/lib/apiClient";
 import toast from "react-hot-toast";
-
+import type { NavConditions } from "@/lib/navigation";
 /** -------- Types -------- */
 type MarkerNode = {
   id: number;
@@ -36,9 +36,8 @@ type NavMode = {
 type FeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry, any>;
 
 type Props = {
-  path: Set<string>;
-  navModes: NavMode[];
-  curNavMode: number;
+  path: Set<number>;
+  curNavConditions: NavConditions;
   markers: MarkerNode[];
   edgeIndex: EdgeIndexEntry[];
   setEdgeIndex: React.Dispatch<React.SetStateAction<EdgeIndexEntry[]>>;
@@ -52,8 +51,7 @@ type CachedFeatures = {
 
 export default function NavMode({
   path,
-  navModes,
-  curNavMode,
+  curNavConditions,
   markers,
   edgeIndex,
   setEdgeIndex,
@@ -62,8 +60,8 @@ export default function NavMode({
   const { isDark } = useAppTheme();
   const featureCacheRef = useRef<Map<number, CachedFeatures>>(new Map());
 
-  function isInPath(id: string | number) {
-    return path.has(String(id));
+  function isInPath(id: number) {
+    return path.has(id);
   }
 
 
@@ -74,9 +72,17 @@ export default function NavMode({
         const a = markers.find((cur) => cur.id === from);
         const b = markers.find((cur) => cur.id === to);
         if (!a || !b) return null;
-        if (!Boolean(a[navModes[curNavMode].param as keyof MarkerNode]) || !Boolean(b[navModes[curNavMode].param as keyof MarkerNode])) {
-          return null;
+        if (curNavConditions.is_pedestrian) {
+          if (!a.isPedestrian || !b.isPedestrian) {
+            return null;
+          }
         }
+        if (curNavConditions.is_vehicular) {
+          if (!a.isVehicular || !b.isVehicular) {
+            return null;
+          }
+        }
+        console.log(isInPath(id), id)
         return {
           type: "Feature",
           properties: {
@@ -97,7 +103,7 @@ export default function NavMode({
       type: "FeatureCollection",
       features,
     };
-  }, [markers, edgeIndex, path, curNavMode]);
+  }, [markers, edgeIndex, path, curNavConditions]);
 
   const lineLayer = useMemo<LayerProps>(
     () => ({

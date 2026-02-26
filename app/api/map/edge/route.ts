@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
-import { EdgeOutside, NodeOutside } from "@/db/schema";
-import { calcDistance } from "@/lib/navigation";
+import { calcDistance } from "@/lib/utils";
 import { jsonError, parseId } from "@/lib/utils";
 
 export async function POST(req: Request) {
@@ -27,11 +26,15 @@ export async function POST(req: Request) {
 
     // distance
     const [resA, resB] = await Promise.all([
-      db.execute(sql`SELECT * FROM node_outside WHERE id = ${a}`),
-      db.execute(sql`SELECT * FROM node_outside WHERE id = ${b}`),
+      db.execute(sql<{ lat: number; lng: number }>`
+        SELECT lat, lng FROM node_outside WHERE id = ${a}
+      `),
+      db.execute(sql<{ lat: number; lng: number }>`
+        SELECT lat, lng FROM node_outside WHERE id = ${b}
+      `),
     ]);
-    const nodeA = (resA.rows[0] as NodeOutside | undefined) ?? null;
-    const nodeB = (resB.rows[0] as NodeOutside | undefined) ?? null;
+    const nodeA = resA.rows[0] as { lat: number; lng: number } | undefined;
+    const nodeB = resB.rows[0] as { lat: number; lng: number } | undefined;
 
     const distance = calcDistance(
       nodeA?.lat ?? 0,
@@ -53,8 +56,9 @@ export async function POST(req: Request) {
     const ff = direction ? a : b;
     const tt = direction ? b : a;
     return NextResponse.json({ id: inserted.id, a:ff, b:tt }, { status: 201 });
-  } catch (err: any) {
-    return jsonError("Insert failed", 500, err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Insert failed", 500, message);
   }
 }
 
@@ -78,8 +82,9 @@ export async function DELETE(req: Request) {
     }
 
     return NextResponse.json({}, { status: 200 });
-  } catch (err: any) {
-    return jsonError("Delete failed", 500, err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Delete failed", 500, message);
   }
 }
 
@@ -94,12 +99,20 @@ export async function GET(req: Request) {
       const nid = parseId(idParam);
       if (!nid) return jsonError("Invalid id", 400);
 
-      const result = await db.execute(sql<EdgeOutside>`
+      const result = await db.execute(sql<{
+        id: number;
+        node_a_id: number;
+        node_b_id: number;
+        bi_directional: boolean;
+        direction: boolean;
+        distance: number;
+        incline: number;
+      }>`
         SELECT
           id,
-          node_a_id AS "nodeAId",
-          node_b_id AS "nodeBId",
-          bi_directional AS "biDirectional",
+          node_a_id,
+          node_b_id,
+          bi_directional,
           direction,
           distance,
           incline
@@ -108,36 +121,53 @@ export async function GET(req: Request) {
       `);
 
       if (result.rows.length === 0) return jsonError("Edge not found", 404);
-      return NextResponse.json(
-        { row: result.rows[0] as EdgeOutside },
-        { status: 200 },
-      );
+      const row = result.rows[0];
+      return NextResponse.json({
+        row: {
+          id: row.id,
+          nodeAId: row.node_a_id,
+          nodeBId: row.node_b_id,
+          biDirectional: row.bi_directional,
+          direction: row.direction,
+          distance: row.distance,
+          incline: row.incline,
+        },
+      }, { status: 200 });
     }
 
-    const result = await db.execute(sql<EdgeOutside>`
+    const result = await db.execute(sql<{
+      id: number;
+      node_a_id: number;
+      node_b_id: number;
+      bi_directional: boolean;
+      direction: boolean;
+      distance: number;
+      incline: number;
+    }>`
       SELECT
         id,
-        node_a_id AS "nodeAId",
-        node_b_id AS "nodeBId",
-        bi_directional AS "biDirectional",
+        node_a_id,
+        node_b_id,
+        bi_directional,
         direction,
         distance,
         incline
       FROM edge_outside;
     `);
 
-    let rows = result.rows.map((curedge) => {
+    const rows = result.rows.map((curedge) => {
       return {
         key: curedge.id,
-        from: curedge.direction ? curedge.nodeAId : curedge.nodeBId,
-        to: curedge.direction ? curedge.nodeBId : curedge.nodeAId,
-        biDirectional: curedge.biDirectional,
+        from: curedge.direction ? curedge.node_a_id : curedge.node_b_id,
+        to: curedge.direction ? curedge.node_b_id : curedge.node_a_id,
+        biDirectional: curedge.bi_directional,
         incline: curedge.incline,
       };
     });
 
     return NextResponse.json({ rows }, { status: 200 });
-  } catch (err: any) {
-    return jsonError("Could not fetch nodes", 500, err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Could not fetch nodes", 500, message);
   }
 }

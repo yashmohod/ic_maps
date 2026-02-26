@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
+import { heuristic } from "./utils";
 
 import "server-only";
 import {
@@ -11,48 +12,25 @@ import {
 import { MinHeap } from "./minHeap";
 
 /** Closest outdoor node to a (lat, lng) point (for outdoor routing). */
-export async function closestNode(lat: number, lng: number) {
-  const result = await db.execute(
-    sql<{
-      id: number;
-    }>`SELECT id FROM node_outside ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
-  );
-  return result.rows[0]?.id ?? -1;
-}
-
-export function calcDistance(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-) {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-
-  const R = 6371000; // Earth radius (m)
-  const φ1 = toRad(lat1);
-  const φ2 = toRad(lat2);
-  const Δφ = toRad(lat2 - lat1);
-  const Δλ = toRad(lng2 - lng1);
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
-function heuristic(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  return Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lng1 - lng2, 2));
+export async function closestNode(lat: number, lng: number): Promise<number> {
+  const row = await db
+    .execute(
+      sql<{
+        id: number;
+      }>`SELECT id FROM node_outside ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
+    )
+    .then((cur) => cur.rows[0] as { id: number } | undefined);
+  return row?.id ?? -1;
 }
 
 ///////////////////////////////// --  Graph -- ////////////////////////////////////////
+export type NavConditions = {
+  is_pedestrian: boolean;
+  is_vehicular: boolean;
+  is_avoid_stairs: boolean;
+  is_incline_limit: boolean;
+  max_incline: number;
+};
 
 export type Graph = {
   nodesInside: Map<number, NodeInside>;
@@ -60,7 +38,7 @@ export type Graph = {
   adjInside: Map<number, Array<{ to: number; edgeId: number }>>;
   adjOutside: Map<
     number,
-    Array<{ to: number; distance: number; edgeId: number }>
+    Array<{ to: number; distance: number; edgeId: number; incline: number }>
   >;
   version: number; // for debugging / cache sanity
 };
@@ -81,25 +59,26 @@ export function buildGraph(
   const adjInside = new Map<number, Array<{ to: number; edgeId: number }>>();
   const adjOutside = new Map<
     number,
-    Array<{ to: number; distance: number; edgeId: number }>
+    Array<{ to: number; distance: number; edgeId: number; incline: number }>
   >();
   const pushOutside = (
     from: number,
     to: number,
     distance: number,
     edgeId: number,
+    incline: number,
   ) => {
     const arr = adjOutside.get(from) ?? [];
-    arr.push({ to, distance, edgeId });
+    arr.push({ to, distance, edgeId, incline });
     adjOutside.set(from, arr);
   };
 
   for (const e of edge_outside) {
-    const from = e.nodeAId;
-    const to = e.nodeBId;
+    const from = e.node_a_id;
+    const to = e.node_b_id;
     const distance = e.distance ?? 0;
-    pushOutside(from, to, distance, e.id);
-    if (e.biDirectional) pushOutside(to, from, distance, e.id);
+    pushOutside(from, to, distance, e.id, e.incline);
+    if (e.bi_directional) pushOutside(to, from, distance, e.id, e.incline);
   }
 
   const pushInside = (from: number, to: number, edgeId: number) => {
@@ -109,10 +88,10 @@ export function buildGraph(
   };
 
   for (const e of _edge_inside) {
-    const from = e.nodeAId;
-    const to = e.nodeBId;
+    const from = e.node_a_id;
+    const to = e.node_b_id;
     pushInside(from, to, e.id);
-    if (e.biDirectional) pushInside(to, from, e.id);
+    if (e.bi_directional) pushInside(to, from, e.id);
   }
 
   return {
@@ -130,7 +109,6 @@ type GraphStore = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __graphStore: GraphStore | undefined;
 }
 
@@ -194,46 +172,57 @@ export async function reloadGraph(): Promise<Graph> {
 export async function navigate(
   start: number,
   destinationId: number,
-  navConditions: string[],
-) {
+  navConditions: NavConditions,
+): Promise<number[] | null> {
   const graph = await getGraph();
   const startNode = graph.nodesOutside.get(start) as NodeOutside;
   const endNodes = await db
     .execute(
-      sql`SELECT node_outside_id AS FROM destination_node WHERE destination_id = ${destinationId}`,
+      sql`SELECT node_outside_id AS id FROM destination_node WHERE destination_id = ${destinationId}`,
     )
     .then((res) => {
       return new Set(res.rows.map((row) => row.id as number));
     });
-  const destniationPos = await db
+  const destinationPos = await db
     .execute(sql`SELECT lng,lat FROM destination WHERE id=${destinationId};`)
-    .then((res) => res.rows[0] as { lng: number; lat: number });
-  if (!startNode || !endNodes) {
+    .then((res) => res.rows[0] as { lng: number; lat: number } | undefined);
+
+  if (!startNode || endNodes.size === 0 || !destinationPos) {
     throw new Error("Start or end node not found");
   }
+
+  if (endNodes.has(startNode.id)) return [];
+  console.log(navConditions);
+
   const pathTree: Map<number, number> | null = await aStar(
     graph,
     startNode.id,
-    destniationPos,
+    destinationPos,
     endNodes,
     navConditions,
   );
 
   if (!pathTree) return null;
-  let pathStart: null | number = null;
+  let curP: null | number = null;
   for (const endnode of endNodes) {
     if (pathTree.has(endnode)) {
-      pathStart = endnode;
+      curP = endnode;
       break;
     }
   }
-  if (!pathStart) return null;
+  if (curP === null) return null;
   const path: number[] = [];
-  while (pathStart !== start) {
-    path.push(pathStart);
-    pathStart = pathTree.get(pathStart)!;
+  while (curP !== start) {
+    const nxt: number = pathTree.get(curP)!;
+    const adjList = graph.adjOutside.get(nxt);
+    const edgeId: number | undefined = adjList?.find(
+      (cur) => cur.to === curP,
+    )?.edgeId;
+    if (edgeId === undefined) return null;
+    path.push(edgeId);
+    curP = nxt;
   }
-  path.push(start);
+  path.reverse();
   return path;
 }
 
@@ -242,9 +231,9 @@ type AStarNode = { f: number; g: number; id: number };
 async function aStar(
   graph: Graph,
   startNode: number,
-  destinaitonPos: { lat: number; lng: number },
+  destinationPos: { lat: number; lng: number },
   endNodes: Set<number>,
-  navConditions: string[],
+  navConditions: NavConditions,
 ) {
   const pathTree = new Map<number, number>();
   const gScore = new Map<number, number>();
@@ -256,8 +245,8 @@ async function aStar(
   const h0 = heuristic(
     startPos.lat,
     startPos.lng,
-    destinaitonPos.lat,
-    destinaitonPos.lng,
+    destinationPos.lat,
+    destinationPos.lng,
   );
   openSet.add({ f: h0, g: 0, id: startNode });
 
@@ -277,13 +266,22 @@ async function aStar(
       const neighborNode = graph.nodesOutside.get(neighbor.to);
       if (!neighborNode) continue;
 
-      let check = true;
-      for (const condition of navConditions) {
-        const key = condition as keyof NodeOutside;
-        if (key in neighborNode) {
-          check = Boolean(neighborNode[key]) && check;
+      let check = false;
+
+      if (navConditions.is_vehicular && neighborNode.is_vehicular) {
+        check = true;
+      }
+      if (navConditions.is_pedestrian && neighborNode.is_pedestrian) {
+        if (
+          (navConditions.is_avoid_stairs ? !neighborNode.is_stairs : true) &&
+          (navConditions.is_incline_limit
+            ? neighbor.incline <= navConditions.max_incline
+            : true)
+        ) {
+          check = true;
         }
       }
+
       if (!check) continue;
 
       const gNew = cur.g + neighbor.distance;
@@ -295,8 +293,8 @@ async function aStar(
       const h = heuristic(
         neighborNode.lat,
         neighborNode.lng,
-        destinaitonPos.lat,
-        destinaitonPos.lng,
+        destinationPos.lat,
+        destinationPos.lng,
       );
       openSet.add({ f: gNew + h, g: gNew, id: neighbor.to });
     }

@@ -1,5 +1,6 @@
 "use client";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { Toggle } from "@/components/ui/toggle";
 import React, { useRef, useState, useMemo, useEffect, type JSX } from "react";
 import {
   Map as ReactMap,
@@ -31,12 +32,12 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { authClient, type Session } from "@/lib/auth-client";
-
+import { CheckIcon, XIcon } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import apiClient from "@/lib/apiClient";
-import { object } from "zod";
-import { ToggleButton } from "@/components/Toggle";
-
+import { Slider } from "@/components/ui/slider"
+import { NavConditions } from "@/lib/navigation";
+import { core } from "zod";
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };
@@ -89,11 +90,7 @@ type GeoJSONFeatureCollection = {
   }>;
 };
 
-type NavMode = {
-  id: number;
-  name: string;
-  param: string;
-}
+
 
 /** ---------------- Map stages ---------------- */
 
@@ -136,6 +133,8 @@ const STAGE_DETAILS: Record<
   },
 };
 
+const MAX_INCLINE = 45;
+
 export default function NavigationMap(): JSX.Element {
   const defViewState = {
     longitude: -76.494131,
@@ -162,22 +161,20 @@ export default function NavigationMap(): JSX.Element {
   const [markers, setMarkers] = useState<MarkerNode[]>([]);
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
 
-  const [path, setPath] = useState<Set<string>>(new Set());
-
-  const [curNavMode, setCurNavMode] = useState<number>(0);
-  const navModes: NavMode[] = [
-    { id: 0, name: "Pedestrian", param: "isPedestrian" },
-    { id: 1, name: "Vehicular", param: "isVehicular" },
-  ];
-
-  const [avoidStairs, setAvoidStairs] = useState<boolean>(false);
-  const [limitIncline, setLimitIncline] = useState<boolean>(false);
-  const [maxIncline, setMaxIncline] = useState<number>(-1);
-
-  const [mapStage, setMapStage] = useState<MapStage>(MAP_STAGES.IDLE);
-
+  const [path, setPath] = useState<number[]>([]);
   const [lastGeoMsg, setLastGeoMsg] = useState<string>("");
   const [useCompass, setUseCompass] = useState<boolean>(false);
+
+  const [curNavConditions, setCurNavConditions] = useState<NavConditions>(
+    {
+      is_pedestrian: true,
+      is_vehicular: false,
+      is_avoid_stairs: false,
+      is_incline_limit: false,
+      max_incline: 0
+    });
+
+  const [mapStage, setMapStage] = useState<MapStage>(MAP_STAGES.IDLE);
 
   const [curBuildingPoly, setCurBuildingPoly] =
     useState<GeoJSONFeatureCollection | null>(null);
@@ -188,13 +185,8 @@ export default function NavigationMap(): JSX.Element {
   const deviceHeadingRef = useRef<number | null>(null);
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
 
-  const [buildingNodes, setBuildingNodes] = useState<Set<string>>(new Set());
-  const [pathNodeIds, setPathNodeIds] = useState<Set<string>>(new Set());
+  const [buildingNodes, setBuildingNodes] = useState<Set<number>>(new Set());
 
-  // ---- Route recalc on nav-mode change (route preview only) ----
-  const [pendingPathKeys, setPendingPathKeys] = useState<string[] | null>(null);
-  const routeReqSeqRef = useRef(0);
-  const lastRecalcToastRef = useRef<string>("");
 
   const selectedBuilding = useMemo(() => {
     return destinations.find((b) => `${b.id}` === `${selectedDest}`) ?? null;
@@ -532,10 +524,8 @@ export default function NavigationMap(): JSX.Element {
       setZoomed(true);
       setTracking(false);
 
-      setPath(new Set());
-      setPathNodeIds(new Set());
+      setPath([]);
       routeCoordsRef.current = [];
-      setPendingPathKeys(null);
 
       setMapStage(MAP_STAGES.BUILDING);
 
@@ -550,10 +540,9 @@ export default function NavigationMap(): JSX.Element {
     setSelectedDest(-1);
     setDestPos(null);
     setBuildingNodes(new Set());
-    setPath(new Set());
+    setPath([]);
     setNavigating(false);
     routeCoordsRef.current = [];
-    setPendingPathKeys(null);
     setMapStage(MAP_STAGES.IDLE);
     showCampusOverview();
   }
@@ -565,7 +554,7 @@ export default function NavigationMap(): JSX.Element {
     }
     if (tracking) stopTracking();
     else {
-      setPath(new Set());
+      setPath([]);
       setNavigating(false);
     }
     setSheetPosition(0);
@@ -591,60 +580,8 @@ export default function NavigationMap(): JSX.Element {
     return { nodesById, edgesByKey };
   }
 
-  function orderNodeIdsFromPathKeys(
-    pathKeys: string[],
-    edgesByKey: Map<string, { from: string; to: string }>,
-  ) {
-    const adj = new Map<string, Set<string>>();
-    const add = (u: string, v: string) => {
-      if (!adj.has(u)) adj.set(u, new Set());
-      if (!adj.has(v)) adj.set(v, new Set());
-      adj.get(u)!.add(v);
-      adj.get(v)!.add(u);
-    };
 
-    for (const k of pathKeys) {
-      const e = edgesByKey.get(k);
-      if (!e) continue;
-      add(e.from, e.to);
-    }
 
-    if (adj.size === 0) return [];
-
-    const endpoints = [...adj.entries()]
-      .filter(([, s]) => s.size === 1)
-      .map(([id]) => id);
-    const start = endpoints[0] ?? [...adj.keys()][0];
-
-    const ordered: string[] = [];
-    const visited = new Set<string>();
-    let cur: string | null = start;
-    let prev: string | null = null;
-
-    while (cur != null) {
-      ordered.push(cur);
-      visited.add(cur);
-      const nextNode =
-        [...(adj.get(cur) ?? [])].find((n) => n !== prev && !visited.has(n)) ??
-        null;
-      prev = cur;
-      cur = nextNode;
-    }
-
-    return ordered;
-  }
-
-  function nodeIdsToCoords(
-    orderedIds: string[],
-    nodesById: Map<string, { lng: number; lat: number }>,
-  ) {
-    const coords: Array<[number, number]> = [];
-    for (const id of orderedIds) {
-      const p = nodesById.get(id);
-      if (p) coords.push([p.lng, p.lat]);
-    }
-    return coords;
-  }
 
   const buildingNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!markers.length || !buildingNodes.size) return null;
@@ -652,39 +589,20 @@ export default function NavigationMap(): JSX.Element {
     return {
       type: "FeatureCollection",
       features: markers
-        .filter((m) => buildingNodes.has(String(m.id)))
-        .map((m) => ({
-          type: "Feature",
-          properties: {
-            id: String(m.id),
-            onPath: pathNodeIds.has(String(m.id)),
-          },
-          geometry: { type: "Point", coordinates: [m.lng, m.lat] },
-        })),
+        .filter((m) => buildingNodes.has(m.id))
+        .map((m) => {
+          return {
+            type: "Feature",
+            properties: {
+              id: String(m.id),
+              onPath: pathNodeIds.has(m.id),
+            },
+            geometry: { type: "Point", coordinates: [m.lng, m.lat] },
+          }
+        }),
     };
   }, [markers, buildingNodes, pathNodeIds]);
 
-  function buildRouteFeature(pathKeys: string[]) {
-    if (!Array.isArray(pathKeys) || pathKeys.length === 0) return null;
-    const { nodesById, edgesByKey } = makeLookups(markers, edgeIndex);
-    const orderedIds = orderNodeIdsFromPathKeys(pathKeys, edgesByKey);
-    const coords = nodeIdsToCoords(orderedIds, nodesById);
-    if (coords.length < 2) return null;
-
-    setPathNodeIds(new Set(orderedIds.map((id) => String(id))));
-    routeCoordsRef.current = coords;
-
-    return coords;
-  }
-
-  function extractPathKeys(resp: any): string[] {
-    const pathKeys: string[] = Array.isArray(resp?.path)
-      ? resp.path
-      : resp?.path instanceof Set
-        ? [...resp.path]
-        : [];
-    return pathKeys.map(String);
-  }
 
   /** -------- Bearing / camera -------- */
 
@@ -742,86 +660,68 @@ export default function NavigationMap(): JSX.Element {
     if (!userPos) return toast.error("Tap Locate Me before looking for a route.");
 
     try {
+
       const req = await apiClient.post("/api/map/navigateTo", {
         destId: selectedDest,
         lat: userPos.lat,
         lng: userPos.lng,
-        navMode: navModes[curNavMode].param,
+        navConditions: curNavConditions,
       });
-
-      console.log(req)
       const resp = await req.json();
-      console.log(resp)
 
-      // const resp: any = await getRouteTo(
-      //   selectedDest,
-      //   userPos.lat,
-      //   userPos.lng,
-      //   String(navModes[curNavMode].name),
-      // );
+      const pnids: Set<number> = new Set(resp?.path as number[]);
 
-      const pathKeys = extractPathKeys(resp);
-
-      if (pathKeys.length === 0) {
+      if (pnids.size === 0) {
         toast.error("No route found for that selection.");
         return;
       }
 
-      setPath(new Set(pathKeys));
+      // setPathNodeIds(pnids)
+      setPath(pnids);
       setNavigating(true);
       setTracking(false);
 
-      const coords = buildRouteFeature(pathKeys);
       setMapStage(MAP_STAGES.ROUTE);
-
-      if (!coords) {
-        setPendingPathKeys(pathKeys);
-        setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
-        setZoomed(true);
-        fitToUserAndDest();
-        return;
-      }
 
       setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
       setZoomed(true);
-      fitToUserAndDest(coords);
+      // fitToUserAndDest(coords);
     } catch (err) {
       console.error("Route lookup failed", err);
       toast.error("Failed to build route. Please try again.");
     }
   }
 
-  async function recalcRouteForNavMode(nextNavMode: string | number) {
+  async function recalcRouteForNavMode(nextNavConditions: NavConditions) {
     if (!selectedDest || !userPos) return;
 
-    const seq = ++routeReqSeqRef.current;
 
     try {
-      const resp: any = await getRouteTo(
-        selectedDest,
-        userPos.lat,
-        userPos.lng,
-        String(nextNavMode),
-      );
+      const req = await apiClient.post("/api/map/navigateTo", {
+        destId: selectedDest,
+        lat: userPos.lat,
+        lng: userPos.lng,
+        navConditions: curNavConditions,
+      });
+      const resp = await req.json();
 
-      if (seq !== routeReqSeqRef.current) return;
+      const pnids: Set<number> = new Set(resp?.path as number[]);
 
-      const keys = extractPathKeys(resp);
-
-      if (keys.length === 0) {
-        toast.error("No route found for that mode.");
-        setPendingPathKeys(null);
+      if (pnids.size === 0) {
+        toast.error("No route found for that selection.");
         return;
       }
 
+      setPathNodeIds(pnids)
+      setPath(pnids);
+
       routeCoordsRef.current = [];
-      setPathNodeIds(new Set());
-      setPath(new Set(keys));
+      // setPathNodeIds(new Set());
       setNavigating(true);
       setTracking(false);
       setMapStage(MAP_STAGES.ROUTE);
 
-      setPendingPathKeys(keys);
+      // setPendingPathKeys(keys);
     } catch (err) {
       console.error("Recalc route failed", err);
       toast.error("Failed to recalculate route.");
@@ -833,29 +733,8 @@ export default function NavigationMap(): JSX.Element {
     if (!selectedDest) return toast.error("Please select a destination first.");
     if (!userPos) return toast.error("Tap Locate Me first so I know where you are.");
 
-    let resp: any;
-    try {
-      const req = await apiClient.post("/api/map/navigateTo", {
-        destId: selectedDest,
-        lat: userPos.lat,
-        lng: userPos.lng,
-        navMode: navModes[curNavMode].param,
-      });
-      resp = await req.json();
-    } catch {
-      toast.error("Failed to get route");
-      return;
-    }
+    const firstEdge = edgeIndex.find((cur) => cur.id === path[0])
 
-    const pathKeys = extractPathKeys(resp);
-
-    if (pathKeys.length === 0) return toast.error("No route found.");
-
-    setPath(new Set(pathKeys));
-
-    const coords = buildRouteFeature(pathKeys);
-    if (!coords || coords.length < 2)
-      return toast.error("Route is too short to navigate.");
 
     setNavigating(true);
 
@@ -953,31 +832,31 @@ export default function NavigationMap(): JSX.Element {
     if (!isViewingRoute) return;
     if (!selectedDest || !userPos) return;
 
-    void recalcRouteForNavMode(curNavMode);
+    void recalcRouteForNavMode(curNavConditions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curNavMode]);
+  }, [curNavConditions]);
 
   // Once NavModeMap loads the new mode graph, build the route geometry
-  useEffect(() => {
-    if (!pendingPathKeys || pendingPathKeys.length === 0) return;
-    if (!markers.length || !edgeIndex.length) return;
+  // useEffect(() => {
+  //   if (!pendingPathKeys || pendingPathKeys.length === 0) return;
+  //   if (!markers.length || !edgeIndex.length) return;
 
-    const coords = buildRouteFeature(pendingPathKeys);
+  //   const coords = buildRouteFeature(pendingPathKeys);
 
-    if (!coords) {
-      const key = pendingPathKeys.slice(0, 3).join(",") + `|${curNavMode}`;
-      if (lastRecalcToastRef.current !== key) {
-        lastRecalcToastRef.current = key;
-        toast.error("Route geometry couldn't be built for this mode.");
-      }
-      setPendingPathKeys(null);
-      return;
-    }
+  //   if (!coords) {
+  //     const key = pendingPathKeys.slice(0, 3).join(",");
+  //     if (lastRecalcToastRef.current !== key) {
+  //       lastRecalcToastRef.current = key;
+  //       toast.error("Route geometry couldn't be built for this mode.");
+  //     }
+  //     setPendingPathKeys(null);
+  //     return;
+  //   }
 
-    fitToUserAndDest(coords, { duration: 900 });
-    setPendingPathKeys(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingPathKeys, markers, edgeIndex]);
+  //   fitToUserAndDest(coords, { duration: 900 });
+  //   setPendingPathKeys(null);
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [pendingPathKeys, markers, edgeIndex]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -1255,8 +1134,47 @@ export default function NavigationMap(): JSX.Element {
             </div>
 
             <div className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-
-              {navModes.map((mode) => {
+              <button
+                onClick={() => {
+                  setCurNavConditions((prev) => {
+                    let temp = { ...prev }
+                    if (!temp.is_pedestrian) {
+                      temp.is_pedestrian = true;
+                      temp.is_vehicular = false;
+                    }
+                    return temp;
+                  })
+                }}
+                className={[
+                  "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
+                  curNavConditions.is_pedestrian
+                    ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                    : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+                ].join(" ")}
+              >
+                Pedestrian
+              </button>
+              <button
+                onClick={() => {
+                  setCurNavConditions((prev) => {
+                    let temp = { ...prev }
+                    if (!temp.is_vehicular) {
+                      temp.is_pedestrian = false;
+                      temp.is_vehicular = true;
+                    }
+                    return temp;
+                  })
+                }}
+                className={[
+                  "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
+                  curNavConditions.is_vehicular
+                    ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                    : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+                ].join(" ")}
+              >
+                Vehicular
+              </button>
+              {/* {[{id:0,name:"Pe"}].map((mode) => {
                 const active = `${mode.id}` === `${curNavMode}`;
                 return (
                   <button
@@ -1274,27 +1192,86 @@ export default function NavigationMap(): JSX.Element {
                     {mode.name}
                   </button>
                 );
-              })}
+              })} */}
             </div>
           </div>
         </div> : null}
 
 
+      {curNavConditions.is_pedestrian ?
+        <>
+          <div className="absolute right-10 top-80 z-30 flex flex-col   bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
+            <div className="p-2">
+              <Toggle
+                className={curNavConditions.is_avoid_stairs ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
+                aria-label={"Stairs"}
+                size="sm"
+                variant="outline"
+                pressed={curNavConditions.is_avoid_stairs}
+                onPressedChange={(pressed) =>
+                  setCurNavConditions(prev => ({
+                    ...prev,
+                    isAvoidStairs: pressed,
+                  }))
+                }
+              >
+                {curNavConditions.is_avoid_stairs ? (
+                  <CheckIcon className="group-aria-pressed/toggle:fill-foreground" />
+                ) : (
+                  <XIcon className="group-aria-pressed/toggle:fill-foreground" />
+                )}
+                Avoid Stairs
+              </Toggle>
+            </div>
+            <div className="p-2 ">
+              <Toggle
+                className={curNavConditions.is_incline_limit ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
+                aria-label={"Limit Incline"}
+                size="sm"
+                variant="outline"
+                pressed={curNavConditions.is_incline_limit}
+                onPressedChange={(pressed) =>
+                  setCurNavConditions(prev => ({
+                    ...prev,
+                    isInclineLimit: pressed,
+                  }))
+                }
+              >
+                {curNavConditions.is_incline_limit ? (
+                  <CheckIcon className="group-aria-pressed/toggle:fill-foreground" />
+                ) : (
+                  <XIcon className="group-aria-pressed/toggle:fill-foreground" />
+                )}
+                Limit Incline
+              </Toggle>
+            </div>
+          </div>
 
-      <div className="absolute right-3 top-80 z-30 flex flex-col space-y-3">
-        <ToggleButton
-          state={avoidStairs}
-          setState={setAvoidStairs}
-          name="Stairs"
-        />
+          <div className="absolute right-15 w-10 top-105 z-30 flex flex-col space-y-3  bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
+            <div className="mx-auto grid w-full max-w-xs gap-3">
+              <div className="flex items-center justify-center">
+                <span className="text-muted-foreground text-sm">
+                  {curNavConditions.max_incline}°
+                </span>
+              </div>
+              <Slider
+                id="slider-demo-temperature"
+                value={[curNavConditions.max_incline]}
+                onValueChange={(val) => {
+                  setCurNavConditions((prev) => {
+                    return { ...prev, maxIncline: val[0] }
+                  })
+                }}
+                orientation="vertical"
+                min={0}
+                max={MAX_INCLINE}
+                step={1}
+              />
+            </div>
 
-        <ToggleButton
-          state={limitIncline}
-          setState={setLimitIncline}
-          name="Incline"
-        />
-      </div>
-
+          </div>
+        </>
+        : null}
       {/* admin pages (moved fully to left) */}
       <div className="absolute left-3 top-40 z-30 flex flex-col space-y-3">
         {isAdmin ?
@@ -1557,8 +1534,7 @@ export default function NavigationMap(): JSX.Element {
             <NavModeMap
               // key={`navmode-${String(curNavMode)}`}
               path={path}
-              navModes={navModes}
-              curNavMode={curNavMode}
+              curNavConditions={curNavConditions}
               markers={markers}
               edgeIndex={edgeIndex}
               setEdgeIndex={setEdgeIndex}

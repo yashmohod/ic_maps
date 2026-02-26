@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
-import { EdgeOutside, NodeOutside } from "@/db/schema";
-import { calcDistance } from "@/lib/navigation";
 import { jsonError, isValidLatLng, parseId } from "@/lib/utils";
-
-
-
-
-
 
 export async function POST(req: Request) {
   try {
@@ -35,8 +28,9 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ id: inserted.id }, { status: 201 });
-  } catch (err: any) {
-    return jsonError("Insert failed", 500, err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Insert failed", 500, message);
   }
 }
 
@@ -55,7 +49,7 @@ export async function PUT(req: Request) {
     if (!nid) return jsonError("Invalid id", 400);
 
     if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
-    console.log(id)
+    console.log(id);
     const result = await db.execute(sql`
       UPDATE node_outside
       SET
@@ -65,7 +59,7 @@ export async function PUT(req: Request) {
       WHERE id = ${nid}
 
     `);
-      console.log(result)
+    console.log(result);
     if (result.rowCount === 0) {
       return jsonError("Node not found", 404);
     }
@@ -80,8 +74,9 @@ export async function PUT(req: Request) {
 `);
 
     return NextResponse.json({}, { status: 200 });
-  } catch (err: any) {
-    return jsonError("Update failed", 500, err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Update failed", 500, message);
   }
 }
 
@@ -106,8 +101,9 @@ export async function DELETE(req: Request) {
     }
 
     return NextResponse.json({}, { status: 200 });
-  } catch (err: any) {
-    return jsonError("Delete failed", 500, err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Delete failed", 500, message);
   }
 }
 
@@ -122,41 +118,87 @@ export async function GET(req: Request) {
       const nid = parseId(idParam);
       if (!nid) return jsonError("Invalid id", 400);
 
-      const result = await db.execute(sql<NodeOutside>`
+      const result = await db.execute(sql<{
+        id: number;
+        lat: number;
+        lng: number;
+        is_blue_light: boolean;
+        is_pedestrian: boolean;
+        is_vehicular: boolean;
+        is_elevator: boolean;
+        is_stairs: boolean;
+        location: unknown;
+      }>`
         SELECT
           id,
           lat,
           lng,
-          is_blue_light AS "isBlueLight",
-          is_pedestrian AS "isPedestrian",
-          is_vehicular AS "isVehicular",
-          is_elevator AS "isElevator",
-          is_stairs AS "isStairs",
+          is_blue_light,
+          is_pedestrian,
+          is_vehicular,
+          is_elevator,
+          is_stairs,
           location
         FROM node_outside
         WHERE id = ${nid};
       `);
 
       if (result.rows.length === 0) return jsonError("Node not found", 404);
-      return NextResponse.json({ row: result.rows[0] }, { status: 200 });
+      const row = result.rows[0];
+      return NextResponse.json({
+        row: {
+          id: row.id,
+          lat: row.lat,
+          lng: row.lng,
+          isBlueLight: row.is_blue_light,
+          isPedestrian: row.is_pedestrian,
+          isVehicular: row.is_vehicular,
+          isElevator: row.is_elevator,
+          isStairs: row.is_stairs,
+          location: row.location,
+        },
+      }, { status: 200 });
     }
 
-    const result = await db.execute(sql<NodeOutside>`
+    const result = await db.execute(sql<{
+      id: number;
+      lat: number;
+      lng: number;
+      is_blue_light: boolean;
+      is_pedestrian: boolean;
+      is_vehicular: boolean;
+      is_elevator: boolean;
+      is_stairs: boolean;
+      location: unknown;
+    }>`
       SELECT
         id,
         lat,
         lng,
-        is_blue_light AS "isBlueLight",
-        is_pedestrian AS "isPedestrian",
-        is_vehicular AS "isVehicular",
-        is_elevator AS "isElevator",
-        is_stairs AS "isStairs",
+        is_blue_light,
+        is_pedestrian,
+        is_vehicular,
+        is_elevator,
+        is_stairs,
         location
       FROM node_outside;
     `);
 
-    return NextResponse.json({ rows: result.rows }, { status: 200 });
-  } catch (err: any) {
-    return jsonError("Could not fetch nodes", 500, err?.message ?? err);
+    const rows = result.rows.map((row) => ({
+      id: row.id,
+      lat: row.lat,
+      lng: row.lng,
+      isBlueLight: row.is_blue_light,
+      isPedestrian: row.is_pedestrian,
+      isVehicular: row.is_vehicular,
+      isElevator: row.is_elevator,
+      isStairs: row.is_stairs,
+      location: row.location,
+    }));
+
+    return NextResponse.json({ rows }, { status: 200 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError("Could not fetch nodes", 500, message);
   }
 }
