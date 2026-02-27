@@ -585,7 +585,7 @@ export default function NavigationMap(): JSX.Element {
 
   const buildingNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!markers.length || !buildingNodes.size) return null;
-
+    const lastEdge = edgeIndex.find((cur) => cur.id === path[path.length - 1]);
     return {
       type: "FeatureCollection",
       features: markers
@@ -595,13 +595,13 @@ export default function NavigationMap(): JSX.Element {
             type: "Feature",
             properties: {
               id: String(m.id),
-              onPath: pathNodeIds.has(m.id),
+              onPath: lastEdge?.to === m.id,
             },
             geometry: { type: "Point", coordinates: [m.lng, m.lat] },
           }
         }),
     };
-  }, [markers, buildingNodes, pathNodeIds]);
+  }, [markers, buildingNodes, path]);
 
 
   /** -------- Bearing / camera -------- */
@@ -669,9 +669,9 @@ export default function NavigationMap(): JSX.Element {
       });
       const resp = await req.json();
 
-      const pnids: Set<number> = new Set(resp?.path as number[]);
+      const pnids: number[] = resp?.path as number[];
 
-      if (pnids.size === 0) {
+      if (pnids.length === 0) {
         toast.error("No route found for that selection.");
         return;
       }
@@ -705,14 +705,13 @@ export default function NavigationMap(): JSX.Element {
       });
       const resp = await req.json();
 
-      const pnids: Set<number> = new Set(resp?.path as number[]);
+      const pnids: number[] = resp?.path as number[];
 
-      if (pnids.size === 0) {
+      if (pnids.length === 0) {
         toast.error("No route found for that selection.");
         return;
       }
 
-      setPathNodeIds(pnids)
       setPath(pnids);
 
       routeCoordsRef.current = [];
@@ -725,7 +724,6 @@ export default function NavigationMap(): JSX.Element {
     } catch (err) {
       console.error("Recalc route failed", err);
       toast.error("Failed to recalculate route.");
-      setPendingPathKeys(null);
     }
   }
 
@@ -734,12 +732,15 @@ export default function NavigationMap(): JSX.Element {
     if (!userPos) return toast.error("Tap Locate Me first so I know where you are.");
 
     const firstEdge = edgeIndex.find((cur) => cur.id === path[0])
+    if (!firstEdge) return console.log("could not align the camera, cause no first edge found");
+    const firstNode = markers.find((cur) => cur.id === firstEdge?.from);
+    if (!firstNode) return console.log("could not align the camera, cause no first node found");
 
 
     setNavigating(true);
 
     const [lng1, lat1] = [userPos.lng, userPos.lat];
-    const [lng2, lat2] = coords[1];
+    const [lng2, lat2] = [firstNode.lng, firstNode.lat];
     const forward =
       typeof userPos.heading === "number"
         ? userPos.heading
@@ -800,10 +801,9 @@ export default function NavigationMap(): JSX.Element {
     setViewState(defViewState);
     routeCoordsRef.current = [];
 
-    setPath(new Set());
+    setPath([]);
     setNavigating(false);
     setTracking(false);
-    setPendingPathKeys(null);
     setMapStage(MAP_STAGES.IDLE);
     disableCompass();
   }
@@ -1054,8 +1054,7 @@ export default function NavigationMap(): JSX.Element {
         stopTracking();
         setTracking(false);
         setNavigating(false);
-        setPath(new Set());
-        setPathNodeIds(new Set());
+        setPath([]);
         routeCoordsRef.current = [];
         setMapStage(MAP_STAGES.BUILDING);
       } else {

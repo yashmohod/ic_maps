@@ -12,14 +12,43 @@ import {
 import { MinHeap } from "./minHeap";
 
 /** Closest outdoor node to a (lat, lng) point (for outdoor routing). */
-export async function closestNode(lat: number, lng: number): Promise<number> {
-  const row = await db
-    .execute(
-      sql<{
-        id: number;
-      }>`SELECT id FROM node_outside ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
-    )
-    .then((cur) => cur.rows[0] as { id: number } | undefined);
+export async function closestNode(
+  lat: number,
+  lng: number,
+  navConditions: NavConditions,
+): Promise<number> {
+  let row;
+  if (navConditions.is_avoid_stairs) {
+    row = await db
+      .execute(
+        sql<{
+          id: number;
+        }>`
+      SELECT id 
+      FROM node_outside 
+      WHERE 
+        is_pedestrian=${navConditions.is_pedestrian}
+        is_vehicular=${navConditions.is_vehicular}
+        is_stairs=${false}
+      ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
+      )
+      .then((cur) => cur.rows[0] as { id: number } | undefined);
+  } else {
+    row = await db
+      .execute(
+        sql<{
+          id: number;
+        }>`
+      SELECT id 
+      FROM node_outside 
+      WHERE 
+        is_pedestrian=${navConditions.is_pedestrian}
+        is_vehicular=${navConditions.is_vehicular}
+      ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
+      )
+      .then((cur) => cur.rows[0] as { id: number } | undefined);
+  }
+
   return row?.id ?? -1;
 }
 

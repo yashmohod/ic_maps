@@ -36,7 +36,7 @@ type NavMode = {
 type FeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry, any>;
 
 type Props = {
-  path: Set<number>;
+  path: number[];
   curNavConditions: NavConditions;
   markers: MarkerNode[];
   edgeIndex: EdgeIndexEntry[];
@@ -60,9 +60,7 @@ export default function NavMode({
   const { isDark } = useAppTheme();
   const featureCacheRef = useRef<Map<number, CachedFeatures>>(new Map());
 
-  function isInPath(id: number) {
-    return path.has(id);
-  }
+
 
 
   const edgesGeoJSON = useMemo<FeatureCollection>(() => {
@@ -82,14 +80,13 @@ export default function NavMode({
             return null;
           }
         }
-        console.log(isInPath(id), id)
         return {
           type: "Feature",
           properties: {
             key: String(id),
             from: String(from),
             to: String(to),
-            path: isInPath(id), // key can be string|number, isInPath handles it
+            path: path.find((cur) => cur === id) !== undefined ? true : false, // key can be string|number, isInPath handles it
           },
           geometry: {
             type: "LineString",
