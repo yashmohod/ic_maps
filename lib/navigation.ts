@@ -11,13 +11,28 @@ import {
 } from "@/db/schema"; // adapt to your schema
 import { MinHeap } from "./minHeap";
 
-/** Closest outdoor node to a (lat, lng) point (for outdoor routing). */
-export async function closestNode(lat: number, lng: number): Promise<number> {
+const FILE = "navigation.ts";
+function logReturnNull(reason: string): void {
+  const match = new Error().stack?.split("\n")[2]?.match(/:(\d+):/);
+  const line = match?.[1] ?? "?";
+  console.log(`[${FILE}:${line}] returning null: ${reason}`);
+}
+
+/** Closest outdoor node to a (lat, lng) point (for outdoor routing), filtered by nav mode. */
+export async function closestNode(
+  lat: number,
+  lng: number,
+  navConditions: NavConditions,
+): Promise<number> {
+  const { is_pedestrian, is_vehicular } = navConditions;
   const row = await db
     .execute(
-      sql<{
-        id: number;
-      }>`SELECT id FROM node_outside ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id LIMIT 1`,
+      sql<{ id: number }>`
+        SELECT id FROM node_outside
+        WHERE (${is_pedestrian} AND is_pedestrian = true) OR (${is_vehicular} AND is_vehicular = true)
+        ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id
+        LIMIT 1
+      `,
     )
     .then((cur) => cur.rows[0] as { id: number } | undefined);
   return row?.id ?? -1;
@@ -202,7 +217,10 @@ export async function navigate(
     navConditions,
   );
 
-  if (!pathTree) return null;
+  if (!pathTree) {
+    logReturnNull("pathTree is null (aStar found no path)");
+    return null;
+  }
   let curP: null | number = null;
   for (const endnode of endNodes) {
     if (pathTree.has(endnode)) {
@@ -210,7 +228,10 @@ export async function navigate(
       break;
     }
   }
-  if (curP === null) return null;
+  if (curP === null) {
+    logReturnNull("curP is null (no end node in pathTree)");
+    return null;
+  }
   const path: number[] = [];
   while (curP !== start) {
     const nxt: number = pathTree.get(curP)!;
@@ -218,7 +239,10 @@ export async function navigate(
     const edgeId: number | undefined = adjList?.find(
       (cur) => cur.to === curP,
     )?.edgeId;
-    if (edgeId === undefined) return null;
+    if (edgeId === undefined) {
+      logReturnNull("edgeId undefined when backtracking path");
+      return null;
+    }
     path.push(edgeId);
     curP = nxt;
   }
@@ -241,7 +265,11 @@ async function aStar(
   const openSet = new MinHeap<AStarNode>((a, b) => a.f - b.f);
 
   const startPos = graph.nodesOutside.get(startNode);
-  if (!startPos) return null;
+  console.log(startPos);
+  if (!startPos) {
+    logReturnNull("startPos not in graph.nodesOutside");
+    return null;
+  }
   const h0 = heuristic(
     startPos.lat,
     startPos.lng,
@@ -300,5 +328,6 @@ async function aStar(
     }
   }
 
+  logReturnNull("aStar exhausted openSet without reaching any end node");
   return null;
 }

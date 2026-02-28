@@ -37,7 +37,7 @@ import maplibregl from "maplibre-gl";
 import apiClient from "@/lib/apiClient";
 import { Slider } from "@/components/ui/slider"
 import { NavConditions } from "@/lib/navigation";
-import { core } from "zod";
+import { core, set } from "zod";
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };
@@ -144,6 +144,12 @@ export default function NavigationMap(): JSX.Element {
     pitch: 0,
   };
 
+  type Path = {
+    path: Set<number>;
+    firstNodeId: number;
+    lastNodeId: number;
+  }
+
   const [viewState, setViewState] = useState(defViewState);
 
   const topLeftBoundary = { lng: -76.505098, lat: 42.427959 };
@@ -160,8 +166,8 @@ export default function NavigationMap(): JSX.Element {
 
   const [markers, setMarkers] = useState<MarkerNode[]>([]);
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
-
-  const [path, setPath] = useState<number[]>([]);
+  const PATH_RESET: Path = { path: new Set(), lastNodeId: -1, firstNodeId: -1 }
+  const [path, setPath] = useState<Path>(PATH_RESET);
   const [lastGeoMsg, setLastGeoMsg] = useState<string>("");
   const [useCompass, setUseCompass] = useState<boolean>(false);
 
@@ -524,7 +530,7 @@ export default function NavigationMap(): JSX.Element {
       setZoomed(true);
       setTracking(false);
 
-      setPath([]);
+      setPath(PATH_RESET);
       routeCoordsRef.current = [];
 
       setMapStage(MAP_STAGES.BUILDING);
@@ -540,7 +546,7 @@ export default function NavigationMap(): JSX.Element {
     setSelectedDest(-1);
     setDestPos(null);
     setBuildingNodes(new Set());
-    setPath([]);
+    setPath(PATH_RESET);
     setNavigating(false);
     routeCoordsRef.current = [];
     setMapStage(MAP_STAGES.IDLE);
@@ -554,7 +560,7 @@ export default function NavigationMap(): JSX.Element {
     }
     if (tracking) stopTracking();
     else {
-      setPath([]);
+      setPath(PATH_RESET);
       setNavigating(false);
     }
     setSheetPosition(0);
@@ -591,17 +597,18 @@ export default function NavigationMap(): JSX.Element {
       features: markers
         .filter((m) => buildingNodes.has(m.id))
         .map((m) => {
+
           return {
             type: "Feature",
             properties: {
               id: String(m.id),
-              onPath: pathNodeIds.has(m.id),
+              onPath: m.id == path.lastNodeId,
             },
             geometry: { type: "Point", coordinates: [m.lng, m.lat] },
           }
         }),
     };
-  }, [markers, buildingNodes, pathNodeIds]);
+  }, [markers, buildingNodes, path]);
 
 
   /** -------- Bearing / camera -------- */
@@ -654,38 +661,44 @@ export default function NavigationMap(): JSX.Element {
 
   /** -------- Route actions -------- */
 
+  async function getRoute(): Promise<Path> {
+    if (!selectedDest) {
+      toast.error("Please select a destination before starting route.");
+      return PATH_RESET;
+    }
+    if (!userPos) {
+      toast.error("Tap Locate Me before looking for a route.");
+      return PATH_RESET;
+    }
+
+    const req = await apiClient.post("/api/map/navigateTo", {
+      destId: selectedDest,
+      lat: userPos.lat,
+      lng: userPos.lng,
+      navConditions: curNavConditions,
+    });
+    const resp = await req.json();
+    const orderedPath = resp?.path as number[]
+    const pnids: Set<number> = new Set(resp?.path as number[]);
+    const firstNodeId = edgeIndex.find((cur) => cur.id == orderedPath[0])?.from
+    const lastNodeId = edgeIndex.find((cur) => cur.id == orderedPath[orderedPath.length - 1])?.to
+    if (!lastNodeId || !firstNodeId || !pnids || pnids.size === 0) {
+      toast.error("No route found for that selection.");
+      return PATH_RESET;
+    }
+    return { path: pnids, firstNodeId, lastNodeId } as Path;
+  }
+
+
   async function showRoute() {
-    if (!selectedDest)
-      return toast.error("Please select a destination before starting route.");
-    if (!userPos) return toast.error("Tap Locate Me before looking for a route.");
-
     try {
-
-      const req = await apiClient.post("/api/map/navigateTo", {
-        destId: selectedDest,
-        lat: userPos.lat,
-        lng: userPos.lng,
-        navConditions: curNavConditions,
-      });
-      const resp = await req.json();
-
-      const pnids: Set<number> = new Set(resp?.path as number[]);
-
-      if (pnids.size === 0) {
-        toast.error("No route found for that selection.");
-        return;
-      }
-
-      // setPathNodeIds(pnids)
-      setPath(pnids);
+      const curPath = await getRoute();
+      setPath(curPath);
       setNavigating(true);
       setTracking(false);
-
       setMapStage(MAP_STAGES.ROUTE);
-
       setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
       setZoomed(true);
-      // fitToUserAndDest(coords);
     } catch (err) {
       console.error("Route lookup failed", err);
       toast.error("Failed to build route. Please try again.");
@@ -693,39 +706,15 @@ export default function NavigationMap(): JSX.Element {
   }
 
   async function recalcRouteForNavMode(nextNavConditions: NavConditions) {
-    if (!selectedDest || !userPos) return;
-
-
     try {
-      const req = await apiClient.post("/api/map/navigateTo", {
-        destId: selectedDest,
-        lat: userPos.lat,
-        lng: userPos.lng,
-        navConditions: curNavConditions,
-      });
-      const resp = await req.json();
-
-      const pnids: Set<number> = new Set(resp?.path as number[]);
-
-      if (pnids.size === 0) {
-        toast.error("No route found for that selection.");
-        return;
-      }
-
-      setPathNodeIds(pnids)
-      setPath(pnids);
-
-      routeCoordsRef.current = [];
-      // setPathNodeIds(new Set());
+      const curPath = await getRoute();
+      setPath(curPath);
       setNavigating(true);
       setTracking(false);
       setMapStage(MAP_STAGES.ROUTE);
-
-      // setPendingPathKeys(keys);
     } catch (err) {
       console.error("Recalc route failed", err);
       toast.error("Failed to recalculate route.");
-      setPendingPathKeys(null);
     }
   }
 
@@ -733,13 +722,14 @@ export default function NavigationMap(): JSX.Element {
     if (!selectedDest) return toast.error("Please select a destination first.");
     if (!userPos) return toast.error("Tap Locate Me first so I know where you are.");
 
-    const firstEdge = edgeIndex.find((cur) => cur.id === path[0])
+    const firstNode = markers.find((cur) => cur.id == path.firstNodeId);
 
+    if (!firstNode) return toast.error("Navigation could not start.");
 
     setNavigating(true);
 
     const [lng1, lat1] = [userPos.lng, userPos.lat];
-    const [lng2, lat2] = coords[1];
+    const [lng2, lat2] = [firstNode?.lng, firstNode.lat];
     const forward =
       typeof userPos.heading === "number"
         ? userPos.heading
@@ -800,10 +790,9 @@ export default function NavigationMap(): JSX.Element {
     setViewState(defViewState);
     routeCoordsRef.current = [];
 
-    setPath(new Set());
+    setPath(PATH_RESET);
     setNavigating(false);
     setTracking(false);
-    setPendingPathKeys(null);
     setMapStage(MAP_STAGES.IDLE);
     disableCompass();
   }
@@ -1054,8 +1043,7 @@ export default function NavigationMap(): JSX.Element {
         stopTracking();
         setTracking(false);
         setNavigating(false);
-        setPath(new Set());
-        setPathNodeIds(new Set());
+        setPath(PATH_RESET);
         routeCoordsRef.current = [];
         setMapStage(MAP_STAGES.BUILDING);
       } else {
@@ -1211,7 +1199,7 @@ export default function NavigationMap(): JSX.Element {
                 onPressedChange={(pressed) =>
                   setCurNavConditions(prev => ({
                     ...prev,
-                    isAvoidStairs: pressed,
+                    is_avoid_stairs: pressed,
                   }))
                 }
               >
@@ -1233,7 +1221,7 @@ export default function NavigationMap(): JSX.Element {
                 onPressedChange={(pressed) =>
                   setCurNavConditions(prev => ({
                     ...prev,
-                    isInclineLimit: pressed,
+                    is_incline_limit: pressed,
                   }))
                 }
               >
@@ -1259,7 +1247,7 @@ export default function NavigationMap(): JSX.Element {
                 value={[curNavConditions.max_incline]}
                 onValueChange={(val) => {
                   setCurNavConditions((prev) => {
-                    return { ...prev, maxIncline: val[0] }
+                    return { ...prev, max_incline: val[0] }
                   })
                 }}
                 orientation="vertical"
@@ -1532,7 +1520,6 @@ export default function NavigationMap(): JSX.Element {
 
             {/* KEY forces remount so NavModeMap reloads graph cleanly per mode */}
             <NavModeMap
-              // key={`navmode-${String(curNavMode)}`}
               path={path}
               curNavConditions={curNavConditions}
               markers={markers}

@@ -1,12 +1,6 @@
 
 "use client";
 
-/**
- * NOTE: QR generation uses the `qrcode` package.
- * Install it once:
- *   npm i qrcode
- */
-
 import { authClient, type Session } from "@/lib/auth-client";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
@@ -32,15 +26,7 @@ import {
   IconShare2,
   IconTrash,
 } from "@tabler/icons-react";
-import {
-  getAllBuildings,
-  getBuildingPos,
-  AddRoute,
-  getAllUserRoutes,
-  EditRoute,
-  DeleteRoute,
-  getAllBuildingNodes, // IMPORTANT: use this with destinationId
-} from "@/lib/icmapsApi";
+
 
 type MarkerNode = { id: string | number; lng: number; lat: number };
 

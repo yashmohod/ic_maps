@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { db } from "@/db/index";
+import { db, pool } from "@/db/index";
 import { jsonError, isValidLatLng, parseId } from "@/lib/utils";
+
+function getDetail(err: unknown): string {
+  if (err instanceof Error && "cause" in err && err.cause instanceof Error)
+    return err.cause.message;
+  return err instanceof Error ? err.message : String(err);
+}
 
 export async function POST(req: Request) {
   try {
@@ -12,15 +18,15 @@ export async function POST(req: Request) {
 
     if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
 
-    const result = await db.execute(sql`
-      INSERT INTO node_outside (lat, lng, location)
-      VALUES (
-        ${lat as number},
-        ${lng as number},
-        ST_SetSRID(ST_MakePoint(${lng as number}, ${lat as number}), 4326)
-      )
-      RETURNING id;
-    `);
+    const latNum = lat as number;
+    const lngNum = lng as number;
+    const pointWkt = `POINT(${lngNum} ${latNum})`;
+    const result = await pool.query(
+      `INSERT INTO node_outside (lat, lng, location)
+       VALUES ($1, $2, ST_GeomFromText($3, 4326))
+       RETURNING id`,
+      [latNum, lngNum, pointWkt],
+    );
 
     const inserted = result.rows[0];
     if (!inserted?.id) {
@@ -29,8 +35,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ id: inserted.id }, { status: 201 });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Insert failed", 500, message);
+    return jsonError("Insert failed", 500, getDetail(err));
   }
 }
 
@@ -49,17 +54,13 @@ export async function PUT(req: Request) {
     if (!nid) return jsonError("Invalid id", 400);
 
     if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
-    console.log(id);
-    const result = await db.execute(sql`
-      UPDATE node_outside
-      SET
-        lat = ${lat as number},
-        lng = ${lng as number},
-        location = ST_SetSRID(ST_MakePoint(${lng as number}, ${lat as number}), 4326)
-      WHERE id = ${nid}
-
-    `);
-    console.log(result);
+    const latNum = lat as number;
+    const lngNum = lng as number;
+    const pointWkt = `POINT(${lngNum} ${latNum})`;
+    const result = await pool.query(
+      `UPDATE node_outside SET lat = $1, lng = $2, location = ST_GeomFromText($3, 4326) WHERE id = $4`,
+      [latNum, lngNum, pointWkt, nid],
+    );
     if (result.rowCount === 0) {
       return jsonError("Node not found", 404);
     }
@@ -75,8 +76,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Update failed", 500, message);
+    return jsonError("Update failed", 500, getDetail(err));
   }
 }
 
@@ -145,19 +145,22 @@ export async function GET(req: Request) {
 
       if (result.rows.length === 0) return jsonError("Node not found", 404);
       const row = result.rows[0];
-      return NextResponse.json({
-        row: {
-          id: row.id,
-          lat: row.lat,
-          lng: row.lng,
-          isBlueLight: row.is_blue_light,
-          isPedestrian: row.is_pedestrian,
-          isVehicular: row.is_vehicular,
-          isElevator: row.is_elevator,
-          isStairs: row.is_stairs,
-          location: row.location,
+      return NextResponse.json(
+        {
+          row: {
+            id: row.id,
+            lat: row.lat,
+            lng: row.lng,
+            isBlueLight: row.is_blue_light,
+            isPedestrian: row.is_pedestrian,
+            isVehicular: row.is_vehicular,
+            isElevator: row.is_elevator,
+            isStairs: row.is_stairs,
+            location: row.location,
+          },
         },
-      }, { status: 200 });
+        { status: 200 },
+      );
     }
 
     const result = await db.execute(sql<{

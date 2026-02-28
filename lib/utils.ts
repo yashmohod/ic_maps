@@ -44,7 +44,10 @@ export function jsonError(message: string, status: number, detail?: unknown) {
   return NextResponse.json(
     {
       error: message,
-      ...(includeDetail && detail != null ? { detail: String(detail) } : {}),
+      // Include detail in dev, or for 5xx so clients can show the real error (e.g. PostGIS missing)
+      ...(detail != null && (includeDetail || status >= 500)
+        ? { detail: String(detail) }
+        : {}),
     },
     { status },
   );

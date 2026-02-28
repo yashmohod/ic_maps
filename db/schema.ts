@@ -134,9 +134,12 @@ export const nodeInside = pgTable(
   "node_inside",
   {
     id: serial("id").primaryKey(),
-    node_outside_id: integer("node_outside_id").references(() => nodeOutside.id, {
-      onDelete: "cascade",
-    }),
+    node_outside_id: integer("node_outside_id").references(
+      () => nodeOutside.id,
+      {
+        onDelete: "cascade",
+      },
+    ),
     parent_node_inside_id: integer("parent_node_inside_id"),
 
     x: doublePrecision("x").notNull(),
@@ -277,9 +280,6 @@ export const route = pgTable(
   "route",
   {
     id: serial("id").primaryKey(),
-    destination_id: integer("destination_id")
-      .notNull()
-      .references(() => destination.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 256 }).notNull(),
     user_id: text("user_id")
       .notNull()
@@ -288,6 +288,16 @@ export const route = pgTable(
   },
   (t) => [unique("route_user_name_unique").on(t.user_id, t.name)],
 );
+
+export const route_destination = pgTable("route_destination", {
+  order: integer("order").notNull(),
+  destination_id: integer("destination_id")
+    .notNull()
+    .references(() => destination.id, { onDelete: "cascade" }),
+  route_id: integer("route_id")
+    .notNull()
+    .references(() => route.id, { onDelete: "cascade" }),
+});
 
 //join table: destination <-> nodes
 export const destinationNode = pgTable(

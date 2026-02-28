@@ -412,8 +412,6 @@ export default function RouteEditor(): JSX.Element {
       ids.map((nid) => apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId: nid }))
     );
     // setCurDestinationNodes(new Set())
-
-
   }
 
 
@@ -436,7 +434,12 @@ export default function RouteEditor(): JSX.Element {
         isElevator: false,
         isBlueLight: false
       }]);
-      else toast.error("Node could not be added.");
+      else {
+        const msg = (resp as { detail?: string; error?: string }).detail
+          ?? (resp as { detail?: string; error?: string }).error
+          ?? "Node could not be added.";
+        toast.error(msg);
+      }
       return;
     }
 
@@ -512,19 +515,14 @@ export default function RouteEditor(): JSX.Element {
 
   async function getAllFeature() {
     const req = await apiClient.get("/api/map/all")
-
     if (req.status !== 200) {
       toast.error("Failed to fetch map features!");
       return;
     }
-
     const data = await req.json()
-    console.log(data)
-
     setMarkers(
       data.nodes as MarkerNode[]
     );
-
     setEdgeIndex(
       data.edges as EdgeIndexEntry[]
     );

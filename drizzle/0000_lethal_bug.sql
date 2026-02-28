@@ -95,11 +95,16 @@ CREATE TABLE "node_outside" (
 --> statement-breakpoint
 CREATE TABLE "route" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"destination_id" integer NOT NULL,
 	"name" varchar(256) NOT NULL,
 	"user_id" text NOT NULL,
 	"description" text,
 	CONSTRAINT "route_user_name_unique" UNIQUE("user_id","name")
+);
+--> statement-breakpoint
+CREATE TABLE "route_destination" (
+	"order" integer NOT NULL,
+	"destination_id" integer NOT NULL,
+	"route_id" integer NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "session" (
@@ -147,8 +152,9 @@ ALTER TABLE "edge_outside" ADD CONSTRAINT "edge_outside_node_b_id_node_outside_i
 ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_node_outside_id_node_outside_id_fk" FOREIGN KEY ("node_outside_id") REFERENCES "public"."node_outside"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_parent_fk" FOREIGN KEY ("parent_node_inside_id") REFERENCES "public"."node_inside"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "route" ADD CONSTRAINT "route_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "route" ADD CONSTRAINT "route_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "route_destination" ADD CONSTRAINT "route_destination_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "route_destination" ADD CONSTRAINT "route_destination_route_id_route_id_fk" FOREIGN KEY ("route_id") REFERENCES "public"."route"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "destination_node_destination_id_idx" ON "destination_node" USING btree ("destination_id");--> statement-breakpoint

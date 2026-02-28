@@ -1,5 +1,5 @@
 {
-  "id": "71047d48-8ea7-4c8f-9392-8b0facc7c6b0",
+  "id": "3e8e6890-16b9-4dea-b306-724008171549",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -900,12 +900,6 @@
           "primaryKey": true,
           "notNull": true
         },
-        "destination_id": {
-          "name": "destination_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
         "name": {
           "name": "name",
           "type": "varchar(256)",
@@ -927,19 +921,6 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "route_destination_id_destination_id_fk": {
-          "name": "route_destination_id_destination_id_fk",
-          "tableFrom": "route",
-          "tableTo": "destination",
-          "columnsFrom": [
-            "destination_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "route_user_id_user_id_fk": {
           "name": "route_user_id_user_id_fk",
           "tableFrom": "route",
@@ -965,6 +946,64 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.route_destination": {
+      "name": "route_destination",
+      "schema": "",
+      "columns": {
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_id": {
+          "name": "destination_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "route_destination_destination_id_destination_id_fk": {
+          "name": "route_destination_destination_id_destination_id_fk",
+          "tableFrom": "route_destination",
+          "tableTo": "destination",
+          "columnsFrom": [
+            "destination_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "route_destination_route_id_route_id_fk": {
+          "name": "route_destination_route_id_route_id_fk",
+          "tableFrom": "route_destination",
+          "tableTo": "route",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

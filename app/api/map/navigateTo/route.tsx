@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       navConditions: NavConditions;
     };
 
-    const startNodeId: number = await closestNode(lat, lng);
+    const startNodeId: number = await closestNode(lat, lng, navConditions);
     // console.log(startNodeId, destId, navConditions)
     const path: number[] | null = await navigate(startNodeId, destId, navConditions)
 

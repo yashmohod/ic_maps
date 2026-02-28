@@ -1,9 +1,11 @@
 docker rm -f postgress
 docker volume rm -f icmaps_pg 2>/dev/null
-docker run --platform linux/amd64 --name postgress \
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+docker run  --name postgress \
   -p 127.0.0.1:5432:5432 \
   -e POSTGRES_USER=root \
   -e POSTGRES_PASSWORD=root \
   -e POSTGRES_DB=icmaps \
   -v icmaps_pg:/var/lib/postgresql/data \
+  -v "$SCRIPT_DIR/docker-init:/docker-entrypoint-initdb.d:ro" \
   -d postgis/postgis:16-3.5

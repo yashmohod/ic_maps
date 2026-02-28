@@ -54,6 +54,11 @@ async function main() {
       );`);
   }
 
+  // Sync sequence so next INSERT without id gets max(id)+1 (avoids duplicate key when app adds nodes)
+  await pool.query(
+    `SELECT setval(pg_get_serial_sequence('node_outside', 'id'), COALESCE((SELECT MAX(id) FROM node_outside), 1))`,
+  );
+
   const csvPath2 = path.resolve(process.cwd(), "Dev/edges.csv");
   const rl2 = readline.createInterface({
     input: createReadStream(csvPath2, { encoding: "utf8" }),

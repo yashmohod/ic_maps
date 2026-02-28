@@ -32,11 +32,15 @@ type NavMode = {
   param: string;
 }
 
-
+type Path = {
+  path: Set<number>;
+  firstNodeId: number;
+  lastNodeId: number;
+}
 type FeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry, any>;
 
 type Props = {
-  path: Set<number>;
+  path: Path;
   curNavConditions: NavConditions;
   markers: MarkerNode[];
   edgeIndex: EdgeIndexEntry[];
@@ -61,7 +65,7 @@ export default function NavMode({
   const featureCacheRef = useRef<Map<number, CachedFeatures>>(new Map());
 
   function isInPath(id: number) {
-    return path.has(id);
+    return path.path.has(id);
   }
 
 
