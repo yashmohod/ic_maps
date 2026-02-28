@@ -86,14 +86,13 @@ export default function NavMode({
             return null;
           }
         }
-        console.log(isInPath(id), id)
         return {
           type: "Feature",
           properties: {
             key: String(id),
             from: String(from),
             to: String(to),
-            path: isInPath(id), // key can be string|number, isInPath handles it
+            path: path.find((cur) => cur === id) !== undefined ? true : false, // key can be string|number, isInPath handles it
           },
           geometry: {
             type: "LineString",
