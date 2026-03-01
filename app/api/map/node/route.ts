@@ -9,12 +9,16 @@ function getDetail(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+const ROUTE = "/api/map/node";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { lat, lng } = body as { lat: unknown; lng: unknown };
+
+    console.log(`[API ${ROUTE} POST] called`, { lat, lng });
 
     if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
 
@@ -35,6 +39,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ id: inserted.id }, { status: 201 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     return jsonError("Insert failed", 500, getDetail(err));
   }
 }
@@ -49,6 +54,8 @@ export async function PUT(req: Request) {
       lat: unknown;
       lng: unknown;
     };
+
+    console.log(`[API ${ROUTE} PUT] called`, { id, lat, lng });
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
@@ -76,6 +83,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} PUT] error`, err);
     return jsonError("Update failed", 500, getDetail(err));
   }
 }
@@ -86,6 +94,8 @@ export async function DELETE(req: Request) {
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { id } = body as { id: unknown };
+
+    console.log(`[API ${ROUTE} DELETE] called`, { id });
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
@@ -102,6 +112,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Delete failed", 500, message);
   }
@@ -113,6 +124,7 @@ export async function GET(req: Request) {
 
     // Optional: allow filtering by id (?id=123). If absent, return all.
     const idParam = searchParams.get("id");
+    console.log(`[API ${ROUTE} GET] called`, { idParam });
 
     if (idParam != null) {
       const nid = parseId(idParam);
@@ -201,6 +213,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ rows }, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not fetch nodes", 500, message);
   }

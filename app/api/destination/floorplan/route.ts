@@ -41,6 +41,11 @@ export async function POST(req: Request) {
     const file = formData.get("file");
     const destinationIdRaw = formData.get("destinationId");
 
+    console.log(`[API /api/destination/floorplan POST] called`, {
+      hasFile: !!file,
+      destinationId: destinationIdRaw,
+    });
+
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
@@ -110,6 +115,7 @@ export async function POST(req: Request) {
       { status: 201 },
     );
   } catch (err: any) {
+    console.error("[API /api/destination/floorplan POST] error", err);
     return NextResponse.json(
       {
         error: "Upload failed",

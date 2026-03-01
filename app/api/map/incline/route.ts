@@ -8,12 +8,14 @@ import { jsonError, isFiniteNumber, parseId } from "@/lib/utils";
  * Body: { id: number, incline: number }
  * Updates the incline (meters) for an edge_outside by id.
  */
+const ROUTE = "/api/map/incline";
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { id, incline } = body as { id: unknown; incline: unknown };
+    console.log(`[API ${ROUTE} POST] called`, { id, incline });
 
     const edgeId = parseId(id);
     if (!edgeId) return jsonError("Invalid id", 400);
@@ -39,6 +41,7 @@ export async function POST(req: Request) {
       { status: 200 },
     );
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Update failed", 500, message);
   }

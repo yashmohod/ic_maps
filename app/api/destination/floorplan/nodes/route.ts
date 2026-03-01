@@ -3,10 +3,13 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { isFiniteNumber, jsonError, parseId } from "@/lib/utils";
 
+const ROUTE = "/api/destination/floorplan/nodes";
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const destinationId = searchParams.get("destinationId");
+    console.log(`[API ${ROUTE} GET] called`, { destinationId });
     const did = parseId(destinationId);
     if (!did) return jsonError("Invalid destinationId", 400);
 
@@ -42,6 +45,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ nodes }, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not fetch nodes", 500, message);
   }
@@ -69,6 +73,20 @@ export async function POST(req: Request) {
       width,
       height,
     } = body as Record<string, unknown>;
+
+    console.log(`[API ${ROUTE} POST] called`, {
+      destinationId,
+      x,
+      y,
+      nodeOutsideId,
+      parentNodeInsideId,
+      isEntry,
+      isExit,
+      isElevator,
+      isStairs,
+      isRamp,
+      isGroup,
+    });
 
     const did = parseId(destinationId);
     if (!did) return jsonError("Invalid destinationId", 400);
@@ -136,6 +154,7 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Insert failed", 500, message);
   }
@@ -148,6 +167,19 @@ export async function PUT(req: Request) {
 
     const { id, x, y, parentNodeInsideId, isEntry, isExit, isElevator, isStairs, isRamp, isGroup, imageUrl, incline, width, height } =
       body as Record<string, unknown>;
+
+    console.log(`[API ${ROUTE} PUT] called`, {
+      id,
+      x,
+      y,
+      parentNodeInsideId,
+      isEntry,
+      isExit,
+      isElevator,
+      isStairs,
+      isRamp,
+      isGroup,
+    });
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
@@ -198,6 +230,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} PUT] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Update failed", 500, message);
   }
@@ -209,6 +242,7 @@ export async function DELETE(req: Request) {
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { id } = body as { id: unknown };
+    console.log(`[API ${ROUTE} DELETE] called`, { id });
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
 
@@ -219,6 +253,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Delete failed", 500, message);
   }

@@ -4,6 +4,8 @@ import { db } from "@/db/index";
 import { calcDistance } from "@/lib/utils";
 import { jsonError, parseId } from "@/lib/utils";
 
+const ROUTE = "/api/map/edge";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -14,7 +16,7 @@ export async function POST(req: Request) {
       to: unknown;
       biDirectionalEdges: unknown;
     };
-    console.log(from, to, biDirectionalEdges);
+    console.log(`[API ${ROUTE} POST] called`, { from, to, biDirectionalEdges });
     const fromId = Number(from);
     const toId = Number(to);
 
@@ -57,6 +59,7 @@ export async function POST(req: Request) {
     const tt = direction ? b : a;
     return NextResponse.json({ id: inserted.id, a:ff, b:tt }, { status: 201 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Insert failed", 500, message);
   }
@@ -68,6 +71,8 @@ export async function DELETE(req: Request) {
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { id } = body as { id: unknown };
+
+    console.log(`[API ${ROUTE} DELETE] called`, { id });
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
@@ -83,6 +88,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Delete failed", 500, message);
   }
@@ -94,6 +100,7 @@ export async function GET(req: Request) {
 
     // Optional: allow filtering by id (?id=123). If absent, return all.
     const idParam = searchParams.get("id");
+    console.log(`[API ${ROUTE} GET] called`, { idParam });
 
     if (idParam != null) {
       const nid = parseId(idParam);
@@ -167,6 +174,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ rows }, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not fetch nodes", 500, message);
   }

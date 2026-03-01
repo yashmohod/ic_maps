@@ -59,7 +59,7 @@ type Destination = {
   lat?: number;
   lng?: number;
   description?: string;
-  polyGon?: string;
+  polygon?: string;
 };
 
 function Spinner({ className = "h-4 w-4" }: { className?: string }) {
@@ -185,7 +185,7 @@ export default function CustomRoutesPage(): JSX.Element {
   const [curDestinationPoly, setCurDestinationPoly] =
     useState<GeoJSONFeatureCollection | null>(null);
 
-  // ✅ The actual building nodes we will render (fetched via getAllBuildingNodes(destinationId))
+  // Building nodes for the selected destination (from GET /api/destination/outsideNode + GET /api/map/node)
   const [buildingNodes, setBuildingNodes] = useState<MarkerNode[]>([]);
   const [buildingNodesPending, setBuildingNodesPending] = useState(false);
 
@@ -238,14 +238,24 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setSaveEditPendingId(routeId);
     try {
-      const resp: any = await EditRoute(routeId, name, destinationId);
-      if (resp?.status === 200) {
+      const res = await fetch("/api/shareableroute", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          routeId,
+          name,
+          destinationIds: [Number(destinationId)],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
         toast.success("Route updated!");
         cancelEdit();
         await getRoutes();
         void showBuilding(destinationId);
       } else {
-        toast.error("Route could not be updated!");
+        toast.error(data?.error ?? "Route could not be updated!");
       }
     } catch (e) {
       console.error(e);
@@ -319,9 +329,26 @@ export default function CustomRoutesPage(): JSX.Element {
     }
 
     try {
-      const resp: any = await getAllUserRoutes(session.user.id);
-      if (resp?.routes) setRoutes(resp.routes || []);
-      else toast.error("Routes did not load!");
+      const res = await fetch("/api/shareableroute/all", {
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data?.routes)) {
+        const mapped: Route[] = data.routes.map(
+          (r: { id: number; name: string; destinations: Array<{ id: number; name: string }> }) => {
+            const first = r.destinations?.[0];
+            return {
+              id: r.id,
+              name: r.name,
+              destinationId: first != null ? String(first.id) : "",
+              destinationName: first?.name ?? "",
+            };
+          },
+        );
+        setRoutes(mapped);
+      } else {
+        toast.error("Routes did not load!");
+      }
     } catch (e) {
       console.error(e);
       toast.error("Routes did not load!");
@@ -358,14 +385,24 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setCreatePending(true);
     try {
-      const resp: any = await AddRoute(session.user.id, name, destinationId);
-      console.log("AddRoute resp", resp);
-
-      toast.success("Route created!");
-      setNewModalOpen(false);
-
-      await getRoutes();
-      void showBuilding(destinationId);
+      const res = await fetch("/api/shareableroute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          name,
+          destinationIds: [Number(destinationId)],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.id != null) {
+        toast.success("Route created!");
+        setNewModalOpen(false);
+        await getRoutes();
+        void showBuilding(destinationId);
+      } else {
+        toast.error(data?.error ?? "Failed to create route.");
+      }
     } catch (e) {
       console.error(e);
       toast.error("Failed to create route.");
@@ -385,12 +422,18 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setDeletePending(true);
     try {
-      const resp: any = await DeleteRoute(deleteRoute.id);
-      if (resp?.status === 200) {
+      const res = await fetch("/api/shareableroute", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ routeId: deleteRoute.id }),
+      });
+      if (res.ok) {
         toast.success("Route deleted.");
         await getRoutes();
       } else {
-        toast.error("Route could not be deleted!");
+        const data = await res.json().catch(() => ({}));
+        toast.error(data?.error ?? "Route could not be deleted!");
       }
 
       setConfirmDeleteOpen(false);
@@ -436,34 +479,23 @@ export default function CustomRoutesPage(): JSX.Element {
   const [destinations, setDestinations] = useState<Destination[]>();
 
   async function getDestinations() {
-    const resp: any = await getAllBuildings();
-    if (resp?.buildings) setDestinations(resp.buildings || []);
-    else toast.error("Buildings did not load!");
-  }
-
-  function extractNodesFromResp(resp: any): any[] {
-    if (!resp) return [];
-    if (Array.isArray(resp)) return resp;
-
-    // common shapes
-    const candidates = [
-      resp.nodes,
-      resp.markers,
-      resp.building_nodes,
-      resp.data,
-      resp.all_nodes,
-      resp?.payload?.nodes,
-      resp?.payload?.markers,
-    ];
-
-    const found = candidates.find((x) => Array.isArray(x));
-    return Array.isArray(found) ? found : [];
+    try {
+      const res = await fetch("/api/destination");
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data?.destinations)) {
+        setDestinations(data.destinations);
+      } else {
+        toast.error("Buildings did not load!");
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Buildings did not load!");
+    }
   }
 
   /**
-   * ✅ Show building: polygon from getBuildingPos
-   * ✅ Nodes from getAllBuildingNodes(destinationId)
-   * ❌ No "building position" marker rendered
+   * Show building: polygon and position from destinations array (from GET /api/destination).
+   * Nodes: GET /api/destination/outsideNode?id=X then GET /api/map/node, filter by node ids.
    */
   async function showBuilding(destinationId: string) {
     if (!destinationId) {
@@ -476,50 +508,54 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setPreviewDestId(String(destinationId));
 
-    // 1) Fetch polygon + building lat/lng (for camera)
-    try {
-      const resp: any = await getBuildingPos(String(destinationId));
-
-      const polyStr = resp?.building?.polyGon;
-      const parsed = typeof polyStr === "string" ? JSON.parse(polyStr) : null;
+    // 1) Polygon + lat/lng from destinations array (already loaded)
+    const dest = destinations?.find((d) => String(d.id) === String(destinationId));
+    if (dest) {
+      const polyStr = dest.polygon;
+      const parsed = typeof polyStr === "string" ? JSON.parse(polyStr) : polyStr;
       const normalized = normalizeToFeatureCollection(parsed);
       setCurDestinationPoly(normalized);
 
-      const b = resp?.building;
-      const rawLat = Number(b?.lat);
-      const rawLng = Number(b?.lng);
-
+      const rawLat = Number(dest.lat);
+      const rawLng = Number(dest.lng);
       const pos =
         Number.isFinite(rawLat) && Number.isFinite(rawLng)
           ? { lat: rawLat - 0.0002, lng: rawLng + 0.00005 }
           : null;
-
       setPreviewDestPos(pos);
       if (pos) ensureCenter(pos.lng, pos.lat, 18.5);
-    } catch (err) {
-      console.error("getBuildingPos failed", err);
-      toast.error("Unable to locate that building right now.");
+    } else {
       setCurDestinationPoly(null);
       setPreviewDestPos(null);
     }
 
-    // 2) Fetch nodes for THIS building
+    // 2) Fetch node ids for this destination, then get coords from map/node
     setBuildingNodesPending(true);
     try {
-      const respNodes: any = await getAllBuildingNodes(String(destinationId));
-      const raw = extractNodesFromResp(respNodes);
-
-      const cleaned: MarkerNode[] = raw
-        .map((n: any) => ({
-          id: n.id,
-          lng: Number(n.lng),
-          lat: Number(n.lat),
+      const nodeRes = await fetch(
+        `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
+      );
+      const nodeData = await nodeRes.json().catch(() => ({}));
+      const nodeIds: number[] = Array.isArray(nodeData?.nodes) ? nodeData.nodes : [];
+      if (nodeIds.length === 0) {
+        setBuildingNodes([]);
+        return;
+      }
+      const mapRes = await fetch("/api/map/node");
+      const mapData = await mapRes.json().catch(() => ({}));
+      const rows = Array.isArray(mapData?.rows) ? mapData.rows : [];
+      const idSet = new Set(nodeIds);
+      const cleaned: MarkerNode[] = rows
+        .filter((row: { id?: number }) => row.id != null && idSet.has(Number(row.id)))
+        .map((row: { id: number; lat: number; lng: number }) => ({
+          id: row.id,
+          lng: Number(row.lng),
+          lat: Number(row.lat),
         }))
         .filter(
-          (n: any) =>
-            n.id != null && Number.isFinite(n.lng) && Number.isFinite(n.lat),
+          (n: MarkerNode) =>
+            Number.isFinite(n.lng) && Number.isFinite(n.lat),
         );
-
       setBuildingNodes(cleaned);
     } catch (err) {
       console.error("getAllBuildingNodes failed", err);

@@ -299,6 +299,30 @@ export const route_destination = pgTable("route_destination", {
     .references(() => route.id, { onDelete: "cascade" }),
 });
 
+// Relations for route ↔ route_destination ↔ destination
+export const routeRelations = relations(route, ({ one, many }) => ({
+  user: one(user, { fields: [route.user_id], references: [user.id] }),
+  route_destinations: many(route_destination),
+}));
+
+export const routeDestinationRelations = relations(
+  route_destination,
+  ({ one }) => ({
+    route: one(route, {
+      fields: [route_destination.route_id],
+      references: [route.id],
+    }),
+    destination: one(destination, {
+      fields: [route_destination.destination_id],
+      references: [destination.id],
+    }),
+  }),
+);
+
+export const destinationRelations = relations(destination, ({ many }) => ({
+  route_destinations: many(route_destination),
+}));
+
 //join table: destination <-> nodes
 export const destinationNode = pgTable(
   "destination_node",
@@ -329,6 +353,7 @@ export const schema = {
   navMode,
   destination,
   route,
+  route_destination,
   destinationNode,
 };
 export type User = InferSelectModel<typeof user>;
@@ -339,4 +364,5 @@ export type EdgeInside = InferSelectModel<typeof edgeInside>;
 export type NavMode = InferSelectModel<typeof navMode>;
 export type Destination = InferSelectModel<typeof destination>;
 export type Route = InferSelectModel<typeof route>;
+export type RouteDestination = InferSelectModel<typeof route_destination>;
 export type DestinationNode = InferSelectModel<typeof destinationNode>;

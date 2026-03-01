@@ -4,11 +4,13 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { schema } from "@/db/schema";
 
+const ROUTE = "/api/users/[id]";
 export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
+  console.log(`[API ${ROUTE} GET] called`, { id });
   try {
     const rows = await db
       .select({
@@ -27,7 +29,7 @@ export async function GET(
 
     return NextResponse.json({ user: rows[0] });
   } catch (error) {
-    console.error("[users GET]", error);
+    console.error(`[API ${ROUTE} GET] error`, error);
     return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
   }
 }
@@ -39,6 +41,7 @@ export async function PATCH(
   const { id } = await context.params;
   try {
     const body = (await req.json()) as { isAdmin?: boolean; name?: string };
+    console.log(`[API ${ROUTE} PATCH] called`, { id, body });
     const updates: { isAdmin?: boolean; name?: string } = {};
 
     if (typeof body.isAdmin === "boolean") {
@@ -89,7 +92,7 @@ export async function PATCH(
 
     return NextResponse.json({ user: rows[0] });
   } catch (error) {
-    console.error("[users PATCH]", error);
+    console.error(`[API ${ROUTE} PATCH] error`, error);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
 }
@@ -99,6 +102,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
+  console.log(`[API ${ROUTE} DELETE] called`, { id });
   try {
     const result = await db.delete(schema.user).where(eq(schema.user.id, id)).run();
     if (result.changes === 0) {
@@ -106,7 +110,7 @@ export async function DELETE(
     }
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[users DELETE]", error);
+    console.error(`[API ${ROUTE} DELETE] error`, error);
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

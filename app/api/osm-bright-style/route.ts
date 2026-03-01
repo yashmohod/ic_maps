@@ -27,6 +27,8 @@ function pickMainVectorSourceName(style: AnyStyle): string | null {
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
+  console.log(`[API /api/osm-bright-style GET] called`, { origin: url.origin });
+  try {
   const origin = url.origin;
 
   // 1) Load the base style file (OSM Bright local version)
@@ -105,4 +107,11 @@ export async function GET(req: Request) {
       "cache-control": "no-store",
     },
   });
+  } catch (err) {
+    console.error("[API /api/osm-bright-style GET] error", err);
+    return NextResponse.json(
+      { error: "Style load failed", detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
+  }
 }

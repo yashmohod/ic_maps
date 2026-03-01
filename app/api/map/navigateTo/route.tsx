@@ -17,6 +17,8 @@ export async function POST(req: Request) {
       navConditions: NavConditions;
     };
 
+    console.log(`[API /api/map/navigateTo POST] called`, { destId, lat, lng, navConditions });
+
     const startNodeId: number = await closestNode(lat, lng, navConditions);
     // console.log(startNodeId, destId, navConditions)
     const path: number[] | null = await navigate(startNodeId, destId, navConditions)
@@ -24,6 +26,7 @@ export async function POST(req: Request) {
     console.log(path);
     return NextResponse.json({ path }, { status: 200 })
   } catch (err: unknown) {
+    console.error("[API /api/map/navigateTo POST] error", err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not find a route!", 500, message);
   }

@@ -13,6 +13,8 @@ const navModeColumnMap = {
   is_blue_light: "is_blue_light",
 } as const;
 
+const ROUTE = "/api/map/setFeatureStatus";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -24,9 +26,9 @@ export async function POST(req: Request) {
     const value = parseBoolean(body.value);
     if (value == null) return jsonError("Invalid value (must be boolean)", 400);
 
-
-
     const navModeRaw = String(body.navMode ?? "").trim() as keyof typeof navModeColumnMap;
+
+    console.log(`[API ${ROUTE} POST] called`, { id, value, navMode: body.navMode });
     const column = navModeColumnMap[navModeRaw];
     if (!column) return jsonError("Unsupported navMode", 400);
 
@@ -43,6 +45,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ id, navMode: navModeRaw, value }, { status: 200 });
   } catch (err: any) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     return jsonError("Update failed", 500, err?.message ?? String(err));
   }
 }

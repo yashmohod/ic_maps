@@ -9,6 +9,8 @@ import {
   parsePolygon,
 } from "@/lib/utils";
 
+const ROUTE = "/api/destination";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -20,6 +22,8 @@ export async function POST(req: Request) {
       lng: unknown;
       polygon: unknown;
     };
+
+    console.log(`[API ${ROUTE} POST] called`, { name, lat, lng });
 
     if (!isNonEmptyString(name, 256)) {
       return jsonError(
@@ -70,6 +74,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ id: inserted.id }, { status: 201 });
   } catch (err: any) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     // Unexpected/DB errors -> 500
     return jsonError("Destination insert failed", 500, err?.message ?? err);
   }
@@ -89,6 +94,8 @@ export async function PUT(req: Request) {
       openTime: unknown;
       closeTime: unknown;
     };
+
+    console.log(`[API ${ROUTE} PUT] called`, { id, name, lat, lng, openTime, closeTime });
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
@@ -157,6 +164,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: any) {
+    console.error(`[API ${ROUTE} PUT] error`, err);
     return jsonError("Destination update failed", 500, err?.message ?? err);
   }
 }
@@ -167,6 +175,7 @@ export async function DELETE(req: Request) {
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { id } = body as { id: unknown };
+    console.log(`[API ${ROUTE} DELETE] called`, { id });
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
 
@@ -182,12 +191,14 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: any) {
+    console.error(`[API ${ROUTE} DELETE] error`, err);
     return jsonError("Destination delete failed", 500, err?.message ?? err);
   }
 }
 
 export async function GET(_req: Request) {
   try {
+    console.log(`[API ${ROUTE} GET] called`);
     const result = await db.execute(sql`
       SELECT * FROM destination;
     `);
@@ -209,6 +220,7 @@ export async function GET(_req: Request) {
 
     return NextResponse.json({ destinations }, { status: 200 });
   } catch (err: any) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     return jsonError("Could not fetch destinations", 500, err?.message ?? err);
   }
 }

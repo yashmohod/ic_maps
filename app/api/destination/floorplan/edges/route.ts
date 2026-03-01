@@ -3,10 +3,13 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { jsonError, parseId } from "@/lib/utils";
 
+const ROUTE = "/api/destination/floorplan/edges";
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const destinationId = searchParams.get("destinationId");
+    console.log(`[API ${ROUTE} GET] called`, { destinationId });
     const did = parseId(destinationId);
     if (!did) return jsonError("Invalid destinationId", 400);
 
@@ -31,6 +34,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ edges }, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not fetch edges", 500, message);
   }
@@ -46,6 +50,15 @@ export async function POST(req: Request) {
       string,
       unknown
     >;
+
+    console.log(`[API ${ROUTE} POST] called`, {
+      destinationId,
+      from,
+      to,
+      biDirectional,
+      sourceHandle,
+      targetHandle,
+    });
 
     const did = parseId(destinationId);
     if (!did) return jsonError("Invalid destinationId", 400);
@@ -82,6 +95,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ id: row.id }, { status: 201 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Insert failed", 500, message);
   }
@@ -93,6 +107,7 @@ export async function DELETE(req: Request) {
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { id } = body as { id: unknown };
+    console.log(`[API ${ROUTE} DELETE] called`, { id });
     const eid = parseId(id);
     if (!eid) return jsonError("Invalid id", 400);
 
@@ -102,6 +117,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Delete failed", 500, message);
   }

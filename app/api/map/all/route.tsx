@@ -14,8 +14,10 @@ function jsonError(message: string, status: number, detail?: unknown) {
 }
 
 
+const ROUTE = "/api/map/all";
 export async function GET() {
   try {
+    console.log(`[API ${ROUTE} GET] called`);
     const resultnode = await db.execute(sql<{
       id: number;
       lng: number;
@@ -86,6 +88,7 @@ export async function GET() {
 
     return NextResponse.json({ nodes, edges }, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not fetch nodes", 500, message);
   }

@@ -18,12 +18,12 @@ import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
 
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
-import { getAllNavModes, RouteNavigate } from "@/lib/icmapsApi";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
+import type { NavConditions } from "@/lib/navigation";
+import apiClient from "@/lib/apiClient";
 
-// ✅ This is the KEY: load markers + edgeIndex the same way your working pages do
-import NavModeMap from "@/components/NavMode"; // <-- adjust if your path differs
+import NavModeMap from "@/components/NavMode";
 
 type LngLat = { lng: number; lat: number };
 
@@ -32,11 +32,6 @@ type UserPos = {
   lat: number;
   accuracy?: number;
   heading?: number | null;
-};
-
-type NavMode = {
-  id: string | number;
-  name: string;
 };
 
 type MarkerNode = { id: string | number; lng: number; lat: number };
@@ -66,36 +61,10 @@ function Spinner({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
-/** Extract path keys from many possible shapes:
- * - { path: [...] }
- * - { path: { path: [...] } }
- * - resp.path being array directly
- */
-function extractPathKeys(resp: any): string[] {
-  if (!resp) return [];
-
-  // common shapes
-  if (Array.isArray(resp?.path)) return resp.path.map(String);
-  if (Array.isArray(resp)) return resp.map(String);
-
-  // nested path object
-  if (resp?.path && typeof resp.path === "object" && Array.isArray(resp.path.path)) {
-    return resp.path.path.map(String);
-  }
-
-  // other possible fields
-  const candidates = [
-    resp.pathKeys,
-    resp.path_keys,
-    resp.edges,
-    resp.routeEdges,
-    resp.route_edges,
-    resp.data?.path,
-    resp.payload?.path,
-  ];
-
-  const found = candidates.find((x) => Array.isArray(x));
-  return Array.isArray(found) ? found.map(String) : [];
+/** Extract path (edge IDs) from navigateTo response */
+function extractPath(resp: { path?: unknown }): number[] {
+  if (!resp?.path || !Array.isArray(resp.path)) return [];
+  return resp.path.filter((x): x is number => typeof x === "number");
 }
 
 function makeLookups(markersLocal: MarkerNode[], edgeIndexLocal: EdgeIndexEntry[]) {
@@ -227,26 +196,93 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const surfaceSubtleClass = "bg-panel-muted text-panel-muted-foreground";
   const borderMutedClass = "border-border";
 
-  /** -------- nav modes -------- */
-  const [navModes, setNavModes] = useState<NavMode[]>([]);
-  const [curNavMode, setCurNavMode] = useState<string | number>("");
-  const [modesPending, setModesPending] = useState(true);
+  /** Route from shareable link: GET /api/shareableroute?id=... */
+  type RouteInfo = { name: string; destinationId: number } | null;
+  const [routeInfo, setRouteInfo] = useState<RouteInfo>(null);
+  const [routeLoadPending, setRouteLoadPending] = useState(true);
 
-  async function loadNavModes() {
-    setModesPending(true);
+  /** Nav conditions for navigateTo (single-destination routing) */
+  const [curNavConditions, setCurNavConditions] = useState<NavConditions>({
+    is_pedestrian: true,
+    is_vehicular: false,
+    is_avoid_stairs: false,
+    is_incline_limit: false,
+    max_incline: 0,
+  });
+
+  /** Load shareable route by id to get first destination */
+  async function loadRoute() {
+    if (!routeIdRaw) {
+      setRouteLoadPending(false);
+      return;
+    }
+    setRouteLoadPending(true);
     try {
-      const resp: any = await getAllNavModes();
-      const list: NavMode[] = resp?.NavModes ?? resp?.navModes ?? [];
-      setNavModes(list);
-      if (list.length > 0) setCurNavMode(list[0].id);
+      const res = await fetch(
+        `/api/shareableroute?id=${encodeURIComponent(routeIdRaw)}`,
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error ?? "Route not found.");
+        setRouteInfo(null);
+        return;
+      }
+      const firstDest = data.destinations?.[0];
+      if (!firstDest?.id) {
+        toast.error("This route has no destination.");
+        setRouteInfo(null);
+        return;
+      }
+      setRouteInfo({
+        name: data.name ?? "Route",
+        destinationId: Number(firstDest.id),
+      });
     } catch (e) {
       console.error(e);
-      toast.error("Failed to load navigation modes.");
+      toast.error("Failed to load route.");
+      setRouteInfo(null);
     } finally {
-      setModesPending(false);
+      setRouteLoadPending(false);
     }
   }
 
+  /** Load graph (nodes + edges) from GET /api/map/all */
+  const [graphLoaded, setGraphLoaded] = useState(false);
+  async function loadGraph() {
+    try {
+      const res = await apiClient.get("/api/map/all");
+      if (res.status !== 200) {
+        toast.error("Failed to load map data.");
+        return;
+      }
+      const data = await res.json();
+      const nodes = data.nodes ?? [];
+      const edges = (data.edges ?? []).map(
+        (e: { id: number; from: number; to: number }) => ({
+          key: String(e.id),
+          from: e.from,
+          to: e.to,
+        }),
+      );
+      setMarkers(nodes);
+      setEdgeIndex(edges);
+      setGraphLoaded(true);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to load map data.");
+    }
+  }
+
+  /** -------- nav modes (simplified: pedestrian / vehicular toggle) -------- */
+  const navModeOptions = useMemo(
+    () => [
+      { id: "pedestrian", label: "Pedestrian", conditions: { is_pedestrian: true, is_vehicular: false } as const },
+      { id: "vehicular", label: "Vehicular", conditions: { is_pedestrian: false, is_vehicular: true } as const },
+    ],
+    [],
+  );
+
+  /** -------- (removed legacy nav modes / getAllNavModes) -------- */
   /** -------- user location -------- */
   const [userPos, setUserPos] = useState<UserPos | null>(null);
   const [locating, setLocating] = useState(false);
@@ -384,38 +420,42 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     );
   }
 
-  /** Fetch path keys from backend */
+  /** Fetch path from our API (user -> route's first destination) */
   async function refreshRoute() {
     if (!routeIdRaw) return;
     if (!userPos) return;
-    if (!curNavMode) return;
+    if (!routeInfo?.destinationId) return;
     if (routePending) return;
 
     setRoutePending(true);
     try {
-      // allow either numeric or string ids
-      const asNum = Number(routeIdRaw);
-      const routeIdForApi: any = Number.isFinite(asNum) ? asNum : routeIdRaw;
-
-      const resp: any = await (RouteNavigate as any)(
-        routeIdForApi,
-        userPos.lat,
-        userPos.lng,
-        Number(curNavMode),
-      );
-
-      console.log("RouteNavigate resp:", resp);
-
-      const keys = extractPathKeys(resp);
-      if (!keys.length) {
+      const res = await apiClient.post("/api/map/navigateTo", {
+        destId: routeInfo.destinationId,
+        lat: userPos.lat,
+        lng: userPos.lng,
+        navConditions: curNavConditions,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
         setPathKeys([]);
         setPathSet(new Set());
         setRouteFC(null);
         setDestPos(null);
-        toast.error("No path returned for that share route.");
+        toast.error(data?.error ?? "No path returned.");
         return;
       }
 
+      const path = extractPath(data);
+      if (!path.length) {
+        setPathKeys([]);
+        setPathSet(new Set());
+        setRouteFC(null);
+        setDestPos(null);
+        toast.error("No path returned for that route.");
+        return;
+      }
+
+      const keys = path.map(String);
       setPathKeys(keys);
       setPathSet(new Set(keys));
     } catch (e) {
@@ -504,20 +544,30 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     setTimeout(() => fitToUserAndRoute(allCoords), 0);
   }, [pathKeys, markers, edgeIndex, userPos?.lat, userPos?.lng]);
 
-  /** lifecycle */
+  /** lifecycle: load route and graph on mount */
   useEffect(() => {
-    if (!routeIdRaw) toast.error("Missing route id in URL.");
-    void loadNavModes();
+    if (!routeIdRaw) {
+      toast.error("Missing route id in URL.");
+      setRouteLoadPending(false);
+      return;
+    }
+    void loadRoute();
+    void loadGraph();
     void locateOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeIdRaw]);
 
-  // refresh route when mode/location ready
+  /** Refresh route when destination, location, or nav conditions change */
   useEffect(() => {
+    if (!routeInfo?.destinationId || !userPos || !graphLoaded) return;
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curNavMode, userPos?.lat, userPos?.lng, routeIdRaw]);
-  const emptyPath = useMemo(() => new Set<string>(), []);
+  }, [routeInfo?.destinationId, userPos?.lat, userPos?.lng, curNavConditions, graphLoaded]);
+
+  const emptyPath = useMemo(
+    () => ({ path: new Set<number>(), firstNodeId: -1, lastNodeId: -1 }),
+    [],
+  );
   /** UI */
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
@@ -543,10 +593,18 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 Shareable Route
               </p>
               <p className="truncate text-sm font-semibold">
-                Route ID: <span className="opacity-80">{routeIdRaw || "—"}</span>
+                {routeLoadPending
+                  ? "Loading…"
+                  : routeInfo
+                    ? routeInfo.name
+                    : `Route ID: ${routeIdRaw || "—"}`}
               </p>
               <p className="mt-1 text-xs text-panel-muted-foreground">
-                {routePending ? "Refreshing route…" : "Route loaded from your current location."}
+                {routePending
+                  ? "Refreshing route…"
+                  : routeInfo
+                    ? "Route to destination from your current location."
+                    : "Load a route to see directions."}
               </p>
             </div>
 
@@ -576,7 +634,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                   "disabled:opacity-60",
                 ].join(" ")}
                 onClick={refreshRoute}
-                disabled={!userPos || !curNavMode || routePending}
+                disabled={!userPos || !routeInfo?.destinationId || routePending}
                 title="Refresh route"
               >
                 {routePending ? <Spinner /> : null}
@@ -585,47 +643,38 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             </div>
           </div>
 
-          {/* Nav mode pills */}
+          {/* Nav mode: Pedestrian / Vehicular */}
           <div className="mt-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-panel-muted-foreground">
-                Navigation mode
-              </span>
-              {modesPending ? (
-                <span className="inline-flex items-center gap-2 text-[11px] text-panel-muted-foreground">
-                  <Spinner className="h-3.5 w-3.5" />
-                  Loading modes…
-                </span>
-              ) : null}
-            </div>
-
-            <div className="mt-2 -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {navModes.map((mode) => {
-                const active = String(mode.id) === String(curNavMode);
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-panel-muted-foreground">
+              Mode
+            </span>
+            <div className="mt-2 -mx-1 flex gap-2">
+              {navModeOptions.map((opt) => {
+                const active =
+                  (opt.id === "pedestrian" && curNavConditions.is_pedestrian) ||
+                  (opt.id === "vehicular" && curNavConditions.is_vehicular);
                 return (
                   <button
-                    key={String(mode.id)}
-                    onClick={() => setCurNavMode(mode.id)}
+                    key={opt.id}
+                    onClick={() =>
+                      setCurNavConditions((prev) => ({
+                        ...prev,
+                        ...opt.conditions,
+                      }))
+                    }
                     disabled={routePending}
                     className={[
-                      "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
+                      "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition",
                       active
                         ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
                         : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
                       routePending && "opacity-60",
                     ].join(" ")}
-                    title={active ? "Current mode" : "Switch mode"}
                   >
-                    {mode.name}
+                    {opt.label}
                   </button>
                 );
               })}
-
-              {!modesPending && navModes.length === 0 && (
-                <span className="px-2 text-[11px] text-panel-muted-foreground">
-                  No nav modes available.
-                </span>
-              )}
             </div>
           </div>
         </div>
@@ -652,9 +701,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the yellow route ourselves) */}
             <NavModeMap
               path={emptyPath}
-              navMode={curNavMode}
+              curNavConditions={curNavConditions}
               markers={markers}
-              setMarkers={setMarkers}
               edgeIndex={edgeIndex}
               setEdgeIndex={setEdgeIndex}
             />

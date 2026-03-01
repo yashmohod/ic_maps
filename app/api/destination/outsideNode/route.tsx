@@ -3,11 +3,14 @@ import { jsonError, parseId } from "@/lib/utils";
 import { db, pool } from "@/db";
 import { sql } from "drizzle-orm";
 
+const ROUTE = "/api/destination/outsideNode";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
     const { destId, nodeId } = body as { destId: number; nodeId: number };
+    console.log(`[API ${ROUTE} POST] called`, { destId, nodeId });
     const did = parseId(destId);
     const nid = parseId(nodeId);
     if (!did || !nid) return jsonError("Invalid Ids", 400);
@@ -36,6 +39,7 @@ export async function POST(req: Request) {
       client.release();
     }
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Node could not be added", 500, message);
   }
@@ -48,6 +52,7 @@ export async function DELETE(req: Request) {
     if (!body) return jsonError("Invalid JSON body", 400);
 
     const { destId, nodeId } = body as { destId: number; nodeId: number };
+    console.log(`[API ${ROUTE} DELETE] called`, { destId, nodeId });
     const did = parseId(destId);
     const nid = parseId(nodeId);
     if (!did || !nid) return jsonError("Invalid id", 400);
@@ -81,6 +86,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Delete failed", 500, message);
   }
@@ -90,6 +96,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const destinationId = searchParams.get("id");
+    console.log(`[API ${ROUTE} GET] called`, { destinationId });
     const did = parseId(destinationId);
     if (!did) return jsonError("Invalid Id", 400);
 
@@ -102,6 +109,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ nodes }, { status: 200 })
 
   } catch (err: unknown) {
+    console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
     return jsonError("Could not fetch nodes", 500, message);
   }
