@@ -1,6 +1,5 @@
 // src/components/MapEditor.tsx
 "use client";
-import apiClient from "@/lib/apiClient";
 import React, { useMemo, useRef, useState, useEffect, type JSX } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import {

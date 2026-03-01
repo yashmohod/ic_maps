@@ -1,4 +1,3 @@
-// scripts/seed.ts
 import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { db, pool } from "@/db"; // adjust path alias if needed

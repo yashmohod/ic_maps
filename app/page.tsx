@@ -225,19 +225,9 @@ export default function NavigationMap(): JSX.Element {
 
   const { isDark } = useAppTheme();
 
-  const { data: session, error, refetch, isPending } = authClient.useSession();
+  const { data: session, error } = authClient.useSession();
 
   const [isAdmin, setIsAdmin] = useState(false);
-  async function loadIsAdmin(userId: string) {
-    try {
-      const resp = await fetch(`/api/users/${userId}`);
-      if (!resp.ok) return;
-      const data = (await resp.json()) as { user?: { isAdmin: boolean } };
-      setIsAdmin(!!data.user?.isAdmin);
-    } catch (err) {
-      console.error(err);
-    }
-  };
   const [isIcUser, setIsIcUser] = useState(false);
   function isICUser(email: string) {
     let frag = email.split("@");
@@ -246,9 +236,9 @@ export default function NavigationMap(): JSX.Element {
 
   useEffect(() => {
     if (!session || error) return;
-    loadIsAdmin(session.user.id);
+    setIsAdmin(Boolean((session.user as { isAdmin?: boolean }).isAdmin));
     isICUser(session.user.email);
-  }, [session, refetch, error]);
+  }, [session, error]);
 
   useEffect(() => {
     if (!pendingRouteStartRef.current) return;

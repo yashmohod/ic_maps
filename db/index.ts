@@ -26,11 +26,11 @@ export const db = drizzle({ client: pool });
 export { pool };
 
 export async function getUser(userId: string) {
-  const rows = await db
-    .select()
-    .from(schema.user)
-    .where(eq(schema.user.id, userId))
-    .limit(1);
-
-  return rows[0];
+  if (!userId) return null;
+  return {
+    id: userId,
+    name: userId.split("@")[0] || "Guest",
+    email: userId.includes("@") ? userId : `${userId}@local.icmaps`,
+    isAdmin: false,
+  };
 }

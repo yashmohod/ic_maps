@@ -1,10 +1,18 @@
-import { getUser } from "@/db";
 import { NextResponse } from "next/server";
+import { getLocalUser } from "@/lib/local-users";
+import { getUser } from "@/db/index";
 
 const BACKEND = "http://localhost:8080";
 const ROUTE = "/api/user";
 
 export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const id = (searchParams.get("id") || "").trim();
+
+  if (id) {
+    return NextResponse.json({ user: getLocalUser(id) });
+  }
+
   const qs = new URL(req.url).search;
   console.log(`[API ${ROUTE} GET] called`, { search: qs });
   try {

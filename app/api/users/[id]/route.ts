@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-
-import { db } from "@/db";
-import { schema } from "@/db/schema";
+import { deleteLocalUser, getLocalUser, upsertLocalUser } from "@/lib/local-users";
 
 const ROUTE = "/api/users/[id]";
 export async function GET(
@@ -12,22 +9,7 @@ export async function GET(
   const { id } = await context.params;
   console.log(`[API ${ROUTE} GET] called`, { id });
   try {
-    const rows = await db
-      .select({
-        id: schema.user.id,
-        name: schema.user.name,
-        email: schema.user.email,
-        isAdmin: schema.user.isAdmin,
-      })
-      .from(schema.user)
-      .where(eq(schema.user.id, id))
-      .limit(1);
-
-    if (!rows[0]) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ user: rows[0] });
+    return NextResponse.json({ user: getLocalUser(id) });
   } catch (error) {
     console.error(`[API ${ROUTE} GET] error`, error);
     return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
@@ -65,32 +47,8 @@ export async function PATCH(
       );
     }
 
-    const updated = await db
-      .update(schema.user)
-      .set(updates)
-      .where(eq(schema.user.id, id))
-      .run();
-
-    const rows = await db
-      .select({
-        id: schema.user.id,
-        name: schema.user.name,
-        email: schema.user.email,
-        isAdmin: schema.user.isAdmin,
-      })
-      .from(schema.user)
-      .where(eq(schema.user.id, id))
-      .limit(1);
-
-    if (!rows[0]) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    if (updated.changes === 0) {
-      return NextResponse.json({ user: rows[0], unchanged: true });
-    }
-
-    return NextResponse.json({ user: rows[0] });
+    const user = upsertLocalUser(id, updates);
+    return NextResponse.json({ user });
   } catch (error) {
     console.error(`[API ${ROUTE} PATCH] error`, error);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
@@ -104,8 +62,8 @@ export async function DELETE(
   const { id } = await context.params;
   console.log(`[API ${ROUTE} DELETE] called`, { id });
   try {
-    const result = await db.delete(schema.user).where(eq(schema.user.id, id)).run();
-    if (result.changes === 0) {
+    const deleted = deleteLocalUser(id);
+    if (!deleted) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     return NextResponse.json({ success: true });
