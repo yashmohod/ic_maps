@@ -591,7 +591,7 @@ export default function NavigationMap(): JSX.Element {
 
   const buildingNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!markers.length || !buildingNodes.size) return null;
-    const lastEdge = edgeIndex.find((cur) => cur.id === path[path.length - 1]);
+    const lastEdge = edgeIndex.find((cur) => cur.id === path.lastNodeId);
     return {
       type: "FeatureCollection",
       features: markers
