@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { deleteLocalUser, getLocalUser, upsertLocalUser } from "@/lib/local-users";
 
+const ROUTE = "/api/users/[id]";
 export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
+  console.log(`[API ${ROUTE} GET] called`, { id });
   try {
     return NextResponse.json({ user: getLocalUser(id) });
   } catch (error) {
-    console.error("[users GET]", error);
+    console.error(`[API ${ROUTE} GET] error`, error);
     return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
   }
 }
@@ -20,12 +22,9 @@ export async function PATCH(
 ) {
   const { id } = await context.params;
   try {
-    const body = (await req.json()) as {
-      isAdmin?: boolean;
-      name?: string;
-      email?: string;
-    };
-    const updates: { isAdmin?: boolean; name?: string; email?: string } = {};
+    const body = (await req.json()) as { isAdmin?: boolean; name?: string };
+    console.log(`[API ${ROUTE} PATCH] called`, { id, body });
+    const updates: { isAdmin?: boolean; name?: string } = {};
 
     if (typeof body.isAdmin === "boolean") {
       updates.isAdmin = body.isAdmin;
@@ -40,10 +39,6 @@ export async function PATCH(
       }
       updates.name = trimmed;
     }
-    if (typeof body.email === "string") {
-      const trimmed = body.email.trim();
-      if (trimmed) updates.email = trimmed;
-    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
@@ -55,7 +50,7 @@ export async function PATCH(
     const user = upsertLocalUser(id, updates);
     return NextResponse.json({ user });
   } catch (error) {
-    console.error("[users PATCH]", error);
+    console.error(`[API ${ROUTE} PATCH] error`, error);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
 }
@@ -65,6 +60,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
+  console.log(`[API ${ROUTE} DELETE] called`, { id });
   try {
     const deleted = deleteLocalUser(id);
     if (!deleted) {
@@ -72,7 +68,7 @@ export async function DELETE(
     }
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[users DELETE]", error);
+    console.error(`[API ${ROUTE} DELETE] error`, error);
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

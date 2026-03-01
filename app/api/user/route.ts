@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getLocalUser } from "@/lib/local-users";
+import { getUser } from "@/db/index";
 
-const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
+const BACKEND = "http://localhost:8080";
+const ROUTE = "/api/user";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -12,10 +14,17 @@ export async function GET(req: Request) {
   }
 
   const qs = new URL(req.url).search;
-  const res = await fetch(`${BACKEND}/user${qs}`);
-  const text = await res.text();
-  return new NextResponse(text, {
-    status: res.status,
+  console.log(`[API ${ROUTE} GET] called`, { search: qs });
+  try {
+  const curUser = await getUser(qs);
+  let res = JSON.stringify(curUser);
+  // safest passthrough (doesn't explode on non-json errors)
+  return new NextResponse(res, {
+    status: 200,
     headers: { "Content-Type": "application/json" },
   });
+  } catch (error) {
+    console.error(`[API ${ROUTE} GET] error`, error);
+    return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
+  }
 }

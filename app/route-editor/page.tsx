@@ -27,65 +27,46 @@ import type {
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import NavModes from "../../components/NavModeEditor";
 import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
-
-import {
-  addNode,
-  addEdge,
-  editNode,
-  deleteFeature,
-  setNavModeStatus,
-  getAllMapFeature,
-  getAllBuildings,
-  getAllBuildingNodes,
-  attachNodeToBuilding,
-  detachNodeFromBuilding,
-  getAllMapFeaturesNavModeIds,
-  getAllNavModes,
-  setBlueLight,
-} from "../../lib/icmapsApi";
-
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };
 
 type MarkerNode = {
-  id: string;
+  id: number;
   lng: number;
   lat: number;
-  isBlueLight?: boolean;
+  isBlueLight: boolean;
+  isPedestrian: boolean;
+  isVehicular: boolean;
+  isStairs: boolean;
+  isElevator: boolean;
 };
 
 type EdgeIndexEntry = {
-  key: string;
-  from: string;
-  to: string;
-  biDirectional?: boolean;
+  id: number;
+  from: number;
+  to: number;
+  biDirectional: boolean;
+  incline: number;
 };
 
-type Building = {
-  id: string | number;
+type Destination = {
+  id: number;
   name: string;
+  lat: number;
+  lng: number;
+  polygon: string; // JSON string of a GeoJSON Feature
+  isParkingLot: boolean;
 };
 
-type NavMode = {
-  id: string | number;
-  name: string;
-  fromThrough: boolean;
-};
 
 type ViewStateLite = {
   longitude: number;
@@ -93,8 +74,18 @@ type ViewStateLite = {
   zoom: number;
 };
 
-type DragState = { draggingId: string | null };
 
+type GeoJSONFeatureCollection = {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    properties: Record<string, any>;
+    geometry:
+    | { type: "Point"; coordinates: [number, number] }
+    | { type: "LineString"; coordinates: [number, number][] }
+    | { type: "Polygon"; coordinates: [Array<[number, number]>] };
+  }>;
+};
 /** ---------------- Component ---------------- */
 
 export default function RouteEditor(): JSX.Element {
@@ -117,116 +108,100 @@ export default function RouteEditor(): JSX.Element {
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
   const [biDirectionalEdges, setBiDirectionalEdges] = useState<boolean>(true);
 
+  const [markersToNormalize, setMarkersToNormalize] = useState<number[]>([]);
+
   const curEdgeIndexRef = useRef<EdgeIndexEntry[]>(edgeIndex);
   useEffect(() => {
     curEdgeIndexRef.current = edgeIndex;
   }, [edgeIndex]);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
+  const [inclineInput, setInclineInput] = useState<string>("0");
 
-  // NavMode (Sets)
-  const [curNavModeNodes, setCurNavModeNodes] = useState<Set<string>>(
-    () => new Set()
-  );
-  const [curNavModeEdges, setCurNavModeEdges] = useState<Set<string>>(
-    () => new Set()
-  );
-  const [showOnlyNavMode, setShowOnlyNavMode] = useState<boolean>(false);
-  const [curNavMode, setCurNavMode] = useState<string | number | null>(null);
+
 
   // Buildings
-  const [buildings, setBuildings] = useState<Building[]>([]);
-  const [currentBuilding, setCurrentBuilding] = useState<
-    string | number | null
+  const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [currentDestination, setCurrentDestination] = useState<
+    Destination | null
   >(null);
-  const [curBuildingNodes, setCurBuildingNodes] = useState<Set<string>>(
+  const [curDestinationNodes, setCurDestinationNodes] = useState<Set<number>>(
     () => new Set()
   );
-  const [curBuildingOrder, setCurBuildingOrder] = useState<string[]>([]);
-  const [showNavModeModal, setShowNavModeModal] = useState<boolean>(false);
-  const [navModes, setNavModes] = useState<NavMode[]>([]);
 
+  type NavModeKey = 0 | 1 | 3 | 4 | 5;
+
+  type MarkerFlagKey = keyof Pick<
+    MarkerNode,
+    "isPedestrian" | "isVehicular" | "isElevator" | "isStairs" | "isBlueLight"
+  >;
+
+  type NavModeInfo = { name: string; param: MarkerFlagKey };
+
+  const [curNavMode, setCurNavMode] = useState<NavModeKey>(0);
+
+  const navModes = {
+    0: { name: "Pedestrian", param: "isPedestrian" },
+    1: { name: "Vehicular", param: "isVehicular" },
+    3: { name: "Elevator", param: "isElevator" },
+    4: { name: "Stairs", param: "isStairs" },
+    5: { name: "Blue Light", param: "isBlueLight" },
+  } satisfies Record<NavModeKey, NavModeInfo>;
   // UI
   type EditorMode =
     | "select"
     | "edit"
     | "delete"
     | "navMode"
-    | "buildingGroup"
-    | "blueLight";
+    | "destination"
+    ;
   const [mode, setMode] = useState<EditorMode>("select");
   const [showNodes, setShowNodes] = useState<boolean>(true);
 
-  const curNavModeRef = useRef<string | number | null>(curNavMode);
-  useEffect(() => {
-    curNavModeRef.current = curNavMode;
-  }, [curNavMode]);
 
   const mapRef = useRef<MapRef | null>(null);
   const modeRef = useRef<EditorMode>(mode);
-  const selectedRef = useRef<string | null>(selectedId);
+  const selectedRef = useRef<number | null>(selectedId);
   modeRef.current = mode;
   selectedRef.current = selectedId;
 
   /** ---------------- Helpers ---------------- */
 
-  const edgeKey = (a: string, b: string) => [a, b].join("__");
+  const findMarker = (id: number) => markers.find((m) => m.id === id) ?? null;
 
-  const findMarker = (id: string) => markers.find((m) => m.id === id) ?? null;
-
-  const isNodeSelectedNavMode = (id: string) => curNavModeNodes.has(id);
-  const isEdgeSelectedNavMode = (key: string) => curNavModeEdges.has(key);
-
-  const getEdgeByKey = (key: string) =>
-    edgeIndex.find((e) => e.key === key) ?? null;
-
-  const hasAdjSelectedEdge = (nodeId: string) => {
-    const edges = curEdgeIndexRef.current;
-    return edges.some(
-      (e) =>
-        curNavModeEdges.has(e.key) && (e.from === nodeId || e.to === nodeId)
-    );
-  };
 
   /** ---------------- GeoJSON (Edges) ---------------- */
 
   const edgesGeoJSON = useMemo<
     FeatureCollection<LineString, GeoJsonProperties>
   >(() => {
-    const coord = new Map<string, [number, number]>(
-      markers.map((m) => [m.id, [m.lng, m.lat]])
-    );
-
     const features: Array<Feature<LineString, GeoJsonProperties>> = [];
 
     for (const e of edgeIndex) {
-      const a = coord.get(e.from);
-      const b = coord.get(e.to);
+      const a = markers.find((m) => m.id === e.from);
+      const b = markers.find((m) => m.id === e.to);
+
       if (!a || !b) continue;
+      let nmc = false;
+      if (mode == "navMode" && a[navModes[curNavMode].param] && b[navModes[curNavMode].param]) nmc = true;
 
-      if (
-        showOnlyNavMode &&
-        mode === "navMode" &&
-        !isEdgeSelectedNavMode(e.key)
-      ) {
-        continue;
-      }
-
+      const edgeId = e.id ?? (e as { key?: number }).key;
       features.push({
         type: "Feature",
         properties: {
-          key: e.key,
+          key: edgeId,
           from: e.from,
           to: e.to,
-          ada: isEdgeSelectedNavMode(e.key) && mode === "navMode",
+          ada: nmc,
           bidir: Boolean(e.biDirectional),
         },
-        geometry: { type: "LineString", coordinates: [a, b] },
+        geometry: { type: "LineString", coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
       });
     }
 
     return { type: "FeatureCollection", features };
-  }, [markers, edgeIndex, curNavModeEdges, mode, showOnlyNavMode]);
+  }, [markers, edgeIndex, mode]);
 
   /** ---------------- Layer specs (typed) ---------------- */
 
@@ -281,268 +256,204 @@ export default function RouteEditor(): JSX.Element {
 
   /** ---------------- Graph ops ---------------- */
 
-  async function addEdgeIfMissing(a: string, b: string) {
-    if (a === b) return;
-    if (!findMarker(a) || !findMarker(b)) return;
-    const key = edgeKey(a, b);
-    if (edgeIndex.some((e) => e.key === key)) return;
+  async function addEdgeIfMissing(from: number, to: number) {
+    if (from === to) return;
+    if (!findMarker(from) || !findMarker(to)) return;
 
-    const ok = await addEdge(key, b, a, biDirectionalEdges);
-    if (ok) {
+    const req = await apiClient.post("/api/map/edge", {
+      from,
+      to,
+      biDirectionalEdges,
+    });
+    console.log(req)
+    const resp = await req.json()
+    console.log(resp)
+    if (req.status === 201) {
       setEdgeIndex((list) => [
         ...list,
-        { key, from: a, to: b, biDirectional: biDirectionalEdges },
+        {
+          id: resp?.id ?? "",
+          from: resp?.a ?? "",
+          to: resp?.b ?? "",
+          biDirectional: biDirectionalEdges,
+          incline: 0,
+        },
       ]);
     } else {
       toast.error("Edge could not be added.");
     }
   }
 
-  async function deleteNode(id: string) {
-    const ok = await deleteFeature(id, "node");
-    if (!ok) return toast.error("Feature could not be deleted.");
+  async function deleteNode(id: number) {
+    const req = await apiClient.del("/api/map/node", { id });
+    if (req.status !== 200) return toast.error("Feature could not be deleted.");
 
     setMarkers((prev) => prev.filter((m) => m.id !== id));
     setEdgeIndex((list) => list.filter((e) => e.from !== id && e.to !== id));
 
-    setCurNavModeNodes((prev) => {
+
+    setCurDestinationNodes((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
 
-    setCurBuildingNodes((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-
-    setCurNavModeEdges((prev) => {
-      const remove = new Set(
-        edgeIndex.filter((e) => e.from === id || e.to === id).map((e) => e.key)
-      );
-      if (remove.size === 0) return prev;
-      return new Set([...prev].filter((k) => !remove.has(k)));
-    });
-
-    setCurBuildingOrder((prev) => prev.filter((nid) => nid !== id));
     if (selectedRef.current === id) setSelectedId(null);
   }
 
-  async function deleteEdgeByKey(key: string) {
-    const ok = await deleteFeature(key, "edge");
-    if (!ok) return toast.error("Feature could not be deleted.");
+  async function deleteEdgeByKey(id: number) {
+    const req = await apiClient.del("/api/map/edge", { id });
+    if (req.status !== 200) return toast.error("Feature could not be deleted.");
 
-    setEdgeIndex((list) => list.filter((e) => e.key !== key));
-
-    setCurNavModeEdges((prev) => {
-      if (!prev.has(key)) return prev;
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
+    setEdgeIndex((list) =>
+      list.filter(
+        (e) => e.id !== id && (e as { key?: number }).key !== id,
+      ),
+    );
   }
+
+  async function setEdgeIncline(edgeId: number, incline: number) {
+    const req = await apiClient.post("/api/map/incline", { id: edgeId, incline });
+    if (req.status !== 200) {
+      toast.error("Could not update incline.");
+      return;
+    }
+    setEdgeIndex((list) =>
+      list.map((e) =>
+        e.id === edgeId || (e as { key?: number }).key === edgeId
+          ? { ...e, id: e.id ?? edgeId, incline }
+          : e,
+      ),
+    );
+    toast.success("Incline updated.");
+  }
+
+
 
   /** ---------------- NavMode ops (Sets) ---------------- */
 
-  function setNavModeNode(
-    id: string,
-    status: boolean,
-    navModeId: string | number | null
-  ) {
-    if (!navModeId) return toast.error("Select a navigation mode first.");
+  async function setNavModeNode(id: number) {
+    const nm = navModes[curNavMode];
+    if (!nm) return toast.error("Select a navigation mode first.");
 
-    if (!status && hasAdjSelectedEdge(id)) {
-      toast.error("Can't deselect a node adjacent to a selected ADA edge.");
-      return;
+    const cur = markers.find((m) => m.id === id);
+    if (!cur) return;
+
+    let nextValue = !cur[nm.param];
+    console.log(id, nm.param)
+    const req = await apiClient.post("/api/map/setFeatureStatus", { id, value: nextValue, navMode: nm.param })
+    const resp = await req.json();
+    console.log(req, resp)
+
+    if (req.status === 200) {
+      setMarkers((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, [nm.param]: nextValue } : m)),
+      );
+    } else {
+      toast.error("Could not add node to the Navmode.");
     }
-
-    setCurNavModeNodes((prev) => {
-      const next = new Set(prev);
-      if (status) next.add(id);
-      else next.delete(id);
-      void setNavModeStatus(id, status, "Node", String(navModeId));
-      return next;
-    });
   }
 
-  function setNavModeEdge(key: string) {
-    const navModeId = curNavModeRef.current;
-    if (!navModeId) return toast.error("Select a navigation mode first.");
 
-    const eic = curEdgeIndexRef.current;
-    const edge = eic.find((e) => e.key === key) ?? null;
-    if (!edge) return;
-
-    const from = edge.from;
-    const to = edge.to;
-
-    setCurNavModeEdges((prev) => {
-      const next = new Set(prev);
-      const wasSelected = next.has(key);
-
-      if (wasSelected) {
-        next.delete(key);
-        void setNavModeStatus(key, false, "Edge", String(navModeId));
-
-        const stillAdj = (nodeId: string) =>
-          [...next].some((k) => {
-            const e = getEdgeByKey(k);
-            return e && (e.from === nodeId || e.to === nodeId);
-          });
-
-        setCurNavModeNodes((prevNode) => {
-          const nextNode = new Set(prevNode);
-          if (!stillAdj(from)) {
-            nextNode.delete(from);
-            void setNavModeStatus(from, false, "Node", String(navModeId));
-          }
-          if (!stillAdj(to)) {
-            nextNode.delete(to);
-            void setNavModeStatus(to, false, "Node", String(navModeId));
-          }
-          return nextNode;
-        });
-      } else {
-        next.add(key);
-        void setNavModeStatus(key, true, "Edge", String(navModeId));
-
-        setCurNavModeNodes((prevNode) => {
-          const nextNode = new Set(prevNode);
-          nextNode.add(to);
-          nextNode.add(from);
-          void setNavModeStatus(to, true, "Node", String(navModeId));
-          void setNavModeStatus(from, true, "Node", String(navModeId));
-          return nextNode;
-        });
-      }
-      return next;
-    });
-  }
 
   /** ---------------- Buildings ---------------- */
 
-  async function handelBuildingSelect(id: string | number) {
-    setCurrentBuilding(id);
-    const resp: any = await getAllBuildingNodes(String(id));
-
-    const ids: string[] = (resp?.nodes || [])
-      .map((n: any) => (typeof n === "string" ? n : n?.id))
-      .filter(Boolean)
-      .map((x: any) => String(x));
-
-    setCurBuildingNodes(new Set(ids));
-    setCurBuildingOrder(ids);
+  async function handelBuildingSelect(id: number) {
+    const curDest = destinations.find((cur) => cur.id == id);
+    if (!curDest) {
+      toast.error("Could not load the current building");
+      return;
+    }
+    console.log(id, curDest)
+    setCurrentDestination(curDest);
+    const req: any = await apiClient.get(`/api/destination/outsideNode?id=${encodeURIComponent(id)}`);
+    const resp = await req.json();
+    console.log(resp)
+    const ids: number[] = (resp?.nodes || [])
+    setCurDestinationNodes(new Set(ids));
   }
 
-  async function addToBuildingGroup(nodeId: string) {
-    if (!currentBuilding) return toast.error("Select a building first.");
+  async function addToBuildingGroup(nodeId: number) {
+    if (!currentDestination) return toast.error("Select a building first.");
 
-    const isSelected = curBuildingNodes.has(nodeId);
+    const isSelected = curDestinationNodes.has(nodeId);
 
     if (isSelected) {
-      try {
-        await detachNodeFromBuilding(String(currentBuilding), nodeId);
-      } catch {
-        return toast.error("Failed to detach node.");
-      }
-      setCurBuildingNodes((prev) => {
+      const req = await apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
+      if (req.status !== 200) return toast.error("Failed to detach node.");
+
+      setCurDestinationNodes((prev) => {
         const next = new Set(prev);
         next.delete(nodeId);
         return next;
       });
-      setCurBuildingOrder((prev) => prev.filter((id) => id !== nodeId));
+
     } else {
-      try {
-        await attachNodeToBuilding(String(currentBuilding), nodeId);
-      } catch {
-        return toast.error("Failed to attach node.");
-      }
-      setCurBuildingNodes((prev) => {
+      const req = await apiClient.post("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
+
+      if (req.status !== 200) return toast.error("Failed to attach node.");
+
+      setCurDestinationNodes((prev) => {
         const next = new Set(prev);
         next.add(nodeId);
         return next;
       });
-      setCurBuildingOrder((prev) =>
-        prev.includes(nodeId) ? prev : [...prev, nodeId]
-      );
+
     }
   }
 
   async function clearAllBuildingNodes() {
-    if (!currentBuilding || curBuildingNodes.size === 0) return;
+    if (!currentDestination || curDestinationNodes.size === 0) return;
 
-    const ids = Array.from(curBuildingNodes);
+    const ids = Array.from(curDestinationNodes);
     const results = await Promise.allSettled(
-      ids.map((nid) => detachNodeFromBuilding(String(currentBuilding), nid))
+      ids.map((nid) => apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId: nid }))
     );
-
-    const succeeded = ids.filter(
-      (_, i) => results[i].status === "fulfilled" && (results[i] as any).value
-    );
-
-    if (succeeded.length === ids.length) {
-      setCurBuildingNodes(new Set());
-      setCurBuildingOrder([]);
-    } else {
-      toast.error("Some nodes failed to detach.");
-      setCurBuildingNodes((prev) => {
-        const next = new Set(prev);
-        for (const id of succeeded) next.delete(id);
-        return next;
-      });
-      setCurBuildingOrder((prev) =>
-        prev.filter((id) => !succeeded.includes(id))
-      );
-    }
+    // setCurDestinationNodes(new Set())
   }
 
-  async function setBlueLightStatus(id: string) {
-    const cur = markers.find((m) => m.id === id);
-    if (!cur) return;
-
-    const nextValue = !Boolean(cur.isBlueLight);
-    try {
-      await setBlueLight(id, nextValue);
-      setMarkers((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, isBlueLight: nextValue } : m))
-      );
-    } catch {
-      toast.error("Could not set marker as Blue Light.");
-    }
-  }
 
   /** ---------------- Map events ---------------- */
 
+  //add node
   async function handleMapClick(e: MapMouseEvent) {
     if ((e.originalEvent as MouseEvent | undefined)?.altKey) {
       const { lng, lat } = e.lngLat;
-      const id = `n-${Date.now()}`;
-      const ok = await addNode(id, lng, lat);
-      if (ok) setMarkers((prev) => [...prev, { id, lng, lat }]);
-      else toast.error("Node could not be added.");
+      const req = await apiClient.post("/api/map/node", { lng, lat });
+      const resp = await req.json();
+      console.log(resp)
+      if (req.status === 201) setMarkers((prev) => [...prev, {
+        id: resp.id,
+        lng,
+        lat,
+        isPedestrian: false,
+        isVehicular: false,
+        isStairs: false,
+        isElevator: false,
+        isBlueLight: false
+      }]);
+      else {
+        const msg = (resp as { detail?: string; error?: string }).detail
+          ?? (resp as { detail?: string; error?: string }).error
+          ?? "Node could not be added.";
+        toast.error(msg);
+      }
       return;
     }
 
-    if (modeRef.current === "select" && selectedRef.current !== null) {
-      setSelectedId(null);
+    if (modeRef.current === "select") {
+      if (selectedRef.current !== null) setSelectedId(null);
+      setSelectedEdgeId(null);
     }
   }
 
-  function handleMarkerClick(e: React.MouseEvent, id: string) {
+  function handleMarkerClick(e: React.MouseEvent, id: number) {
     e.stopPropagation();
 
     if (modeRef.current === "delete") return void deleteNode(id);
-    if (modeRef.current === "buildingGroup") return void addToBuildingGroup(id);
-    if (modeRef.current === "navMode")
-      return void setNavModeNode(
-        id,
-        !isNodeSelectedNavMode(id),
-        curNavModeRef.current
-      );
-    if (modeRef.current === "blueLight") return void setBlueLightStatus(id);
+    if (modeRef.current === "destination") return void addToBuildingGroup(id);
+    if (modeRef.current === "navMode") return void setNavModeNode(id);
 
     if (modeRef.current === "select") {
       const cur = selectedRef.current;
@@ -554,10 +465,10 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
-  async function handleMarkerDragEnd(e: any, id: string) {
+  async function handleMarkerDragEnd(e: any, id: number) {
     const { lng, lat } = e.lngLat as LngLat;
-    const ok = await editNode(id, lng, lat);
-    if (ok) {
+    const req = await apiClient.put("/api/map/node", { id, lng, lat });
+    if (req.status === 200) {
       setMarkers((prev) =>
         prev.map((m) => (m.id === id ? { ...m, lng, lat } : m))
       );
@@ -568,11 +479,13 @@ export default function RouteEditor(): JSX.Element {
 
   function handleEdgeLayerClick(e: MapLayerMouseEvent) {
     const f = e.features?.[0] as any;
-    const key = f?.properties?.key as string | undefined;
+    const key = f?.properties?.key as number | undefined;
     if (!key) return;
-
-    if (modeRef.current === "navMode") return void setNavModeEdge(key);
     if (modeRef.current === "delete") return void deleteEdgeByKey(key);
+    if (modeRef.current === "select") {
+      setSelectedEdgeId(key);
+      return;
+    }
   }
 
   function handleEdgeEnter() {
@@ -600,53 +513,51 @@ export default function RouteEditor(): JSX.Element {
   /** ---------------- Data loading ---------------- */
 
   async function getAllFeature() {
-    const resp: any = await getAllMapFeature();
-    console.log(resp);
+    const req = await apiClient.get("/api/map/all")
+    if (req.status !== 200) {
+      toast.error("Failed to fetch map features!");
+      return;
+    }
+    const data = await req.json()
     setMarkers(
-      (resp?.nodes ?? []).map((n: any) => ({
-        id: String(n.id),
-        lng: Number(n.lng),
-        lat: Number(n.lat),
-        isBlueLight: Boolean(n.isBlueLight),
-      }))
+      data.nodes as MarkerNode[]
     );
-
     setEdgeIndex(
-      (resp?.edges ?? []).map((e: any) => ({
-        key: String(e.key),
-        from: String(e.from),
-        to: String(e.to),
-        biDirectional: Boolean(e.biDirectional),
-      }))
+      data.edges as EdgeIndexEntry[]
     );
   }
 
   async function getBuildingsList() {
-    const resp: any = await getAllBuildings();
-    if (resp) setBuildings(resp.buildings || []);
-    else toast.error("Buildings did not load!");
-  }
-
-  async function getNavModesList() {
-    const resp: any = await getAllNavModes();
-    const curNavModes: NavMode[] = resp?.NavModes ?? [];
-    setNavModes(curNavModes);
-    if (curNavModes.length > 0) {
-      setCurNavMode(curNavModes[0].id);
-      void getNavModeFeatures(curNavModes[0].id);
+    const req = await apiClient.get("/api/destination");
+    if (req.status !== 200) {
+      toast.error("Buildings did not load!");
+      return;
     }
+    const resp = await req.json();
+    setDestinations(resp.destinations || []);
   }
 
-  async function getNavModeFeatures(navModeId: string | number) {
-    const resp: any = await getAllMapFeaturesNavModeIds(String(navModeId));
-    setCurNavModeEdges(new Set((resp?.edges ?? []).map((x: any) => String(x))));
-    setCurNavModeNodes(new Set((resp?.nodes ?? []).map((x: any) => String(x))));
-  }
+
+
+
+  // Selected edge for toolbox (support both id and key from API)
+  const selectedEdge =
+    selectedEdgeId === null
+      ? null
+      : edgeIndex.find((e) => e.id === selectedEdgeId) ??
+      edgeIndex.find((e) => (e as { key?: number }).key === selectedEdgeId);
+
+  useEffect(() => {
+    if (selectedEdgeId === null) return;
+    const edge =
+      edgeIndex.find((e) => e.id === selectedEdgeId) ??
+      edgeIndex.find((e) => (e as { key?: number }).key === selectedEdgeId);
+    setInclineInput(String(edge?.incline ?? 0));
+  }, [selectedEdgeId, edgeIndex]);
 
   useEffect(() => {
     void getAllFeature();
     void getBuildingsList();
-    void getNavModesList();
     return () => {
       const map = mapRef.current?.getMap?.();
       if (!map) return;
@@ -657,100 +568,7 @@ export default function RouteEditor(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (mode !== "navMode" && showOnlyNavMode) setShowOnlyNavMode(false);
-  }, [mode, showOnlyNavMode]);
 
-  /** ---------------- Export / Import ---------------- */
-
-  function exportGeoJSON() {
-    const nodeFeatures: Array<Feature<Point, GeoJsonProperties>> = markers.map(
-      (m) => ({
-        type: "Feature",
-        id: m.id,
-        properties: { id: m.id },
-        geometry: { type: "Point", coordinates: [m.lng, m.lat] },
-      })
-    );
-
-    const data: FeatureCollection = {
-      type: "FeatureCollection",
-      features: [...nodeFeatures, ...edgesGeoJSON.features],
-    };
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "graph.geojson";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function importGeoJSON(ev: React.ChangeEvent<HTMLInputElement>) {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const fc = JSON.parse(String(reader.result));
-        if (fc?.type !== "FeatureCollection" || !Array.isArray(fc.features)) {
-          alert("Invalid GeoJSON FeatureCollection.");
-          return;
-        }
-
-        const nextMarkers: MarkerNode[] = [];
-        const nextEdges: Array<{ key: string; from: string; to: string }> = [];
-
-        for (const f of fc.features) {
-          if (f?.geometry?.type === "Point") {
-            const id = String(f.id ?? f.properties?.id ?? "");
-            const [lng, lat] = f.geometry.coordinates || [];
-            if (id && Number.isFinite(lng) && Number.isFinite(lat)) {
-              nextMarkers.push({ id, lng, lat });
-            }
-          } else if (f?.geometry?.type === "LineString") {
-            const from = f.properties?.from;
-            const to = f.properties?.to;
-            if (from && to) {
-              nextEdges.push({
-                key: edgeKey(String(from), String(to)),
-                from: String(from),
-                to: String(to),
-              });
-            }
-          }
-        }
-
-        const ids = new Set(nextMarkers.map((m) => m.id));
-        if (ids.size !== nextMarkers.length) {
-          alert("Duplicate node ids in import.");
-          return;
-        }
-
-        setMarkers(nextMarkers);
-
-        const uniq: EdgeIndexEntry[] = [];
-        const seen = new Set<string>();
-        for (const e of nextEdges) {
-          if (seen.has(e.key)) continue;
-          seen.add(e.key);
-          uniq.push({ ...e, biDirectional: true });
-        }
-        setEdgeIndex(uniq);
-
-        setSelectedId(null);
-        ev.target.value = "";
-      } catch {
-        alert("Failed to parse GeoJSON.");
-      }
-    };
-
-    reader.readAsText(file);
-  }
 
   function toggleNodes() {
     setShowNodes((v) => {
@@ -759,50 +577,29 @@ export default function RouteEditor(): JSX.Element {
     });
   }
 
-  /** ---------------- DnD (building order) ---------------- */
-
-  const dragState = useRef<DragState>({ draggingId: null });
-
-  function onDragStart(id: string) {
-    dragState.current.draggingId = id;
-  }
-  function onDragOver(e: React.DragEvent) {
-    e.preventDefault();
-  }
-  function onDrop(overId: string) {
-    const fromId = dragState.current.draggingId;
-    dragState.current.draggingId = null;
-    if (!fromId || fromId === overId) return;
-
-    setCurBuildingOrder((prev) => {
-      const ids = prev.filter((id) => curBuildingNodes.has(id));
-      const fromIdx = ids.indexOf(fromId);
-      const toIdx = ids.indexOf(overId);
-      if (fromIdx < 0 || toIdx < 0) return prev;
-
-      ids.splice(toIdx, 0, ids.splice(fromIdx, 1)[0]);
-
-      const rest = prev.filter((id) => !curBuildingNodes.has(id));
-      return [...ids, ...rest];
-    });
-  }
-
-  function zoomToNode(id: string) {
-    const m = findMarker(id);
-    const map = mapRef.current?.getMap?.();
-    if (!m || !map) return;
-    map.flyTo({ center: [m.lng, m.lat], zoom: 18, essential: true });
-  }
 
   /** ---------------- Combobox items ---------------- */
+  const navModeItems: ComboboxItem<NavModeKey>[] =
+    (Object.keys(navModes) as unknown as NavModeKey[]).map((k) => ({
+      value: k,
+      label: navModes[k].name,
+    }));
 
-  const navModeItems = useMemo<ComboboxItem<string | number>[]>(() => {
-    return navModes.map((m) => ({ value: m.id, label: m.name }));
-  }, [navModes]);
 
-  const buildingItems = useMemo<ComboboxItem<string | number>[]>(() => {
-    return buildings.map((b) => ({ value: b.id, label: b.name }));
-  }, [buildings]);
+  const destinationItems = useMemo<ComboboxItem<string | number>[]>(() => {
+    return destinations.map((b) => ({ value: b.id, label: b.name }));
+  }, [destinations]);
+
+
+  /* --------------------- Import / Export ----------------------*/
+
+  function exportMapData() {
+
+  }
+
+  function importMapData() {
+
+  }
 
   /** ---------------- Render ---------------- */
 
@@ -862,30 +659,21 @@ export default function RouteEditor(): JSX.Element {
         </button>
 
         <button
-          className={`px-2 py-1 rounded ${mode === "buildingGroup"
+          className={`px-2 py-1 rounded ${mode === "destination"
             ? "bg-primary text-primary-foreground"
             : "bg-secondary text-secondary-foreground"
             }`}
-          onClick={() => setMode("buildingGroup")}
+          onClick={() => setMode("destination")}
         >
           Building Select
         </button>
 
-        <button
-          className={`px-2 py-1 rounded ${mode === "blueLight"
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary text-secondary-foreground"
-            }`}
-          onClick={() => setMode("blueLight")}
-        >
-          Blue Light
-        </button>
 
         <div className="mx-2 w-px h-5 bg-border" />
 
-        <button
+        {/* <button
           className="px-2 py-1 rounded bg-primary text-primary-foreground"
-          onClick={exportGeoJSON}
+        // onClick={exportMapData}
         >
           Export
         </button>
@@ -895,10 +683,10 @@ export default function RouteEditor(): JSX.Element {
           <input
             type="file"
             accept=".json,.geojson,application/geo+json"
-            onChange={importGeoJSON}
+            // onChange={importMapData}
             hidden
           />
-        </label>
+        </label> */}
 
         <div className="mx-2 w-px h-5 bg-border" />
 
@@ -909,6 +697,8 @@ export default function RouteEditor(): JSX.Element {
           {showNodes ? "Hide Nodes" : "Show Nodes"}
         </button>
       </div>
+
+
 
       {mode === "select" && (
         <div
@@ -939,6 +729,47 @@ export default function RouteEditor(): JSX.Element {
         </div>
       )}
 
+      {/* Edge incline toolbox: shown in select mode when an edge is selected */}
+      {mode === "select" && selectedEdgeId !== null && (
+        <div
+          className={`absolute z-20 top-40 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
+        >
+          <span className="text-sm font-medium">Edge incline (m)</span>
+          <Input
+            type="number"
+            step="0.1"
+            min="-100"
+            max="100"
+            value={inclineInput}
+            onChange={(e) => setInclineInput(e.target.value)}
+            className="w-24 h-8"
+            placeholder="0"
+          />
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              const value = Number.parseFloat(inclineInput);
+              if (!Number.isFinite(value)) {
+                toast.error("Enter a valid number.");
+                return;
+              }
+              void setEdgeIncline(selectedEdgeId, value);
+            }}
+          >
+            Set incline
+          </Button>
+          <button
+            type="button"
+            className="text-sm text-muted-foreground hover:text-foreground"
+            onClick={() => setSelectedEdgeId(null)}
+            aria-label="Close"
+          >
+            Close
+          </button>
+        </div>
+      )}
+
       {/* Nav mode selector (left, under toolbar) */}
       {mode === "navMode" && (
         <div
@@ -951,11 +782,10 @@ export default function RouteEditor(): JSX.Element {
             value={curNavMode}
             onChange={(v) => {
               setCurNavMode(v);
-              void getNavModeFeatures(v);
             }}
             widthClassName="w-[280px]"
           />
-
+          {/* 
           <button
             className={`px-2 py-1 rounded ${showOnlyNavMode
               ? "bg-primary text-primary-foreground"
@@ -972,30 +802,31 @@ export default function RouteEditor(): JSX.Element {
           <Button
             type="button"
             variant="secondary"
-            onClick={() => setShowNavModeModal(true)}
+            onClick={() => { console.log(curNavMode) }}
           >
             Manage Nav Modes
           </Button>
+          */}
         </div>
       )}
 
       {/* Building selector (left, under toolbar) */}
-      {mode === "buildingGroup" && (
+      {mode === "destination" && (
         <div
           className={`absolute z-20 top-16 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
         >
           <ComboboxSelect
             label="Current Building"
             placeholder="Select building..."
-            items={buildingItems}
-            value={currentBuilding}
-            onChange={(v) => void handelBuildingSelect(v)}
+            items={destinationItems}
+            value={currentDestination?.name ?? ""}
+            onChange={(v) => void handelBuildingSelect(Number(v))}
             widthClassName="w-[320px]"
           />
 
           <button
             className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground disabled:opacity-50"
-            disabled={!currentBuilding || curBuildingNodes.size === 0}
+            disabled={!currentDestination || curDestinationNodes.size === 0}
             onClick={clearAllBuildingNodes}
             title="Detach all nodes from current building"
           >
@@ -1033,21 +864,19 @@ export default function RouteEditor(): JSX.Element {
               <Layer {...(oneWayArrows as any)} />
             </Source>
 
+
             {markers.map((m) => {
               const isBuildingSel =
-                mode === "buildingGroup" && curBuildingNodes.has(m.id);
-              const isNavModeSel =
-                mode === "navMode" && isNodeSelectedNavMode(m.id);
-              const isBlueLightSel =
-                mode === "blueLight" && Boolean(m.isBlueLight);
+                mode === "destination" && curDestinationNodes.has(m.id);
+              const isNavModeSet =
+                mode === "navMode" && Boolean(m[navModes[curNavMode].param]);
               const isDrawSel = mode === "select" && m.id === selectedId;
-
-              if (mode === "navMode" && showOnlyNavMode && !isNavModeSel)
+              if (mode === "navMode" && false)
                 return null;
 
               const colorClass = isBuildingSel
                 ? "bg-amber-500"
-                : isNavModeSel || isDrawSel || isBlueLightSel
+                : isNavModeSet || isDrawSel
                   ? "bg-destructive"
                   : "bg-brand";
 
@@ -1078,18 +907,33 @@ export default function RouteEditor(): JSX.Element {
                 </Marker>
               );
             })}
+
+            {mode === "destination" && currentDestination && (
+              <Source id="boundary" type="geojson" data={(JSON.parse(currentDestination.polygon) as GeoJSONFeatureCollection) ?? null}>
+                <Layer
+                  id="boundary-fill"
+                  type="fill"
+                  paint={{
+                    "fill-color": isDark ? "#ffd200" : "#003c71",
+                    "fill-opacity": 0.2,
+                  }}
+                />
+                <Layer
+                  id="boundary-outline"
+                  type="line"
+                  paint={{
+                    "line-color": isDark ? "#ffd200" : "#003c71",
+                    "line-width": 2,
+                  }}
+                />
+              </Source>
+            )}
+
+
           </ReactMap>
         )}
       </div>
 
-      <Dialog open={showNavModeModal} onOpenChange={setShowNavModeModal}>
-        <DialogContent className="sm:max-w-[720px]">
-          <DialogHeader>
-            <DialogTitle>Navigation Modes</DialogTitle>
-          </DialogHeader>
-          <NavModes navModes={navModes} getNavModes={getNavModesList} />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
