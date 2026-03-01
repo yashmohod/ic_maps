@@ -1,0 +1,4 @@
+current_date=$(date +'%Y-%m-%d %H:%M:%S')
+git add .
+git commit -m "auto push: $current_date"
+git push

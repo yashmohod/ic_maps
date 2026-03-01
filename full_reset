@@ -1,0 +1,32 @@
+#!/bin/bash
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "==> Stopping and removing Postgres container and volume..."
+docker rm -f postgress 2>/dev/null || true
+docker volume rm -f icmaps_pg 2>/dev/null || true
+
+echo "==> Starting fresh Postgres + PostGIS..."
+docker run --platform linux/amd64 --name postgress \
+  -p 127.0.0.1:5432:5432 \
+  -e POSTGRES_USER=root \
+  -e POSTGRES_PASSWORD=root \
+  -e POSTGRES_DB=icmaps \
+  -v icmaps_pg:/var/lib/postgresql/data \
+  -v "$SCRIPT_DIR/docker-init:/docker-entrypoint-initdb.d:ro" \
+  -d postgis/postgis:16-3.5
+
+echo "==> Waiting for Postgres to be ready..."
+until docker exec postgress pg_isready -U root -d icmaps 2>/dev/null; do
+  sleep 1
+done
+
+echo "==> Regenerating migrations and migrating..."
+rm -rf ./drizzle/*
+npx drizzle-kit generate
+npx drizzle-kit migrate
+
+echo "==> Seeding and starting dev server..."
+npm run seed
+npm run dev

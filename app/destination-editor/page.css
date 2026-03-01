@@ -1,0 +1,65 @@
+/* push the top-right controls down so they appear under your toolbar */
+.maplibregl-ctrl-top-right,
+.mapboxgl-ctrl-top-right {
+  /* your top bar is ~48px tall + 8px gap => 56px (adjust as needed) */
+  margin-top: 3px;
+  margin-right: 3px; /* match your right padding if you like */
+}
+
+/* Make ALL top-right control buttons bigger */
+.maplibregl-ctrl-top-right .maplibregl-ctrl-group button,
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-group button {
+  width: 42px; /* default ~30px */
+  height: 42px;
+  border-radius: 10px; /* a little softer */
+}
+
+/* Theme the control group to match app panels */
+.maplibregl-ctrl-group,
+.mapboxgl-ctrl-group {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.2);
+}
+
+.maplibregl-ctrl-group button,
+.mapboxgl-ctrl-group button {
+  background-color: transparent;
+  color: var(--panel-foreground);
+}
+
+/* Specifically target MapLibre-Draw buttons (class names keep "mapboxgl" prefix) */
+.maplibregl-ctrl-top-right .mapboxgl-ctrl-draw-btn,
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-draw-btn {
+  width: 42px;
+  height: 42px;
+  background-size: 22px 22px; /* scale icon within larger button */
+  background-position: center;
+}
+
+:root {
+  --map-tool-icon-filter: none;
+}
+
+.dark {
+  --map-tool-icon-filter: invert(1) brightness(1.4);
+}
+
+.mapboxgl-ctrl-draw-btn,
+.maplibregl-ctrl-icon,
+.mapboxgl-ctrl-icon {
+  filter: var(--map-tool-icon-filter);
+}
+
+/* Nice hover/focus affordances for accessibility */
+.maplibregl-ctrl-group button:hover,
+.mapboxgl-ctrl-group button:hover {
+  box-shadow: 0 0 0 3px rgb(255 210 0 / 0.25); /* subtle ring */
+}
+
+.maplibregl-ctrl-group button:focus-visible,
+.mapboxgl-ctrl-group button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
