@@ -35,6 +35,7 @@ import { useAppTheme } from "@/hooks/use-app-theme";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
+import apiClient from "@/lib/apiClient";
 /** ---------------- Types ---------------- */
 
 type LngLat = { lng: number; lat: number };

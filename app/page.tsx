@@ -177,7 +177,8 @@ export default function NavigationMap(): JSX.Element {
       is_vehicular: false,
       is_avoid_stairs: false,
       is_incline_limit: false,
-      max_incline: 0
+      max_incline: 0,
+      is_through_building: false,
     });
 
   const [mapStage, setMapStage] = useState<MapStage>(MAP_STAGES.IDLE);
@@ -1181,6 +1182,28 @@ export default function NavigationMap(): JSX.Element {
           <div className="absolute right-10 top-80 z-30 flex flex-col   bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
             <div className="p-2">
               <Toggle
+                className={curNavConditions.is_through_building ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
+                aria-label={"Through Building"}
+                size="sm"
+                variant="outline"
+                pressed={curNavConditions.is_through_building}
+                onPressedChange={(pressed) =>
+                  setCurNavConditions(prev => ({
+                    ...prev,
+                    is_through_building: pressed,
+                  }))
+                }
+              >
+                {curNavConditions.is_through_building ? (
+                  <CheckIcon className="group-aria-pressed/toggle:fill-foreground" />
+                ) : (
+                  <XIcon className="group-aria-pressed/toggle:fill-foreground" />
+                )}
+                Through Building
+              </Toggle>
+            </div>
+            <div className="p-2">
+              <Toggle
                 className={curNavConditions.is_avoid_stairs ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
                 aria-label={"Stairs"}
                 size="sm"
@@ -1224,30 +1247,30 @@ export default function NavigationMap(): JSX.Element {
               </Toggle>
             </div>
           </div>
-
-          <div className="absolute right-15 w-10 top-105 z-30 flex flex-col space-y-3  bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
-            <div className="mx-auto grid w-full max-w-xs gap-3">
-              <div className="flex items-center justify-center">
-                <span className="text-muted-foreground text-sm">
-                  {curNavConditions.max_incline}°
-                </span>
+          {curNavConditions.is_incline_limit ?
+            <div className="absolute right-10 w-10 top-120 z-30 flex flex-col space-y-3  bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
+              <div className="mx-auto grid w-full max-w-xs gap-3">
+                <div className="flex items-center justify-center">
+                  <span className="text-muted-foreground text-sm">
+                    {curNavConditions.max_incline}°
+                  </span>
+                </div>
+                <Slider
+                  id="slider-demo-temperature"
+                  value={[curNavConditions.max_incline]}
+                  onValueChange={(val) => {
+                    setCurNavConditions((prev) => {
+                      return { ...prev, max_incline: val[0] }
+                    })
+                  }}
+                  orientation="vertical"
+                  min={0}
+                  max={MAX_INCLINE}
+                  step={1}
+                />
               </div>
-              <Slider
-                id="slider-demo-temperature"
-                value={[curNavConditions.max_incline]}
-                onValueChange={(val) => {
-                  setCurNavConditions((prev) => {
-                    return { ...prev, max_incline: val[0] }
-                  })
-                }}
-                orientation="vertical"
-                min={0}
-                max={MAX_INCLINE}
-                step={1}
-              />
             </div>
-
-          </div>
+            : null}
         </>
         : null}
       {/* admin pages (moved fully to left) */}

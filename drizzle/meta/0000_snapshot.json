@@ -1,5 +1,5 @@
 {
-  "id": "afb58a37-8b6c-49b9-8774-491ffe90d5b5",
+  "id": "199a5829-4ce4-4fb5-8e09-494a738c175e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -702,7 +702,8 @@
           "name": "incline",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "default": 0
         },
         "width": {
           "name": "width",

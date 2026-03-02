@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
-import { heuristic } from "./utils";
+import { calcDistance, heuristic } from "./utils";
 
 import "server-only";
 import {
@@ -8,6 +8,8 @@ import {
   type EdgeOutside,
   type NodeInside,
   type EdgeInside,
+  navMode,
+  DestinationNode,
 } from "@/db/schema"; // adapt to your schema
 import { MinHeap } from "./minHeap";
 
@@ -44,6 +46,7 @@ export type NavConditions = {
   is_vehicular: boolean;
   is_avoid_stairs: boolean;
   is_incline_limit: boolean;
+  is_through_building: boolean;
   max_incline: number;
 };
 
@@ -55,6 +58,10 @@ export type Graph = {
     number,
     Array<{ to: number; distance: number; edgeId: number; incline: number }>
   >;
+  /** destination_id -> one representative node_outside_id (for reference) */
+  buildingNodeOutside: Map<number, number>;
+  /** Outdoor node IDs that are building entrances (in destination_node). Used to trigger through-building. */
+  buildingEntranceNodeIds: Set<number>;
   version: number; // for debugging / cache sanity
 };
 
@@ -63,6 +70,7 @@ export function buildGraph(
   _edge_inside: EdgeInside[],
   node_outside: NodeOutside[],
   edge_outside: EdgeOutside[],
+  desinationNodeOutside: DestinationNode[],
   version = 1,
 ): Graph {
   const nodeMapInside = new Map<number, NodeInside>();
@@ -109,9 +117,17 @@ export function buildGraph(
     if (e.bi_directional) pushInside(to, from, e.id);
   }
 
+  const buildingNodeOutside = new Map<number, number>();
+  const buildingEntranceNodeIds = new Set<number>();
+  for (const cur of desinationNodeOutside) {
+    buildingNodeOutside.set(cur.destination_id, cur.node_outside_id);
+    buildingEntranceNodeIds.add(cur.node_outside_id);
+  }
   return {
     nodesInside: nodeMapInside,
     nodesOutside: nodeMapOutside,
+    buildingNodeOutside,
+    buildingEntranceNodeIds,
     adjInside,
     adjOutside,
     version,
@@ -136,13 +152,19 @@ if (process.env.NODE_ENV !== "production") globalThis.__graphStore = store;
 
 // Load graph from DB only once (per process)
 async function loadGraphFromDb(): Promise<Graph> {
-  const [nodeInsideRes, nodeOutsideRes, edgeInsideRes, edgeOutsideRes] =
-    await Promise.all([
-      db.execute(sql<NodeInside>`SELECT * FROM node_inside`),
-      db.execute(sql<NodeOutside>`SELECT * FROM node_outside`),
-      db.execute(sql<EdgeInside>`SELECT * FROM edge_inside`),
-      db.execute(sql<EdgeOutside>`SELECT * FROM edge_outside`),
-    ]);
+  const [
+    nodeInsideRes,
+    nodeOutsideRes,
+    edgeInsideRes,
+    edgeOutsideRes,
+    destinationNodeOutside,
+  ] = await Promise.all([
+    db.execute(sql<NodeInside>`SELECT * FROM node_inside`),
+    db.execute(sql<NodeOutside>`SELECT * FROM node_outside`),
+    db.execute(sql<EdgeInside>`SELECT * FROM edge_inside`),
+    db.execute(sql<EdgeOutside>`SELECT * FROM edge_outside`),
+    db.execute(sql<DestinationNode>`SELECT * FROM destination_node`),
+  ]);
 
   const version = (store.graph?.version ?? 0) + 1;
   return buildGraph(
@@ -150,6 +172,7 @@ async function loadGraphFromDb(): Promise<Graph> {
     edgeInsideRes.rows as EdgeInside[],
     nodeOutsideRes.rows as NodeOutside[],
     edgeOutsideRes.rows as EdgeOutside[],
+    destinationNodeOutside.rows as DestinationNode[],
     version,
   );
 }
@@ -209,7 +232,7 @@ export async function navigate(
   if (endNodes.has(startNode.id)) return [];
   console.log(navConditions);
 
-  const pathTree: Map<number, number> | null = await aStar(
+  const pathTree: Map<number, number> | null | undefined = await aStar(
     graph,
     startNode.id,
     destinationPos,
@@ -239,11 +262,9 @@ export async function navigate(
     const edgeId: number | undefined = adjList?.find(
       (cur) => cur.to === curP,
     )?.edgeId;
-    if (edgeId === undefined) {
-      logReturnNull("edgeId undefined when backtracking path");
-      return null;
+    if (edgeId != null) {
+      path.push(edgeId);
     }
-    path.push(edgeId);
     curP = nxt;
   }
   path.reverse();
@@ -326,8 +347,101 @@ async function aStar(
       );
       openSet.add({ f: gNew + h, g: gNew, id: neighbor.to });
     }
+    console.log(
+      navConditions.is_through_building &&
+        navConditions.is_pedestrian &&
+        graph.buildingEntranceNodeIds.has(cur.id),
+    );
+
+    if (
+      navConditions.is_through_building &&
+      navConditions.is_pedestrian &&
+      graph.buildingEntranceNodeIds.has(cur.id)
+    ) {
+      const possibleBuildingExits = through_building_simple_bfs(
+        graph,
+        cur.id,
+        navConditions,
+      );
+      if (!possibleBuildingExits) continue;
+      for (const exit of possibleBuildingExits) {
+        const exitNode = graph.nodesOutside.get(exit);
+        if (!exitNode) continue;
+
+        const gNew =
+          cur.g +
+          calcDistance(curNode.lat, curNode.lng, exitNode.lat, exitNode.lng);
+        const bestG = gScore.get(exit);
+        if (bestG !== undefined && gNew >= bestG) continue;
+
+        pathTree.set(exit, cur.id);
+        gScore.set(exit, gNew);
+        const h = heuristic(
+          exitNode.lat,
+          exitNode.lng,
+          destinationPos.lat,
+          destinationPos.lng,
+        );
+        openSet.add({ f: gNew + h, g: gNew, id: exit });
+      }
+    }
   }
 
   logReturnNull("aStar exhausted openSet without reaching any end node");
   return null;
+}
+
+function through_building_simple_bfs(
+  graph: Graph,
+  buildingEntranceOutside: number,
+  nav: NavConditions,
+): number[] {
+  let start: any | undefined;
+  for (const [, node] of graph.nodesInside) {
+    if (node.node_outside_id === buildingEntranceOutside) {
+      start = node;
+      break;
+    }
+  }
+  if (!start) return [];
+
+  const exits = new Set<number>();
+
+  const queue: number[] = [start.id];
+  let head = 0;
+
+  // Here "visited" means "seen (maybe rejected)"
+  const visited = new Set<number>([start.id]);
+  const allowed = (n: any) =>
+    (nav.is_avoid_stairs ? !n.is_stairs : true) &&
+    (nav.is_incline_limit ? n.incline <= nav.max_incline : true);
+
+  while (head < queue.length) {
+    const nodeId = queue[head++];
+
+    const neighbors = graph.adjInside.get(nodeId);
+    if (!neighbors) continue;
+
+    for (const edge of neighbors) {
+      const nextId = edge.to;
+      if (visited.has(nextId)) continue;
+
+      const nextNode = graph.nodesInside.get(nextId);
+      if (!nextNode) continue;
+
+      visited.add(nextId); // early mark is OK under node-only constraints
+
+      if (!allowed(nextNode)) continue;
+
+      if (nextNode.is_exit && nextNode.node_outside_id != null) {
+        if (nextNode.node_outside_id !== buildingEntranceOutside) {
+          exits.add(nextNode.node_outside_id);
+        }
+      }
+
+      queue.push(nextId);
+    }
+  }
+  console.log("exits:", exits);
+  return [...exits];
 }

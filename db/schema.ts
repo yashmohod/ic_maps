@@ -151,7 +151,7 @@ export const nodeInside = pgTable(
     is_ramp: boolean("is_ramp").notNull().default(false),
     is_group: boolean("is_group").notNull().default(false),
     image_url: text("image_url"),
-    incline: doublePrecision("incline"),
+    incline: doublePrecision("incline").default(0),
     width: doublePrecision("width"),
     height: doublePrecision("height"),
 

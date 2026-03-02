@@ -1,4 +1,11 @@
-import 'dotenv/config';
+import "dotenv/config";
+import { defineConfig } from "drizzle-kit";
 
-// Drizzle disabled for Java-backend mode.
-export default {};
+export default defineConfig({
+  out: "./drizzle",
+  schema: "./db/schema.ts",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL!,
+  },
+});

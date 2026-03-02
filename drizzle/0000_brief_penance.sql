@@ -75,7 +75,7 @@ CREATE TABLE "node_inside" (
 	"is_ramp" boolean DEFAULT false NOT NULL,
 	"is_group" boolean DEFAULT false NOT NULL,
 	"image_url" text,
-	"incline" double precision,
+	"incline" double precision DEFAULT 0,
 	"width" double precision,
 	"height" double precision,
 	"destination_id" integer NOT NULL
