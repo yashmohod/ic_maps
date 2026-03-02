@@ -1,0 +1,1 @@
+This was the transitory branch when testing the nextjs for a full-stack app instead of just the frontend. Since then, this has been merged into the main, so this branch can be disregarded. Branch of the main to work on new features. 
