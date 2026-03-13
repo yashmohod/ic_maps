@@ -252,12 +252,21 @@ export const edgeOutside = pgTable(
   ],
 );
 
-//navmodes
-export const navMode = pgTable("nav_mode", {
+// outageLog
+export const outageLog = pgTable("outage_log",{ 
   id: serial("id").primaryKey(),
-  name: varchar("name", { length: 256 }).notNull().unique(),
-  through_building: boolean("through_building").notNull().default(false),
-});
+  datetime:timestamp("datetime",{ precision: 6, withTimezone: true }).defaultNow(),
+  inside_node: boolean("inside_node").notNull().default(false),
+  node_id: integer("node_id").notNull(),
+  note: text("note").default(""),
+})
+
+//navmodes
+//export const navMode = pgTable("nav_mode", {
+//  id: serial("id").primaryKey(),
+//  name: varchar("name", { length: 256 }).notNull().unique(),
+//  through_building: boolean("through_building").notNull().default(false),
+//});
 
 //buildings
 export const destination = pgTable("destination", {
