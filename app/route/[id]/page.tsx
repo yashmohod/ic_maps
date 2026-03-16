@@ -11,55 +11,37 @@ import {
   type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import toast, { Toaster } from "react-hot-toast";
+import { toast } from "sonner";
 import { useParams } from "next/navigation";
 
 import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
 
-import { useAppTheme } from "@/hooks/use-app-theme";
+import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
+import { Spinner } from "@/components/ui/spinner";
 import type { NavConditions } from "@/lib/navigation";
 import apiClient from "@/lib/apiClient";
+import { makeCircleGeoJSON } from "@/lib/geo";
+import {
+  surfacePanelClass,
+  surfaceSubtleClass,
+  borderMutedClass,
+} from "@/lib/panel-classes";
+import type {
+  LngLat,
+  UserPos,
+  SimpleMarkerNode,
+  GeoJSONFeatureCollection,
+} from "@/lib/types/map";
 
 import NavModeMap from "@/components/NavMode";
+import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
 
-type LngLat = { lng: number; lat: number };
-
-type UserPos = {
-  lng: number;
-  lat: number;
-  accuracy?: number;
-  heading?: number | null;
-};
-
-type MarkerNode = { id: string | number; lng: number; lat: number };
-type EdgeIndexEntry = { key: string; from: string | number; to: string | number };
-
-type GeoJSONFeatureCollection = {
-  type: "FeatureCollection";
-  features: Array<{
-    type: "Feature";
-    properties: Record<string, any>;
-    geometry:
-    | { type: "Point"; coordinates: [number, number] }
-    | { type: "LineString"; coordinates: Array<[number, number]> }
-    | { type: "Polygon"; coordinates: Array<Array<[number, number]>> };
-  }>;
-};
-
-function Spinner({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <span
-      className={[
-        "inline-block animate-spin rounded-full border-2 border-current border-t-transparent",
-        className,
-      ].join(" ")}
-      aria-label="Loading"
-    />
-  );
-}
+type MarkerNode = SimpleMarkerNode;
+type RouteEdgeEntry = { id: string; from: string | number; to: string | number };
 
 /** Extract path (edge IDs) from navigateTo response */
 function extractPath(resp: { path?: unknown }): number[] {
@@ -67,13 +49,13 @@ function extractPath(resp: { path?: unknown }): number[] {
   return resp.path.filter((x): x is number => typeof x === "number");
 }
 
-function makeLookups(markersLocal: MarkerNode[], edgeIndexLocal: EdgeIndexEntry[]) {
+function makeLookups(markersLocal: MarkerNode[], edgeIndexLocal: RouteEdgeEntry[]) {
   const nodesById = new Map<string, { lng: number; lat: number }>(
     markersLocal.map((m) => [String(m.id), { lng: m.lng, lat: m.lat }]),
   );
 
   const edgesByKey = new Map<string, { from: string; to: string }>(
-    edgeIndexLocal.map((e) => [String(e.key), { from: String(e.from), to: String(e.to) }]),
+    edgeIndexLocal.map((e) => [String(e.id), { from: String(e.from), to: String(e.to) }]),
   );
 
   return { nodesById, edgesByKey };
@@ -88,49 +70,6 @@ function parseEdgeKeyFallback(key: string): { from: string; to: string } | null 
   const to = parts[1]?.trim();
   if (!from || !to) return null;
   return { from, to };
-}
-
-function makeCircleGeoJSON(
-  lng: number,
-  lat: number,
-  radiusMeters: number,
-  points = 64,
-): GeoJSONFeatureCollection {
-  const coords: Array<[number, number]> = [];
-  const d = radiusMeters / 6378137;
-  const [lon, latRad] = [toRad(lng), toRad(lat)];
-
-  for (let i = 0; i <= points; i++) {
-    const brng = (i * 2 * Math.PI) / points;
-    const lat2 = Math.asin(
-      Math.sin(latRad) * Math.cos(d) + Math.cos(latRad) * Math.sin(d) * Math.cos(brng),
-    );
-    const lon2 =
-      lon +
-      Math.atan2(
-        Math.sin(brng) * Math.sin(d) * Math.cos(latRad),
-        Math.cos(d) - Math.sin(latRad) * Math.sin(lat2),
-      );
-    coords.push([toDeg(lon2), toDeg(lat2)]);
-  }
-
-  return {
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: {},
-        geometry: { type: "Polygon", coordinates: [coords] },
-      },
-    ],
-  };
-}
-
-function toRad(deg: number) {
-  return (deg * Math.PI) / 180;
-}
-function toDeg(rad: number) {
-  return (rad * 180) / Math.PI;
 }
 
 /** Order node ids from edges (same style as your NavigationMap helper) */
@@ -172,9 +111,9 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   const defViewState = useMemo(
     () => ({
-      longitude: -76.494131,
-      latitude: 42.422108,
-      zoom: 15.5,
+      longitude: DEFAULT_CENTER.lng,
+      latitude: DEFAULT_CENTER.lat,
+      zoom: DEFAULT_ZOOM,
       bearing: 0,
       pitch: 0,
     }),
@@ -185,16 +124,10 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  const { isDark } = useAppTheme();
-  const stylePath = isDark
-    ? "/styles/osm-bright/style-local-dark.json"
-    : "/styles/osm-bright/style-local-light.json";
-  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const { isDark, mapStyle } = useMapStyle();
+  const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
 
-  const surfacePanelClass = "bg-panel text-panel-foreground";
-  const surfaceSubtleClass = "bg-panel-muted text-panel-muted-foreground";
-  const borderMutedClass = "border-border";
 
   /** Route from shareable link: GET /api/shareableroute?id=... */
   type RouteInfo = { name: string; destinationId: number } | null;
@@ -205,6 +138,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const [curNavConditions, setCurNavConditions] = useState<NavConditions>({
     is_pedestrian: true,
     is_vehicular: false,
+    is_through_building: true,
     is_avoid_stairs: false,
     is_incline_limit: false,
     max_incline: 0,
@@ -259,7 +193,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       const nodes = data.nodes ?? [];
       const edges = (data.edges ?? []).map(
         (e: { id: number; from: number; to: number }) => ({
-          key: String(e.id),
+          id: String(e.id),
           from: e.from,
           to: e.to,
         }),
@@ -323,7 +257,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         setLocating(false);
       },
       (err) => {
-        console.log(err.message);
         toast.error("Could not get your location.");
         setLocating(false);
       },
@@ -333,7 +266,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   /** -------- graph data (from NavModeMap) -------- */
   const [markers, setMarkers] = useState<MarkerNode[]>([]);
-  const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
+  const [edgeIndex, setEdgeIndex] = useState<RouteEdgeEntry[]>([]);
 
   /** -------- route state -------- */
   const [routePending, setRoutePending] = useState(false);
@@ -351,7 +284,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-width": 7,
-        "line-color": "#ffd200",
+        "line-color": "#35D5A4",
         "line-opacity": 0.95,
         "line-blur": 0.2,
       },
@@ -363,26 +296,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     if (!userPos?.accuracy) return null;
     return makeCircleGeoJSON(userPos.lng, userPos.lat, Math.max(userPos.accuracy, 5), 64);
   }, [userPos]);
-
-  const accuracyFill = useMemo(
-    () => ({
-      id: "loc-accuracy-fill",
-      type: "fill" as const,
-      source: "loc-accuracy",
-      paint: { "fill-color": "#3b82f6", "fill-opacity": 0.15 },
-    }),
-    [],
-  );
-
-  const accuracyLine = useMemo(
-    () => ({
-      id: "loc-accuracy-line",
-      type: "line" as const,
-      source: "loc-accuracy",
-      paint: { "line-color": "#3b82f6", "line-width": 2, "line-opacity": 0.6 },
-    }),
-    [],
-  );
 
   function fitToUserAndRoute(coords: Array<[number, number]>) {
     const map = mapRef.current?.getMap?.();
@@ -506,7 +419,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
 
     if (!segments.length) {
-      console.warn("No segments could be resolved from pathKeys", { pathKeys });
       setRouteFC(null);
       setDestPos(null);
       toast.error("Path edges did not match any loaded graph edges for this nav mode.");
@@ -571,8 +483,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   /** UI */
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
-      <Toaster position="top-right" reverseOrder />
-
       <div className="absolute left-3 top-20 z-40 flex items-center gap-2 md:top-3">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
@@ -620,6 +530,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 onClick={locateOnce}
                 disabled={locating}
                 title="Update your location"
+                aria-label="Locate me"
               >
                 {locating ? <Spinner /> : null}
                 Locate me
@@ -636,6 +547,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 onClick={refreshRoute}
                 disabled={!userPos || !routeInfo?.destinationId || routePending}
                 title="Refresh route"
+                aria-label="Refresh route"
               >
                 {routePending ? <Spinner /> : null}
                 Refresh
@@ -666,7 +578,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                     className={[
                       "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition",
                       active
-                        ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                        ? "bg-brand-cta text-brand-cta-foreground"
                         : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
                       routePending && "opacity-60",
                     ].join(" ")}
@@ -698,7 +610,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             onLoad={() => setMapReady(true)}
           >
             {/* ✅ Load the graph (markers + edgeIndex) exactly like your working pages */}
-            {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the yellow route ourselves) */}
+            {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the teal route ourselves) */}
             <NavModeMap
               path={emptyPath}
               curNavConditions={curNavConditions}
@@ -709,10 +621,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
             {/* accuracy ring */}
             {accuracyGeoJSON && (
-              <Source id="loc-accuracy" type="geojson" data={accuracyGeoJSON as any}>
-                <Layer {...(accuracyFill as any)} />
-                <Layer {...(accuracyLine as any)} />
-              </Source>
+              <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
 
             {/* route line (segments FC) */}

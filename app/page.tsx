@@ -1,5 +1,4 @@
 "use client";
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Toggle } from "@/components/ui/toggle";
 import React, { useRef, useState, useMemo, useEffect, type JSX } from "react";
 import {
@@ -10,10 +9,11 @@ import {
   type MapRef,
   type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
-import toast, { Toaster } from "react-hot-toast";
+import { toast } from "sonner";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useAppTheme } from "@/hooks/use-app-theme";
+import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { DEFAULT_CENTER, DEFAULT_ZOOM, CAMPUS_BOUNDS } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import {
@@ -28,7 +28,6 @@ import {
 } from "@tabler/icons-react";
 import ProfileOptions from "../components/profileOptions";
 import NavModeMap from "../components/NavMode";
-import { AppSidebar } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { authClient, type Session } from "@/lib/auth-client";
@@ -37,58 +36,25 @@ import maplibregl from "maplibre-gl";
 import apiClient from "@/lib/apiClient";
 import { Slider } from "@/components/ui/slider"
 import { NavConditions } from "@/lib/navigation";
-import { core, set } from "zod";
-/** ---------------- Types ---------------- */
+import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
+import { makeCircleGeoJSON, bearingTo } from "@/lib/geo";
+import {
+  surfacePanelClass,
+  surfaceSubtleClass,
+  borderMutedClass,
+  selectBaseClass,
+  selectFocusClass,
+} from "@/lib/panel-classes";
+import type {
+  LngLat,
+  UserPos,
+  MarkerNode,
+  EdgeIndexEntry,
+  GeoJSONFeatureCollection,
+  MapDestination,
+} from "@/lib/types/map";
 
-type LngLat = { lng: number; lat: number };
-
-type UserPos = {
-  lng: number;
-  lat: number;
-  accuracy?: number;
-  heading?: number | null;
-};
-
-export type Destination = {
-  id: number;
-  name: string;
-  lat: number;
-  lng: number;
-  polygon: string; // JSON string of a GeoJSON Feature
-  isParkingLot: boolean;
-};
-
-
-type MarkerNode = {
-  id: number;
-  lng: number;
-  lat: number;
-  isBlueLight: boolean;
-  isPedestrian: boolean;
-  isVehicular: boolean;
-  isStairs: boolean;
-  isElevator: boolean;
-};
-
-type EdgeIndexEntry = {
-  id: number;
-  from: number;
-  to: number;
-  biDirectional: boolean;
-  incline: number;
-};
-
-type GeoJSONFeatureCollection = {
-  type: "FeatureCollection";
-  features: Array<{
-    type: "Feature";
-    properties: Record<string, any>;
-    geometry:
-    | { type: "Point"; coordinates: [number, number] }
-    | { type: "LineString"; coordinates: [number, number][] }
-    | { type: "Polygon"; coordinates: [Array<[number, number]>] };
-  }>;
-};
+export type Destination = MapDestination;
 
 
 
@@ -111,25 +77,25 @@ const STAGE_DETAILS: Record<
     label: "Campus overview",
     headline: "Explore the full map",
     description: "Pan freely or pick a building to preview routes.",
-    badgeColor: "bg-slate-100 text-slate-600",
+    badgeColor: "bg-secondary text-secondary-foreground",
   },
   [MAP_STAGES.BUILDING]: {
     label: "Building focus",
     headline: "Dialed into your destination",
     description: "Review building info or preview a route when ready.",
-    badgeColor: "bg-amber-100 text-amber-700",
+    badgeColor: "bg-brand-cta/15 text-brand-cta-foreground dark:text-brand-cta",
   },
   [MAP_STAGES.ROUTE]: {
     label: "Route overview",
     headline: "Preview the full path",
     description: "See the complete route before committing to tracking.",
-    badgeColor: "bg-sky-100 text-sky-700",
+    badgeColor: "bg-brand/10 text-brand dark:bg-brand-cta/15 dark:text-brand-cta",
   },
   [MAP_STAGES.TRACKING]: {
     label: "Live navigation",
     headline: "Tracking in real time",
     description: "Follow turn-by-turn guidance until you arrive.",
-    badgeColor: "bg-emerald-100 text-emerald-700",
+    badgeColor: "bg-brand-cta/15 text-brand-cta-foreground dark:text-brand-cta",
   },
 };
 
@@ -137,9 +103,9 @@ const MAX_INCLINE = 45;
 
 export default function NavigationMap(): JSX.Element {
   const defViewState = {
-    longitude: -76.494131,
-    latitude: 42.422108,
-    zoom: 15.5,
+    longitude: DEFAULT_CENTER.lng,
+    latitude: DEFAULT_CENTER.lat,
+    zoom: DEFAULT_ZOOM,
     bearing: 0,
     pitch: 0,
   };
@@ -152,8 +118,7 @@ export default function NavigationMap(): JSX.Element {
 
   const [viewState, setViewState] = useState(defViewState);
 
-  const topLeftBoundary = { lng: -76.505098, lat: 42.427959 };
-  const bottomRightBoundary = { lng: -76.483915, lat: 42.410851 };
+  const [[swLng, swLat], [neLng, neLat]] = CAMPUS_BOUNDS;
 
   const [selectedDest, setSelectedDest] = useState<number>(-1);
   const [destinations, setDestinations] = useState<Destination[]>([]);
@@ -190,6 +155,7 @@ export default function NavigationMap(): JSX.Element {
   const pendingRouteStartRef = useRef(false);
   const watchIdRef = useRef<number | null>(null);
   const deviceHeadingRef = useRef<number | null>(null);
+  const compassHandlerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null);
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
 
   const [buildingNodes, setBuildingNodes] = useState<Set<number>>(new Set());
@@ -200,23 +166,27 @@ export default function NavigationMap(): JSX.Element {
   }, [destinations, selectedDest]);
 
   async function getAllFeature() {
-    const req = await apiClient.get("/api/map/all")
+    try {
+      const req = await apiClient.get("/api/map/all")
 
-    if (req.status !== 200) {
+      if (req.status !== 200) {
+        toast.error("Failed to fetch map features!");
+        return;
+      }
+
+      const data = await req.json()
+
+      setMarkers(
+        data.nodes as MarkerNode[]
+      );
+
+      setEdgeIndex(
+        data.edges as EdgeIndexEntry[]
+      );
+    } catch (err) {
+      console.error(err);
       toast.error("Failed to fetch map features!");
-      return;
     }
-
-    const data = await req.json()
-    console.log(data)
-
-    setMarkers(
-      data.nodes as MarkerNode[]
-    );
-
-    setEdgeIndex(
-      data.edges as EdgeIndexEntry[]
-    );
   }
 
   useEffect(() => {
@@ -224,7 +194,7 @@ export default function NavigationMap(): JSX.Element {
 
   }, [])
 
-  const { isDark } = useAppTheme();
+  const { isDark, mapStyle } = useMapStyle();
 
   const { data: session, error } = authClient.useSession();
 
@@ -253,17 +223,8 @@ export default function NavigationMap(): JSX.Element {
 
   /** ---------------- PMTiles + Style ---------------- */
 
-  const stylePath = isDark
-    ? "/styles/osm-bright/style-local-dark.json"
-    : "/styles/osm-bright/style-local-light.json";
-  const { baseStyle, vectorSourceId } = usePmtilesStyle({ stylePath });
+  const { baseStyle, vectorSourceId } = usePmtilesStyle({ stylePath: mapStyle });
 
-  const surfacePanelClass = "bg-panel text-panel-foreground";
-  const surfaceSubtleClass = "bg-panel-muted text-panel-muted-foreground";
-  const borderMutedClass = "border-border";
-  const selectBaseClass = "border-border bg-panel text-panel-foreground";
-  const selectFocusClass =
-    "focus:border-brand-accent focus:ring-brand-accent/30";
 
   /** -------- Accuracy ring -------- */
 
@@ -276,26 +237,6 @@ export default function NavigationMap(): JSX.Element {
       64,
     );
   }, [userPos]);
-
-  const accuracyFill = useMemo(
-    () => ({
-      id: "loc-accuracy-fill",
-      type: "fill" as const,
-      source: "loc-accuracy",
-      paint: { "fill-color": "#3b82f6", "fill-opacity": 0.15 },
-    }),
-    [],
-  );
-
-  const accuracyLine = useMemo(
-    () => ({
-      id: "loc-accuracy-line",
-      type: "line" as const,
-      source: "loc-accuracy",
-      paint: { "line-color": "#3b82f6", "line-width": 2, "line-opacity": 0.6 },
-    }),
-    [],
-  );
 
   /** -------- Camera helpers -------- */
 
@@ -365,10 +306,7 @@ export default function NavigationMap(): JSX.Element {
     if (!map) return;
 
     map.fitBounds(
-      [
-        [topLeftBoundary.lng, bottomRightBoundary.lat],
-        [bottomRightBoundary.lng, topLeftBoundary.lat],
-      ],
+      CAMPUS_BOUNDS,
       {
         padding: { top: 48, bottom: 80, left: 48, right: 48 },
         duration: 900,
@@ -381,21 +319,13 @@ export default function NavigationMap(): JSX.Element {
   /** -------- Geo diagnostics + compass -------- */
 
   async function diagEnv() {
-    console.log(
-      "[geo] secure:",
-      window.isSecureContext,
-      "UA:",
-      navigator.userAgent,
-    );
     try {
       if (navigator.permissions?.query) {
-        const p = await navigator.permissions.query({
+        await navigator.permissions.query({
           name: "geolocation" as PermissionName,
         });
-        console.log("[geo] permission.state:", p.state);
       }
-    } catch (e) {
-      console.log("[geo] permissions.query failed:", e);
+    } catch {
     }
   }
 
@@ -425,6 +355,7 @@ export default function NavigationMap(): JSX.Element {
         }
       };
 
+      compassHandlerRef.current = handler;
       window.addEventListener("deviceorientationabsolute", handler, true);
       window.addEventListener("deviceorientation", handler, true);
       setUseCompass(true);
@@ -434,6 +365,11 @@ export default function NavigationMap(): JSX.Element {
   }
 
   function disableCompass() {
+    if (compassHandlerRef.current) {
+      window.removeEventListener("deviceorientationabsolute", compassHandlerRef.current, true);
+      window.removeEventListener("deviceorientation", compassHandlerRef.current, true);
+      compassHandlerRef.current = null;
+    }
     setUseCompass(false);
     deviceHeadingRef.current = null;
   }
@@ -463,10 +399,10 @@ export default function NavigationMap(): JSX.Element {
         const { longitude, latitude, accuracy } = position.coords;
 
         const insideCampus =
-          latitude < topLeftBoundary.lat &&
-          latitude > bottomRightBoundary.lat &&
-          longitude < bottomRightBoundary.lng &&
-          longitude > topLeftBoundary.lng;
+          latitude > swLat &&
+          latitude < neLat &&
+          longitude > swLng &&
+          longitude < neLng;
 
         if (insideCampus || forceCenter) {
           setUserPos({ lng: longitude, lat: latitude, accuracy });
@@ -478,9 +414,7 @@ export default function NavigationMap(): JSX.Element {
           });
         }
       },
-      (err) => {
-        console.log(err.message);
-      },
+      () => {},
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 },
     );
   }
@@ -603,22 +537,6 @@ export default function NavigationMap(): JSX.Element {
 
 
   /** -------- Bearing / camera -------- */
-
-  const toRadLocal = (d: number) => (d * Math.PI) / 180;
-  const toDegLocal = (r: number) => (r * 180) / Math.PI;
-  const normBearing = (b: number) => ((b % 360) + 360) % 360;
-
-  function bearingTo(lng1: number, lat1: number, lng2: number, lat2: number) {
-    const φ1 = toRadLocal(lat1),
-      φ2 = toRadLocal(lat2);
-    const λ1 = toRadLocal(lng1),
-      λ2 = toRadLocal(lng2);
-    const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
-    const x =
-      Math.cos(φ1) * Math.sin(φ2) -
-      Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
-    return normBearing(toDegLocal(Math.atan2(y, x)));
-  }
 
   function aimCamera(
     map: any,
@@ -761,7 +679,6 @@ export default function NavigationMap(): JSX.Element {
         });
       },
       (err) => {
-        console.log("watchPosition error:", err);
         toast.error(err.message || "Tracking error");
         stopTracking();
       },
@@ -791,10 +708,15 @@ export default function NavigationMap(): JSX.Element {
   /** -------- Data loading -------- */
 
   async function getBuildings() {
-    const req = await apiClient.get("api/destination");
-    if (req.status !== 200) return toast.error("Buildings did not load!");
-    const resp = await req.json();
-    setDestinations(resp.destinations || []);
+    try {
+      const req = await apiClient.get("/api/destination");
+      if (req.status !== 200) return toast.error("Buildings did not load!");
+      const resp = await req.json();
+      setDestinations(resp.destinations || []);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load buildings!");
+    }
   }
 
 
@@ -846,7 +768,6 @@ export default function NavigationMap(): JSX.Element {
 
     if (mapStage === MAP_STAGES.BUILDING && destPos) {
       if (!Number.isFinite(destPos.lat) || !Number.isFinite(destPos.lng)) {
-        console.warn("Skipping flyTo due to invalid destPos", destPos);
         return;
       }
 
@@ -896,6 +817,22 @@ export default function NavigationMap(): JSX.Element {
 
   function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function handleSheetKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSheetPosition((current) => {
+        const idx = sheetSnapPoints.findIndex((sp) => Math.abs(sp - current) < 0.02);
+        return idx > 0 ? sheetSnapPoints[idx - 1] : sheetSnapPoints[0];
+      });
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSheetPosition((current) => {
+        const idx = sheetSnapPoints.findIndex((sp) => Math.abs(sp - current) < 0.02);
+        return idx < sheetSnapPoints.length - 1 ? sheetSnapPoints[idx + 1] : sheetSnapPoints[sheetSnapPoints.length - 1];
+      });
+    }
   }
 
   function toggleSheetToFarthestSnap() {
@@ -1050,8 +987,8 @@ export default function NavigationMap(): JSX.Element {
   const canRenderMap = !!baseStyle;
 
   return (
-    <div className="relative h-screen w-full bg-background text-foreground">
-      <Toaster position="top-right" reverseOrder />
+    <main id="main-content" className="relative h-screen w-full bg-background text-foreground">
+      <h1 className="sr-only">IC Maps &ndash; Campus Navigation</h1>
 
       {/* Top brand + search bar */}
       <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
@@ -1064,8 +1001,10 @@ export default function NavigationMap(): JSX.Element {
             className={`flex flex-[10] items-center justify-center-safe rounded-[22px] border ${borderMutedClass} ${surfacePanelClass} px-1 py-1 shadow-xl backdrop-blur`}
           >
             <div className="w-full">
+              <label htmlFor="search-dest" className="sr-only">Select a campus building</label>
               <select
                 id="search-dest"
+                aria-label="Select a campus building"
                 className={`w-full rounded-2xl border px-3 py-3 text-sm font-medium transition focus:outline-none focus:ring-2 ${selectFocusClass} ${selectBaseClass}`}
                 value={selectedDest}
                 onChange={(e) => handleDestinationChange(Number(e.target.value))}
@@ -1088,12 +1027,12 @@ export default function NavigationMap(): JSX.Element {
               <ProfileOptions session={session} />
             </div>
           ) : (
-            <Link href="/account/login">
+            <Link href="/account/login" aria-label="Log in to your account">
               <div
                 className={`flex flex-[1] h-full  w-full items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
               transition transform hover:scale-[1.03] active:scale-95`}
               >
-                <IconLogin2 size={35} />
+                <IconLogin2 size={35} aria-hidden="true" />
               </div>
             </Link>
           )}
@@ -1112,8 +1051,10 @@ export default function NavigationMap(): JSX.Element {
               </span>
             </div>
 
-            <div className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+            <div role="radiogroup" aria-label="Navigation mode" className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
               <button
+                role="radio"
+                aria-checked={curNavConditions.is_pedestrian}
                 onClick={() => {
                   setCurNavConditions((prev) => {
                     let temp = { ...prev }
@@ -1127,13 +1068,15 @@ export default function NavigationMap(): JSX.Element {
                 className={[
                   "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
                   curNavConditions.is_pedestrian
-                    ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                    ? "bg-brand-cta text-brand-cta-foreground"
                     : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
                 ].join(" ")}
               >
                 Pedestrian
               </button>
               <button
+                role="radio"
+                aria-checked={curNavConditions.is_vehicular}
                 onClick={() => {
                   setCurNavConditions((prev) => {
                     let temp = { ...prev }
@@ -1147,7 +1090,7 @@ export default function NavigationMap(): JSX.Element {
                 className={[
                   "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
                   curNavConditions.is_vehicular
-                    ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                    ? "bg-brand-cta text-brand-cta-foreground"
                     : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
                 ].join(" ")}
               >
@@ -1164,7 +1107,7 @@ export default function NavigationMap(): JSX.Element {
                     className={[
                       "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
                       active
-                        ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground"
+                        ? "bg-brand-cta text-brand-cta-foreground"
                         : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
                     ].join(" ")}
                   >
@@ -1182,7 +1125,7 @@ export default function NavigationMap(): JSX.Element {
           <div className="absolute right-10 top-80 z-30 flex flex-col   bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
             <div className="p-2">
               <Toggle
-                className={curNavConditions.is_through_building ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
+                className={curNavConditions.is_through_building ? "bg-brand-cta text-brand-cta-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
                 aria-label={"Through Building"}
                 size="sm"
                 variant="outline"
@@ -1204,7 +1147,7 @@ export default function NavigationMap(): JSX.Element {
             </div>
             <div className="p-2">
               <Toggle
-                className={curNavConditions.is_avoid_stairs ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
+                className={curNavConditions.is_avoid_stairs ? "bg-brand-cta text-brand-cta-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
                 aria-label={"Stairs"}
                 size="sm"
                 variant="outline"
@@ -1226,7 +1169,7 @@ export default function NavigationMap(): JSX.Element {
             </div>
             <div className="p-2 ">
               <Toggle
-                className={curNavConditions.is_incline_limit ? "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
+                className={curNavConditions.is_incline_limit ? "bg-brand-cta text-brand-cta-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
                 aria-label={"Limit Incline"}
                 size="sm"
                 variant="outline"
@@ -1274,44 +1217,42 @@ export default function NavigationMap(): JSX.Element {
         </>
         : null}
       {/* admin pages (moved fully to left) */}
-      <div className="absolute left-3 top-40 z-30 flex flex-col space-y-3">
+      <nav aria-label="Admin tools" className="absolute left-3 top-40 z-30 flex flex-col space-y-3">
         {isAdmin ?
           <>
-            <Link href="/route-editor">
-              <button
-                className={[
-                  "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
-                  `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-                ].join(" ")}
-              >
-                {"Route \n Editor"}
-              </button>
-            </Link>
-
-            <Link href="/building-editor">
-              <button
-                className={[
-                  "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
-                  `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-                ].join(" ")}
-              >
-                {"Building \n Editor"}
-              </button>
-            </Link></>
-          : null}
-        {isIcUser ?
-          <Link href="/customRoute">
-            <button
+            <Link
+              href="/route-editor"
               className={[
-                "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm",
+                "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm text-center",
                 `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
               ].join(" ")}
             >
-              {"Shareable \n Routes"}
-            </button>
+              Route Editor
+            </Link>
+
+            <Link
+              href="/destination-editor"
+              className={[
+                "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm text-center",
+                `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+              ].join(" ")}
+            >
+              Building Editor
+            </Link>
+          </>
+          : null}
+        {isIcUser ?
+          <Link
+            href="/customRoute"
+            className={[
+              "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm text-center",
+              `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+            ].join(" ")}
+          >
+            Shareable Routes
           </Link>
           : null}
-      </div>
+      </nav>
 
       {/* Bottom sheet wrapper */}
       <div
@@ -1325,47 +1266,47 @@ export default function NavigationMap(): JSX.Element {
         style={{ transform: `translateY(${sheetPosition * 100}%)` }}
       >
         <div className="flex flex-row w-full justify-between">
-          <div
+          <button
             className={[
-              "mr-3 mb-2 justify-self-start rounded-[15px]  w-15 h-15 justify-items-center content-center pointer-events-auto",
-              "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground",
+              "mr-3 mb-2 justify-self-start rounded-[15px] w-15 h-15 grid place-items-center pointer-events-auto",
+              "bg-brand-cta text-brand-cta-foreground",
             ].join(" ")}
+            onClick={handelZoom}
+            aria-label={isZoomed ? "Zoom out to campus overview" : "Zoom in to destination"}
           >
-            <button
-              className="w-full h-full grid place-items-center"
-              onClick={handelZoom}
-            >
-              {isZoomed ? (
-                <IconArrowsMaximize className="text-current" size={32} />
+            {isZoomed ? (
+              <IconArrowsMaximize className="text-current" size={32} />
+            ) : (
+              <IconArrowsMinimize className="text-current" size={32} />
+            )}
+          </button>
+
+          <button
+            className={[
+              "mr-3 mb-2 justify-self-end rounded-[15px] w-15 h-15 grid place-items-center pointer-events-auto",
+              "bg-brand-cta text-brand-cta-foreground",
+            ].join(" ")}
+            onClick={handelTheButton}
+            aria-label={
+              !tracking && !navigating
+                ? "Show route"
+                : navigating && tracking
+                  ? "Stop tracking"
+                  : "Start live navigation"
+            }
+          >
+            {!tracking && !navigating ? (
+              <IconArrowGuide className="text-current" size={32} />
+            ) : null}
+
+            {navigating ? (
+              tracking ? (
+                <IconNavigationX className="text-current" size={32} />
               ) : (
-                <IconArrowsMinimize className="text-current" size={32} />
-              )}
-            </button>
-          </div>
-
-          <div
-            className={[
-              "mr-3 mb-2 justify-self-end rounded-[15px]  w-15 h-15 justify-items-center content-center pointer-events-auto",
-              "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground",
-            ].join(" ")}
-          >
-            <button
-              className="w-full h-full grid place-items-center"
-              onClick={handelTheButton}
-            >
-              {!tracking && !navigating ? (
-                <IconArrowGuide className="text-current" size={32} />
-              ) : null}
-
-              {navigating ? (
-                tracking ? (
-                  <IconNavigationX className="text-current" size={32} />
-                ) : (
-                  <IconNavigation className="text-current" size={32} />
-                )
-              ) : null}
-            </button>
-          </div>
+                <IconNavigation className="text-current" size={32} />
+              )
+            ) : null}
+          </button>
         </div>
 
         {/* Actual sheet */}
@@ -1383,29 +1324,27 @@ export default function NavigationMap(): JSX.Element {
             onPointerDown={handleSheetDragStart}
             onTouchStart={handleSheetDragStart}
           >
-            <div
+            <button
               className={[
-                "flex ml-0.5 mt-0.5 w-14 h-14 rounded-3xl shadow-md justify-content-center content-center select-none touch-none",
-                "bg-brand text-brand-foreground dark:bg-brand-accent dark:text-brand-accent-foreground",
+                "ml-0.5 mt-0.5 w-14 h-14 rounded-3xl shadow-md grid place-items-center select-none touch-none",
+                "bg-brand-cta text-brand-cta-foreground",
               ].join(" ")}
               style={{ touchAction: "none" }}
-              onPointerDown={handleSheetDragStart}
+              aria-label={sheetPosition > 0.5 ? "Expand details panel" : "Collapse details panel"}
+              onPointerDown={(e) => handleSheetDragStart(e)}
               onTouchStart={handleSheetDragStart}
+              onKeyDown={handleSheetKeyDown}
+              onClick={() => {
+                if (sheetDidDragRef.current) return;
+                toggleSheetToFarthestSnap();
+              }}
             >
-              <button
-                onPointerDown={(e) => handleSheetDragStart(e)}
-                onClick={() => {
-                  if (sheetDidDragRef.current) return;
-                  toggleSheetToFarthestSnap();
-                }}
-              >
-                {sheetPosition > 0.5 ? (
-                  <IconArrowBadgeUpFilled className="text-current" size={42} />
-                ) : (
-                  <IconArrowBadgeDownFilled className="text-current" size={42} />
-                )}
-              </button>
-            </div>
+              {sheetPosition > 0.5 ? (
+                <IconArrowBadgeUpFilled className="text-current" size={42} />
+              ) : (
+                <IconArrowBadgeDownFilled className="text-current" size={42} />
+              )}
+            </button>
           </div>
 
           <div className="h-[calc(100%-48px)] overflow-y-auto px-4 pb-4">
@@ -1415,32 +1354,33 @@ export default function NavigationMap(): JSX.Element {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
                       {stageDetails.label}
                     </p>
                     <p className="text-lg font-semibold">
                       {selectedBuilding.name}
                     </p>
-                    <p className="mt-1 text-sm opacity-80">
+                    <p className="mt-1 text-sm text-panel-muted-foreground">
                       {stageDetails.headline}
                     </p>
                   </div>
                   <button
                     onClick={handleClearDestination}
-                    className="rounded-full border border-border/40 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-panel-foreground/80 transition hover:bg-foreground/5"
+                    aria-label="Clear destination"
+                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground transition hover:bg-foreground/5"
                   >
                     Clear
                   </button>
                 </div>
 
-                <p className="mt-2 text-sm opacity-80">
+                <p className="mt-2 text-sm text-panel-muted-foreground">
                   {
                     stageDetails.description ||
                     "Additional building details will appear here soon."}
                 </p>
 
                 {destPos && (
-                  <div className="mt-2 text-xs opacity-70">
+                  <div className="mt-2 text-xs text-panel-muted-foreground">
                     {destPos.lat.toFixed(5)}, {destPos.lng.toFixed(5)}
                   </div>
                 )}
@@ -1453,7 +1393,7 @@ export default function NavigationMap(): JSX.Element {
       {/* Map wrapper */}
       <div className="h-full w-full">
         {!canRenderMap ? (
-          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+          <div className="h-full w-full grid place-items-center text-sm text-muted-foreground" role="status" aria-label="Loading map">
             Loading basemap…
           </div>
         ) : (
@@ -1468,10 +1408,6 @@ export default function NavigationMap(): JSX.Element {
             onLoad={() => {
               setMapReady(true);
               const map = mapRef.current?.getMap?.();
-              console.log(map?.getStyle().sources);
-              console.log(map?.getStyle().layers?.map(l => ({
-                id: l.id, source: (l as any).source, "source-layer": (l as any)["source-layer"], type: l.type
-              })));
               map?.on("error", (e: any) => {
                 console.error("[maplibre error]", e?.error ?? e);
               });
@@ -1521,7 +1457,7 @@ export default function NavigationMap(): JSX.Element {
                     "circle-color": [
                       "case",
                       ["boolean", ["get", "onPath"], false],
-                      isDark ? "#ffd200" : "#003c71",
+                      "#35D5A4",
                       isDark ? "#60a5fa" : "#2563eb",
                     ],
                     "circle-stroke-width": 2,
@@ -1541,10 +1477,7 @@ export default function NavigationMap(): JSX.Element {
             />
 
             {accuracyGeoJSON && (
-              <Source id="loc-accuracy" type="geojson" data={accuracyGeoJSON as any}>
-                <Layer {...accuracyFill} />
-                <Layer {...accuracyLine} />
-              </Source>
+              <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
 
             {selectedDest && curBuildingPoly && (
@@ -1553,7 +1486,7 @@ export default function NavigationMap(): JSX.Element {
                   id="boundary-fill"
                   type="fill"
                   paint={{
-                    "fill-color": isDark ? "#ffd200" : "#003c71",
+                    "fill-color": "#35D5A4",
                     "fill-opacity": 0.2,
                   }}
                 />
@@ -1561,7 +1494,7 @@ export default function NavigationMap(): JSX.Element {
                   id="boundary-outline"
                   type="line"
                   paint={{
-                    "line-color": isDark ? "#ffd200" : "#003c71",
+                    "line-color": "#35D5A4",
                     "line-width": 2,
                   }}
                 />
@@ -1579,53 +1512,7 @@ export default function NavigationMap(): JSX.Element {
           </ReactMap>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 
-/** ---------------- Geometry helpers (typed) ---------------- */
-
-function makeCircleGeoJSON(
-  lng: number,
-  lat: number,
-  radiusMeters: number,
-  points = 64,
-): GeoJSONFeatureCollection {
-  const coords: Array<[number, number]> = [];
-  const d = radiusMeters / 6378137;
-  const [lon, latRad] = [toRad(lng), toRad(lat)];
-
-  for (let i = 0; i <= points; i++) {
-    const brng = (i * 2 * Math.PI) / points;
-    const lat2 = Math.asin(
-      Math.sin(latRad) * Math.cos(d) +
-      Math.cos(latRad) * Math.sin(d) * Math.cos(brng),
-    );
-    const lon2 =
-      lon +
-      Math.atan2(
-        Math.sin(brng) * Math.sin(d) * Math.cos(latRad),
-        Math.cos(d) - Math.sin(latRad) * Math.sin(lat2),
-      );
-    coords.push([toDeg(lon2), toDeg(lat2)]);
-  }
-
-  return {
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: {},
-        geometry: { type: "Polygon", coordinates: [coords] },
-      },
-    ],
-  };
-}
-
-function toRad(deg: number) {
-  return (deg * Math.PI) / 180;
-}
-
-function toDeg(rad: number) {
-  return (rad * 180) / Math.PI;
-}

@@ -47,25 +47,25 @@ function fallbackStyles() {
       id: "gl-draw-polygon-fill.cold",
       type: "fill",
       filter: ["all", ["==", "$type", "Polygon"], ["!=", "active", "true"]],
-      paint: { "fill-color": "#3bb2d0", "fill-opacity": 0.4 },
+      paint: { "fill-color": "#1a5276", "fill-opacity": 0.4 },
     },
     {
       id: "gl-draw-polygon-fill.hot",
       type: "fill",
       filter: ["all", ["==", "$type", "Polygon"], ["==", "active", "true"]],
-      paint: { "fill-color": "#fbb03b", "fill-opacity": 0.4 },
+      paint: { "fill-color": "#35D5A4", "fill-opacity": 0.4 },
     },
     {
       id: "gl-draw-lines.cold",
       type: "line",
       filter: ["all", ["==", "$type", "LineString"], ["!=", "active", "true"]],
-      paint: { "line-color": "#3bb2d0", "line-width": 2 },
+      paint: { "line-color": "#1a5276", "line-width": 2 },
     },
     {
       id: "gl-draw-lines.hot",
       type: "line",
       filter: ["all", ["==", "$type", "LineString"], ["==", "active", "true"]],
-      paint: { "line-color": "#fbb03b", "line-width": 2 },
+      paint: { "line-color": "#35D5A4", "line-width": 2 },
     },
     {
       id: "gl-draw-points.cold",
@@ -76,7 +76,7 @@ function fallbackStyles() {
         ["!=", "meta", "midpoint"],
         ["!=", "active", "true"],
       ],
-      paint: { "circle-radius": 5, "circle-color": "#3bb2d0" },
+      paint: { "circle-radius": 5, "circle-color": "#1a5276", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
     },
     {
       id: "gl-draw-points.hot",
@@ -87,13 +87,13 @@ function fallbackStyles() {
         ["!=", "meta", "midpoint"],
         ["==", "active", "true"],
       ],
-      paint: { "circle-radius": 5, "circle-color": "#fbb03b" },
+      paint: { "circle-radius": 5, "circle-color": "#35D5A4" },
     },
     {
       id: "gl-draw-points.mid",
       type: "circle",
       filter: ["all", ["==", "$type", "Point"], ["==", "meta", "midpoint"]],
-      paint: { "circle-radius": 3, "circle-color": "#fbb03b" },
+      paint: { "circle-radius": 3, "circle-color": "#35D5A4" },
     },
   ];
 }

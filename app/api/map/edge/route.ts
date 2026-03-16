@@ -1,24 +1,44 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
+import { headers } from "next/headers";
+import { z } from "zod";
 import { db } from "@/db/index";
+import { auth } from "@/lib/auth";
 import { calcDistance } from "@/lib/utils";
 import { jsonError, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/map/edge";
 
+const edgePostSchema = z.object({
+  from: z.coerce.number().int().positive(),
+  to: z.coerce.number().int().positive(),
+  biDirectionalEdges: z.boolean().optional().default(false),
+});
+
+const edgeDeleteSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
 export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
-    const { from, to, biDirectionalEdges } = body as {
-      from: unknown;
-      to: unknown;
-      biDirectionalEdges: unknown;
-    };
-    console.log(`[API ${ROUTE} POST] called`, { from, to, biDirectionalEdges });
-    const fromId = Number(from);
-    const toId = Number(to);
+    const parsed = edgePostSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+
+    const { from: fromId, to: toId, biDirectionalEdges } = parsed.data;
+    console.log(`[API ${ROUTE} POST] called`, { from: fromId, to: toId, biDirectionalEdges });
 
     const a = Math.min(fromId, toId);
     const b = Math.max(fromId, toId);
@@ -66,20 +86,29 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
-    const { id } = body as { id: unknown };
+    const parsed = edgeDeleteSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
 
+    const { id } = parsed.data;
     console.log(`[API ${ROUTE} DELETE] called`, { id });
-
-    const nid = parseId(id);
-    if (!nid) return jsonError("Invalid id", 400);
 
     const result = await db.execute(sql`
       DELETE FROM edge_outside
-      WHERE id = ${nid}
+      WHERE id = ${id}
     `);
 
     if (result.rowCount === 0) {
@@ -164,7 +193,7 @@ export async function GET(req: Request) {
 
     const rows = result.rows.map((curedge) => {
       return {
-        key: curedge.id,
+        id: curedge.id,
         from: curedge.direction ? curedge.node_a_id : curedge.node_b_id,
         to: curedge.direction ? curedge.node_b_id : curedge.node_a_id,
         biDirectional: curedge.bi_directional,

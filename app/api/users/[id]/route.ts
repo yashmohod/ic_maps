@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { deleteLocalUser, getLocalUser, upsertLocalUser } from "@/lib/local-users";
+import { auth } from "@/lib/auth";
 
 const ROUTE = "/api/users/[id]";
 export async function GET(
@@ -20,6 +22,11 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { id } = await context.params;
   try {
     const body = (await req.json()) as { isAdmin?: boolean; name?: string };
@@ -59,6 +66,11 @@ export async function DELETE(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { id } = await context.params;
   console.log(`[API ${ROUTE} DELETE] called`, { id });
   try {

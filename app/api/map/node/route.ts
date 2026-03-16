@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
+import { headers } from "next/headers";
 import { db, pool } from "@/db/index";
+import { auth } from "@/lib/auth";
 import { jsonError, isValidLatLng, parseId } from "@/lib/utils";
 
 function getDetail(err: unknown): string {
@@ -12,6 +14,11 @@ function getDetail(err: unknown): string {
 const ROUTE = "/api/map/node";
 
 export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
@@ -45,6 +52,11 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
@@ -89,6 +101,11 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);

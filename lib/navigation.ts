@@ -8,16 +8,12 @@ import {
   type EdgeOutside,
   type NodeInside,
   type EdgeInside,
-  navMode,
   DestinationNode,
-} from "@/db/schema"; // adapt to your schema
+} from "@/db/schema";
 import { MinHeap } from "./minHeap";
 
 const FILE = "navigation.ts";
-function logReturnNull(reason: string): void {
-  const match = new Error().stack?.split("\n")[2]?.match(/:(\d+):/);
-  const line = match?.[1] ?? "?";
-  console.log(`[${FILE}:${line}] returning null: ${reason}`);
+function logReturnNull(_reason: string): void {
 }
 
 /** Closest outdoor node to a (lat, lng) point (for outdoor routing), filtered by nav mode. */
@@ -70,7 +66,7 @@ export function buildGraph(
   _edge_inside: EdgeInside[],
   node_outside: NodeOutside[],
   edge_outside: EdgeOutside[],
-  desinationNodeOutside: DestinationNode[],
+  destinationNodeOutside: DestinationNode[],
   version = 1,
 ): Graph {
   const nodeMapInside = new Map<number, NodeInside>();
@@ -119,7 +115,7 @@ export function buildGraph(
 
   const buildingNodeOutside = new Map<number, number>();
   const buildingEntranceNodeIds = new Set<number>();
-  for (const cur of desinationNodeOutside) {
+  for (const cur of destinationNodeOutside) {
     buildingNodeOutside.set(cur.destination_id, cur.node_outside_id);
     buildingEntranceNodeIds.add(cur.node_outside_id);
   }
@@ -230,7 +226,6 @@ export async function navigate(
   }
 
   if (endNodes.has(startNode.id)) return [];
-  console.log(navConditions);
 
   const pathTree: Map<number, number> | null | undefined = await aStar(
     graph,
@@ -286,7 +281,6 @@ async function aStar(
   const openSet = new MinHeap<AStarNode>((a, b) => a.f - b.f);
 
   const startPos = graph.nodesOutside.get(startNode);
-  console.log(startPos);
   if (!startPos) {
     logReturnNull("startPos not in graph.nodesOutside");
     return null;
@@ -347,11 +341,6 @@ async function aStar(
       );
       openSet.add({ f: gNew + h, g: gNew, id: neighbor.to });
     }
-    console.log(
-      navConditions.is_through_building &&
-        navConditions.is_pedestrian &&
-        graph.buildingEntranceNodeIds.has(cur.id),
-    );
 
     if (
       navConditions.is_through_building &&
@@ -414,7 +403,7 @@ function through_building_simple_bfs(
   const visited = new Set<number>([start.id]);
   const allowed = (n: any) =>
     (nav.is_avoid_stairs ? !n.is_stairs : true) &&
-    (nav.is_incline_limit ? n.incline <= nav.max_incline : true);
+    (nav.is_incline_limit ? (n.incline ?? 0) <= nav.max_incline : true);
 
   while (head < queue.length) {
     const nodeId = queue[head++];
@@ -442,6 +431,5 @@ function through_building_simple_bfs(
       queue.push(nextId);
     }
   }
-  console.log("exits:", exits);
   return [...exits];
 }

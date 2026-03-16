@@ -55,13 +55,6 @@ CREATE TABLE "edge_outside" (
 	CONSTRAINT "edge_outside_pair_unique" UNIQUE("node_a_id","node_b_id")
 );
 --> statement-breakpoint
-CREATE TABLE "nav_mode" (
-	"id" serial PRIMARY KEY NOT NULL,
-	"name" varchar(256) NOT NULL,
-	"through_building" boolean DEFAULT false NOT NULL,
-	CONSTRAINT "nav_mode_name_unique" UNIQUE("name")
-);
---> statement-breakpoint
 CREATE TABLE "node_inside" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"node_outside_id" integer,
@@ -91,6 +84,14 @@ CREATE TABLE "node_outside" (
 	"is_stairs" boolean DEFAULT false NOT NULL,
 	"is_blue_light" boolean DEFAULT false NOT NULL,
 	"location" geometry(point) NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "outage_log" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"datetime" timestamp (6) with time zone DEFAULT now(),
+	"inside_node" boolean DEFAULT false NOT NULL,
+	"node_id" integer NOT NULL,
+	"note" text DEFAULT ''
 );
 --> statement-breakpoint
 CREATE TABLE "route" (

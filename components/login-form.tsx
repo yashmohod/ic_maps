@@ -6,19 +6,16 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Field,
   FieldDescription,
   FieldGroup,
-  FieldLabel,
   FieldSeparator,
 } from "@/components/ui/field";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -29,7 +26,6 @@ import { Input } from "@/components/ui/input";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { signInAction } from "@/app/actions/auth";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/ui/spinner"
@@ -82,7 +78,7 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">Welcome</CardTitle>
+          <h2 className="text-xl leading-none font-semibold">Welcome</h2>
           <CardDescription>Login with</CardDescription>
         </CardHeader>
         <CardContent>
@@ -126,11 +122,11 @@ export function LoginForm({
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email</FormLabel>
+                        <FormLabel>Email <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="email.example.com" {...field} />
+                          <Input placeholder="name@example.com" autoComplete="email" aria-required="true" {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <div aria-live="polite"><FormMessage /></div>
                       </FormItem>
                     )}
                   />
@@ -141,14 +137,14 @@ export function LoginForm({
                     name="password"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Password</FormLabel>
+                        <FormLabel>Password <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
 
                         <FormControl>
-                          <Input placeholder="**********" type="password" {...field} />
+                          <Input placeholder="**********" type="password" autoComplete="current-password" aria-required="true" {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <div aria-live="polite"><FormMessage /></div>
                         <a
-                          href="#"
+                          href="/account/forgot-password"
                           className="ml-auto text-sm underline-offset-4 hover:underline"
                         >
                           Forgot your password?
@@ -158,7 +154,7 @@ export function LoginForm({
                   />
                 </Field>
                 <Field>
-                  <Button type="submit" disabled={loading}>{loading?<Spinner />:null}Login</Button>
+                  <Button type="submit" disabled={loading} aria-busy={loading} className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90">{loading ? <><Spinner /><span className="sr-only">Loading</span></> : null}Login</Button>
                   <FieldDescription className="text-center">
                     Don&apos;t have an account? <a href="/account/signup">Sign up</a>
                   </FieldDescription>

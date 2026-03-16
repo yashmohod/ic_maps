@@ -1,7 +1,7 @@
 // src/components/MapEditor.tsx
 "use client";
 import React, { useMemo, useRef, useState, useEffect, type JSX } from "react";
-import toast, { Toaster } from "react-hot-toast";
+import { toast } from "sonner";
 import {
   Map as ReactMap,
   Marker,
@@ -31,79 +31,34 @@ import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useAppTheme } from "@/hooks/use-app-theme";
+import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import apiClient from "@/lib/apiClient";
-/** ---------------- Types ---------------- */
+import { panelClass } from "@/lib/panel-classes";
+import type {
+  LngLat,
+  MarkerNode,
+  EdgeIndexEntry,
+  GeoJSONFeatureCollection,
+  ViewStateLite,
+  MapDestination,
+} from "@/lib/types/map";
 
-type LngLat = { lng: number; lat: number };
-
-type MarkerNode = {
-  id: number;
-  lng: number;
-  lat: number;
-  isBlueLight: boolean;
-  isPedestrian: boolean;
-  isVehicular: boolean;
-  isStairs: boolean;
-  isElevator: boolean;
-};
-
-type EdgeIndexEntry = {
-  id: number;
-  from: number;
-  to: number;
-  biDirectional: boolean;
-  incline: number;
-};
-
-type Destination = {
-  id: number;
-  name: string;
-  lat: number;
-  lng: number;
-  polygon: string; // JSON string of a GeoJSON Feature
-  isParkingLot: boolean;
-};
-
-
-type ViewStateLite = {
-  longitude: number;
-  latitude: number;
-  zoom: number;
-};
-
-
-type GeoJSONFeatureCollection = {
-  type: "FeatureCollection";
-  features: Array<{
-    type: "Feature";
-    properties: Record<string, any>;
-    geometry:
-    | { type: "Point"; coordinates: [number, number] }
-    | { type: "LineString"; coordinates: [number, number][] }
-    | { type: "Polygon"; coordinates: [Array<[number, number]>] };
-  }>;
-};
+type Destination = MapDestination;
 /** ---------------- Component ---------------- */
 
 export default function RouteEditor(): JSX.Element {
   const [viewState, setViewState] = useState<ViewStateLite>({
-    longitude: -76.494131,
-    latitude: 42.422108,
-    zoom: 15.5,
+    longitude: DEFAULT_CENTER.lng,
+    latitude: DEFAULT_CENTER.lat,
+    zoom: DEFAULT_ZOOM,
   });
-  const { isDark } = useAppTheme();
-  const stylePath = isDark
-    ? "/styles/osm-bright/style-local-dark.json"
-    : "/styles/osm-bright/style-local-light.json";
-  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const { isDark, mapStyle } = useMapStyle();
+  const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
-  const panelClass =
-    "border border-border bg-panel text-panel-foreground shadow backdrop-blur";
-
   // Graph
   const [markers, setMarkers] = useState<MarkerNode[]>([]);
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
@@ -187,7 +142,7 @@ export default function RouteEditor(): JSX.Element {
       let nmc = false;
       if (mode == "navMode" && a[navModes[curNavMode].param] && b[navModes[curNavMode].param]) nmc = true;
 
-      const edgeId = e.id ?? (e as { key?: number }).key;
+      const edgeId = e.id;
       features.push({
         type: "Feature",
         properties: {
@@ -220,10 +175,10 @@ export default function RouteEditor(): JSX.Element {
         "line-color": [
           "case",
           ["boolean", ["get", "ada"], true],
-          "#16a34a",
+          "#35D5A4",
           ["boolean", ["get", "bidir"], true],
-          "#1E88E5",
-          "#F57C00",
+          "#003c71",
+          "#2BB89A",
         ],
         "line-opacity": 0.95,
       },
@@ -247,7 +202,7 @@ export default function RouteEditor(): JSX.Element {
         "text-offset": [0, 0],
       },
       paint: {
-        "text-color": "#a35a00ff",
+        "text-color": "#003c71",
         "text-halo-color": "#ffffff",
         "text-halo-width": 1,
       },
@@ -255,79 +210,105 @@ export default function RouteEditor(): JSX.Element {
     []
   );
 
+  /** Invalidate the server-side navigation graph after map edits */
+  function invalidateNavGraph() {
+    apiClient.post("/api/map/reload", {}).catch(() => {});
+  }
+
   /** ---------------- Graph ops ---------------- */
 
   async function addEdgeIfMissing(from: number, to: number) {
     if (from === to) return;
     if (!findMarker(from) || !findMarker(to)) return;
 
-    const req = await apiClient.post("/api/map/edge", {
-      from,
-      to,
-      biDirectionalEdges,
-    });
-    console.log(req)
-    const resp = await req.json()
-    console.log(resp)
-    if (req.status === 201) {
-      setEdgeIndex((list) => [
-        ...list,
-        {
-          id: resp?.id ?? "",
-          from: resp?.a ?? "",
-          to: resp?.b ?? "",
-          biDirectional: biDirectionalEdges,
-          incline: 0,
-        },
-      ]);
-    } else {
-      toast.error("Edge could not be added.");
+    try {
+      const req = await apiClient.post("/api/map/edge", {
+        from,
+        to,
+        biDirectionalEdges,
+      });
+      const resp = await req.json()
+      if (req.status === 201) {
+        setEdgeIndex((list) => [
+          ...list,
+          {
+            id: resp?.id ?? "",
+            from: resp?.a ?? "",
+            to: resp?.b ?? "",
+            biDirectional: biDirectionalEdges,
+            incline: 0,
+          },
+        ]);
+        invalidateNavGraph();
+      } else {
+        toast.error("Edge could not be added.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to add edge.");
     }
   }
 
   async function deleteNode(id: number) {
-    const req = await apiClient.del("/api/map/node", { id });
-    if (req.status !== 200) return toast.error("Feature could not be deleted.");
+    try {
+      const req = await apiClient.del("/api/map/node", { id });
+      if (req.status !== 200) return toast.error("Feature could not be deleted.");
 
-    setMarkers((prev) => prev.filter((m) => m.id !== id));
-    setEdgeIndex((list) => list.filter((e) => e.from !== id && e.to !== id));
+      setMarkers((prev) => prev.filter((m) => m.id !== id));
+      setEdgeIndex((list) => list.filter((e) => e.from !== id && e.to !== id));
+      invalidateNavGraph();
 
 
-    setCurDestinationNodes((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+      setCurDestinationNodes((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
 
-    if (selectedRef.current === id) setSelectedId(null);
+      if (selectedRef.current === id) setSelectedId(null);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete node.");
+    }
   }
 
   async function deleteEdgeByKey(id: number) {
-    const req = await apiClient.del("/api/map/edge", { id });
-    if (req.status !== 200) return toast.error("Feature could not be deleted.");
+    try {
+      const req = await apiClient.del("/api/map/edge", { id });
+      if (req.status !== 200) return toast.error("Feature could not be deleted.");
 
-    setEdgeIndex((list) =>
-      list.filter(
-        (e) => e.id !== id && (e as { key?: number }).key !== id,
-      ),
-    );
+      setEdgeIndex((list) =>
+        list.filter(
+          (e) => e.id !== id,
+        ),
+      );
+      invalidateNavGraph();
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete edge.");
+    }
   }
 
   async function setEdgeIncline(edgeId: number, incline: number) {
-    const req = await apiClient.post("/api/map/incline", { id: edgeId, incline });
-    if (req.status !== 200) {
-      toast.error("Could not update incline.");
-      return;
+    try {
+      const req = await apiClient.post("/api/map/incline", { id: edgeId, incline });
+      if (req.status !== 200) {
+        toast.error("Could not update incline.");
+        return;
+      }
+      setEdgeIndex((list) =>
+        list.map((e) =>
+          e.id === edgeId
+            ? { ...e, id: e.id ?? edgeId, incline }
+            : e,
+        ),
+      );
+      toast.success("Incline updated.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update incline.");
     }
-    setEdgeIndex((list) =>
-      list.map((e) =>
-        e.id === edgeId || (e as { key?: number }).key === edgeId
-          ? { ...e, id: e.id ?? edgeId, incline }
-          : e,
-      ),
-    );
-    toast.success("Incline updated.");
   }
 
 
@@ -342,17 +323,20 @@ export default function RouteEditor(): JSX.Element {
     if (!cur) return;
 
     let nextValue = !cur[nm.param];
-    console.log(id, nm.param)
-    const req = await apiClient.post("/api/map/setFeatureStatus", { id, value: nextValue, navMode: nm.param })
-    const resp = await req.json();
-    console.log(req, resp)
+    try {
+      const req = await apiClient.post("/api/map/setFeatureStatus", { id, value: nextValue, navMode: nm.param })
+      const resp = await req.json();
 
-    if (req.status === 200) {
-      setMarkers((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, [nm.param]: nextValue } : m)),
-      );
-    } else {
-      toast.error("Could not add node to the Navmode.");
+      if (req.status === 200) {
+        setMarkers((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, [nm.param]: nextValue } : m)),
+        );
+      } else {
+        toast.error("Could not add node to the Navmode.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update nav mode for node.");
     }
   }
 
@@ -366,13 +350,16 @@ export default function RouteEditor(): JSX.Element {
       toast.error("Could not load the current building");
       return;
     }
-    console.log(id, curDest)
     setCurrentDestination(curDest);
-    const req: any = await apiClient.get(`/api/destination/outsideNode?id=${encodeURIComponent(id)}`);
-    const resp = await req.json();
-    console.log(resp)
-    const ids: number[] = (resp?.nodes || [])
-    setCurDestinationNodes(new Set(ids));
+    try {
+      const req: any = await apiClient.get(`/api/destination/outsideNode?id=${encodeURIComponent(id)}`);
+      const resp = await req.json();
+      const ids: number[] = (resp?.nodes || [])
+      setCurDestinationNodes(new Set(ids));
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load building nodes.");
+    }
   }
 
   async function addToBuildingGroup(nodeId: number) {
@@ -380,38 +367,52 @@ export default function RouteEditor(): JSX.Element {
 
     const isSelected = curDestinationNodes.has(nodeId);
 
-    if (isSelected) {
-      const req = await apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
-      if (req.status !== 200) return toast.error("Failed to detach node.");
+    try {
+      if (isSelected) {
+        const req = await apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
+        if (req.status !== 200) return toast.error("Failed to detach node.");
 
-      setCurDestinationNodes((prev) => {
-        const next = new Set(prev);
-        next.delete(nodeId);
-        return next;
-      });
+        setCurDestinationNodes((prev) => {
+          const next = new Set(prev);
+          next.delete(nodeId);
+          return next;
+        });
 
-    } else {
-      const req = await apiClient.post("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
+      } else {
+        const req = await apiClient.post("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
 
-      if (req.status !== 200) return toast.error("Failed to attach node.");
+        if (req.status !== 200) return toast.error("Failed to attach node.");
 
-      setCurDestinationNodes((prev) => {
-        const next = new Set(prev);
-        next.add(nodeId);
-        return next;
-      });
+        setCurDestinationNodes((prev) => {
+          const next = new Set(prev);
+          next.add(nodeId);
+          return next;
+        });
 
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update building node assignment.");
     }
   }
 
   async function clearAllBuildingNodes() {
     if (!currentDestination || curDestinationNodes.size === 0) return;
 
-    const ids = Array.from(curDestinationNodes);
-    const results = await Promise.allSettled(
-      ids.map((nid) => apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId: nid }))
-    );
-    // setCurDestinationNodes(new Set())
+    try {
+      const ids = Array.from(curDestinationNodes);
+      const results = await Promise.allSettled(
+        ids.map((nid) => apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId: nid }))
+      );
+      const failures = results.filter((r) => r.status === "rejected");
+      if (failures.length > 0) {
+        toast.error(`Failed to detach ${failures.length} node(s).`);
+      }
+      setCurDestinationNodes(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to clear building nodes.");
+    }
   }
 
 
@@ -421,24 +422,28 @@ export default function RouteEditor(): JSX.Element {
   async function handleMapClick(e: MapMouseEvent) {
     if ((e.originalEvent as MouseEvent | undefined)?.altKey) {
       const { lng, lat } = e.lngLat;
-      const req = await apiClient.post("/api/map/node", { lng, lat });
-      const resp = await req.json();
-      console.log(resp)
-      if (req.status === 201) setMarkers((prev) => [...prev, {
-        id: resp.id,
-        lng,
-        lat,
-        isPedestrian: false,
-        isVehicular: false,
-        isStairs: false,
-        isElevator: false,
-        isBlueLight: false
-      }]);
-      else {
-        const msg = (resp as { detail?: string; error?: string }).detail
-          ?? (resp as { detail?: string; error?: string }).error
-          ?? "Node could not be added.";
-        toast.error(msg);
+      try {
+        const req = await apiClient.post("/api/map/node", { lng, lat });
+        const resp = await req.json();
+        if (req.status === 201) setMarkers((prev) => [...prev, {
+          id: resp.id,
+          lng,
+          lat,
+          isPedestrian: false,
+          isVehicular: false,
+          isStairs: false,
+          isElevator: false,
+          isBlueLight: false
+        }]);
+        else {
+          const msg = (resp as { detail?: string; error?: string }).detail
+            ?? (resp as { detail?: string; error?: string }).error
+            ?? "Node could not be added.";
+          toast.error(msg);
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to add node.");
       }
       return;
     }
@@ -468,13 +473,18 @@ export default function RouteEditor(): JSX.Element {
 
   async function handleMarkerDragEnd(e: any, id: number) {
     const { lng, lat } = e.lngLat as LngLat;
-    const req = await apiClient.put("/api/map/node", { id, lng, lat });
-    if (req.status === 200) {
-      setMarkers((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, lng, lat } : m))
-      );
-    } else {
-      toast.error("Node could not be edited.");
+    try {
+      const req = await apiClient.put("/api/map/node", { id, lng, lat });
+      if (req.status === 200) {
+        setMarkers((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, lng, lat } : m))
+        );
+      } else {
+        toast.error("Node could not be edited.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to move node.");
     }
   }
 
@@ -514,28 +524,38 @@ export default function RouteEditor(): JSX.Element {
   /** ---------------- Data loading ---------------- */
 
   async function getAllFeature() {
-    const req = await apiClient.get("/api/map/all")
-    if (req.status !== 200) {
+    try {
+      const req = await apiClient.get("/api/map/all")
+      if (req.status !== 200) {
+        toast.error("Failed to fetch map features!");
+        return;
+      }
+      const data = await req.json()
+      setMarkers(
+        data.nodes as MarkerNode[]
+      );
+      setEdgeIndex(
+        data.edges as EdgeIndexEntry[]
+      );
+    } catch (err) {
+      console.error(err);
       toast.error("Failed to fetch map features!");
-      return;
     }
-    const data = await req.json()
-    setMarkers(
-      data.nodes as MarkerNode[]
-    );
-    setEdgeIndex(
-      data.edges as EdgeIndexEntry[]
-    );
   }
 
   async function getBuildingsList() {
-    const req = await apiClient.get("/api/destination");
-    if (req.status !== 200) {
-      toast.error("Buildings did not load!");
-      return;
+    try {
+      const req = await apiClient.get("/api/destination");
+      if (req.status !== 200) {
+        toast.error("Buildings did not load!");
+        return;
+      }
+      const resp = await req.json();
+      setDestinations(resp.destinations || []);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load buildings!");
     }
-    const resp = await req.json();
-    setDestinations(resp.destinations || []);
   }
 
 
@@ -546,13 +566,11 @@ export default function RouteEditor(): JSX.Element {
     selectedEdgeId === null
       ? null
       : edgeIndex.find((e) => e.id === selectedEdgeId) ??
-      edgeIndex.find((e) => (e as { key?: number }).key === selectedEdgeId);
+      edgeIndex.find((e) => e.id === selectedEdgeId);
 
   useEffect(() => {
     if (selectedEdgeId === null) return;
-    const edge =
-      edgeIndex.find((e) => e.id === selectedEdgeId) ??
-      edgeIndex.find((e) => (e as { key?: number }).key === selectedEdgeId);
+    const edge = edgeIndex.find((e) => e.id === selectedEdgeId);
     setInclineInput(String(edge?.incline ?? 0));
   }, [selectedEdgeId, edgeIndex]);
 
@@ -606,8 +624,6 @@ export default function RouteEditor(): JSX.Element {
 
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
-      <Toaster position="top-right" reverseOrder />
-
       <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
@@ -876,10 +892,10 @@ export default function RouteEditor(): JSX.Element {
                 return null;
 
               const colorClass = isBuildingSel
-                ? "bg-amber-500"
+                ? "bg-brand-cta"
                 : isNavModeSet || isDrawSel
                   ? "bg-destructive"
-                  : "bg-brand";
+                  : "bg-brand-cta";
 
               return (
                 <Marker
@@ -915,7 +931,7 @@ export default function RouteEditor(): JSX.Element {
                   id="boundary-fill"
                   type="fill"
                   paint={{
-                    "fill-color": isDark ? "#ffd200" : "#003c71",
+                    "fill-color": "#35D5A4",
                     "fill-opacity": 0.2,
                   }}
                 />
@@ -923,7 +939,7 @@ export default function RouteEditor(): JSX.Element {
                   id="boundary-outline"
                   type="line"
                   paint={{
-                    "line-color": isDark ? "#ffd200" : "#003c71",
+                    "line-color": "#35D5A4",
                     "line-width": 2,
                   }}
                 />

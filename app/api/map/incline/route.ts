@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
+import { headers } from "next/headers";
 import { db } from "@/db/index";
+import { auth } from "@/lib/auth";
 import { jsonError, isFiniteNumber, parseId } from "@/lib/utils";
 
 /**
@@ -10,6 +12,11 @@ import { jsonError, isFiniteNumber, parseId } from "@/lib/utils";
  */
 const ROUTE = "/api/map/incline";
 export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);

@@ -9,7 +9,7 @@ import React, {
   useMemo,
   JSX,
 } from "react";
-import toast, { Toaster } from "react-hot-toast";
+import { toast } from "sonner";
 import { Map as ReactMap, type MapRef } from "@vis.gl/react-maplibre";
 import maplibregl, {
   type Map as MlMap,
@@ -28,18 +28,13 @@ import "./page.css";
 
 import EditPanel from "@/components/BuildingInfoEditPanel";
 import DrawControl from "@/components/BuildingDrawControls";
-import { useAppTheme } from "@/hooks/use-app-theme";
+import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 
-/** ---------------- Types ---------------- */
-
-type ViewStateLite = {
-  longitude: number;
-  latitude: number;
-  zoom: number;
-};
+import type { ViewStateLite } from "@/lib/types/map";
 
 export type BuildingRow = {
   id: number;
@@ -121,7 +116,7 @@ const MapSection = React.memo(function MapSection({
 export default function BuildingEditor(): JSX.Element {
   const mapRef = useRef<MapRef | null>(null);
   const buildingsRef = useRef<BuildingRow[]>([]);
-  const { isDark } = useAppTheme();
+  const { isDark, mapStyle } = useMapStyle();
 
   const [mlMap, setMlMap] = useState<MlMap | null>(null);
   const [buildings, setBuildings] = useState<BuildingRow[]>([]);
@@ -144,67 +139,71 @@ export default function BuildingEditor(): JSX.Element {
     }
   );
 
-  const stylePath = isDark
-    ? "/styles/osm-bright/style-local-dark.json"
-    : "/styles/osm-bright/style-local-light.json";
-  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
 
   /** Stable initial map view */
   const stableViewState = useMemo<ViewStateLite>(
     () => ({
-      longitude: -76.494131,
-      latitude: 42.422108,
-      zoom: 15.5,
+      longitude: DEFAULT_CENTER.lng,
+      latitude: DEFAULT_CENTER.lat,
+      zoom: DEFAULT_ZOOM,
     }),
     [],
   );
 
   async function loadDestinations() {
-    const resp: any = await apiClient.get("/api/destination").then((r) => r.json());
-    if (!resp) {
-      toast.error("Buildings failed to load");
-      return;
-    }
+    try {
+      const resp: any = await apiClient.get("/api/destination").then((r) => r.json());
+      if (!resp) {
+        toast.error("Buildings failed to load");
+        return;
+      }
 
-    const list: BuildingRow[] = resp.destinations || [];
-    setBuildings(list);
-    buildingsRef.current = list;
+      const list: BuildingRow[] = resp.destinations || [];
+      setBuildings(list);
+      buildingsRef.current = list;
 
-    if (list.length > 0) {
-      const features = list
-        .map((b) => {
-          try {
-            const polyJ = JSON.parse(b.polygon) as Feature<
-              Polygon,
-              GeoJsonProperties
-            >;
-            return polyJ
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean) as Array<Feature<Polygon, GeoJsonProperties>>;
-      setPolys(features);
+      if (list.length > 0) {
+        const features = list
+          .map((b) => {
+            try {
+              const polyJ = JSON.parse(b.polygon) as Feature<
+                Polygon,
+                GeoJsonProperties
+              >;
+              return polyJ
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean) as Array<Feature<Polygon, GeoJsonProperties>>;
+        setPolys(features);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load destinations.");
     }
   }
   async function onChangeIsParkingLot(v: boolean) {
     if (!currentBuilding) return;
-    const req = await apiClient.post("/api/destination/setParkingLot", { id: currentBuilding.id, isParkingLot: v })
-    if (req.status !== 200) {
-      const resp = await req.json();
-      toast.error(resp.error);
-      console.log(resp.detail)
-    }
-
-    setCurrentBuilding((prev) => {
-      prev.isParkingLot = v;
-      if (v) {
-        prev.openTime = "00:00:00";
-        prev.closeTime = "23:59:59";
+    try {
+      const req = await apiClient.post("/api/destination/setParkingLot", { id: currentBuilding.id, isParkingLot: v })
+      if (req.status !== 200) {
+        const resp = await req.json();
+        toast.error(resp.error);
+        return;
       }
-      return prev;
-    })
+
+      setCurrentBuilding((prev) => ({
+        ...prev,
+        isParkingLot: v,
+        ...(v ? { openTime: "00:00:00", closeTime: "23:59:59" } : {}),
+      }))
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update parking lot status.");
+    }
   }
 
   useEffect(() => {
@@ -250,39 +249,42 @@ export default function BuildingEditor(): JSX.Element {
     lat /= ring.length - 1;
     lng /= ring.length - 1;
 
+    try {
+      const req: any = await apiClient.post("/api/destination",
+        { name, lat, lng, polygon: JSON.stringify(feature) });
 
-    const req: any = await apiClient.post("/api/destination",
-      { name, lat, lng, polygon: JSON.stringify(feature) });
-
-    const resp = await req.json();
+      const resp = await req.json();
 
 
-    if (req.status !== 201) {
-      toast.error(resp?.error);
-      console.log(resp?.detail);
-      return;
+      if (req.status !== 201) {
+        toast.error(resp?.error);
+        return;
+      }
+
+      draw?.setFeatureProperty?.(drawId, "destId", Number(resp.id));
+      draw?.setFeatureProperty?.(drawId, "name", name);
+      const normalizedFeature = {
+        ...(feature as any),
+        properties: { destId: resp.id, name: name }
+      } as Feature<Polygon, GeoJsonProperties>;
+      const polygon = JSON.stringify(normalizedFeature);
+
+
+      setPolys((p) => [...p, normalizedFeature]);
+      setBuildings((prev) => {
+        const newList: BuildingRow[] = [
+          ...prev,
+          { id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" },
+        ];
+        buildingsRef.current = newList;
+        return newList;
+      });
+      // loadDestinations();
+      setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" });
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to create destination.");
     }
-
-    draw?.setFeatureProperty?.(drawId, "destId", Number(resp.id));
-    draw?.setFeatureProperty?.(drawId, "name", name);
-    const normalizedFeature = {
-      ...(feature as any),
-      properties: { destId: resp.id, name: name }
-    } as Feature<Polygon, GeoJsonProperties>;
-    const polygon = JSON.stringify(normalizedFeature);
-
-
-    setPolys((p) => [...p, normalizedFeature]);
-    setBuildings((prev) => {
-      const newList: BuildingRow[] = [
-        ...prev,
-        { id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" },
-      ];
-      buildingsRef.current = newList;
-      return newList;
-    });
-    // loadDestinations();
-    setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" });
 
   }, []);
 
@@ -306,16 +308,20 @@ export default function BuildingEditor(): JSX.Element {
 
     const polygon = JSON.stringify(feature);
 
-    const req: any = await apiClient.put("/api/destination", { id: feature?.properties?.destId, name: feature?.properties?.name, polygon, lat, lng });
-    const resp = await req.json();
-    if (resp) {
-      setPolys((old) =>
-        old.map((p) => (Number(p.properties?.destId) === feature?.properties?.destId ? feature : p)),
-      );
-      setCurrentBuilding((prev) => { return { ...prev, id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon } });
-    } else {
-      toast.error(resp?.error ?? "Failed to update polygon");
-      console.log(resp.detail)
+    try {
+      const req: any = await apiClient.put("/api/destination", { id: feature?.properties?.destId, name: feature?.properties?.name, polygon, lat, lng });
+      const resp = await req.json();
+      if (resp) {
+        setPolys((old) =>
+          old.map((p) => (Number(p.properties?.destId) === feature?.properties?.destId ? feature : p)),
+        );
+        setCurrentBuilding((prev) => { return { ...prev, id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon } });
+      } else {
+        toast.error(resp?.error ?? "Failed to update polygon");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update destination polygon.");
     }
   }, []);
 
@@ -354,22 +360,24 @@ export default function BuildingEditor(): JSX.Element {
   const buildingInfoSave = async () => {
     if (!currentBuilding.id) return toast.error("Select a building first.");
     let curBuildingCopy = currentBuilding;
-    console.log(curBuildingCopy)
-    const resp: any = await apiClient.put("/api/destination", { ...curBuildingCopy })
-    if (resp) {
-      toast.success("Name Updated!");
-      // keep local list in sync
+    try {
+      const resp: any = await apiClient.put("/api/destination", { ...curBuildingCopy })
+      if (resp) {
+        toast.success("Name Updated!");
+        // keep local list in sync
 
-    } else {
-      toast.error(resp?.message ?? "Name could not be updated!");
+      } else {
+        toast.error(resp?.message ?? "Name could not be updated!");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save building info.");
     }
   };
 
   /** Render */
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
-      <Toaster position="top-right" reverseOrder />
-
       <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />

@@ -6,18 +6,15 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card"
 import {
   Field,
   FieldDescription,
   FieldGroup,
-  FieldLabel,
 } from "@/components/ui/field"
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -96,7 +93,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">Create your account</CardTitle>
+          <h2 className="text-xl leading-none font-semibold">Create your account</h2>
           <CardDescription>
             Enter your email below to create your account
           </CardDescription>
@@ -111,11 +108,11 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                     name="name"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Name</FormLabel>
+                        <FormLabel>Name <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="Lewis Hamilton" {...field} />
+                          <Input placeholder="Lewis Hamilton" autoComplete="name" aria-required="true" {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <div aria-live="polite"><FormMessage /></div>
                       </FormItem>
                     )}
                   />
@@ -126,11 +123,11 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email</FormLabel>
+                        <FormLabel>Email <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="email.example.com" {...field} />
+                          <Input placeholder="name@example.com" autoComplete="email" aria-required="true" {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <div aria-live="polite"><FormMessage /></div>
                       </FormItem>
                     )}
                   />
@@ -144,11 +141,11 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                     name="password"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Password</FormLabel>
+                        <FormLabel>Password <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="*********" type="password" {...field} />
+                          <Input placeholder="*********" type="password" autoComplete="new-password" aria-required="true" {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <div aria-live="polite"><FormMessage /></div>
                       </FormItem>
                     )}
                   />                  
@@ -159,11 +156,11 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                     name="confirmPassword"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Confirm Password</FormLabel>
+                        <FormLabel>Confirm Password <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="*********" type="password" {...field} />
+                          <Input placeholder="*********" type="password" autoComplete="new-password" aria-required="true" {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <div aria-live="polite"><FormMessage /></div>
                       </FormItem>
                     )}
                   />
@@ -172,7 +169,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                 
               </Field>
               <Field>
-                  <Button type="submit">Create Account</Button>
+                  <Button type="submit" className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90">Create Account</Button>
                 <FieldDescription className="text-center">
                   Already have an account? <a href="/account/login">Sign in</a>
                 </FieldDescription>

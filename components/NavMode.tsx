@@ -1,36 +1,11 @@
 "use client";
 
-import React, { useMemo, useEffect, useRef } from "react";
+import React, { useMemo, useRef } from "react";
 import { Source, Layer } from "@vis.gl/react-maplibre";
 import type { LayerProps } from "@vis.gl/react-maplibre";
 import { useAppTheme } from "@/hooks/use-app-theme";
-import apiClient from "@/lib/apiClient";
-import toast from "react-hot-toast";
 import type { NavConditions } from "@/lib/navigation";
-/** -------- Types -------- */
-type MarkerNode = {
-  id: number;
-  lng: number;
-  lat: number;
-  isBlueLight: boolean;
-  isPedestrian: boolean;
-  isVehicular: boolean;
-  isStairs: boolean;
-  isElevator: boolean;
-};
-
-type EdgeIndexEntry = {
-  id: number;
-  from: number;
-  to: number;
-  biDirectional: boolean;
-  incline: number;
-};
-type NavMode = {
-  id: number;
-  name: string;
-  param: string;
-}
+import type { MarkerNode, EdgeIndexEntry } from "@/lib/types/map";
 
 type Path = {
   path: Set<number>;
@@ -115,7 +90,7 @@ export default function NavMode({
         "line-color": [
           "case",
           ["boolean", ["get", "path"], false],
-          isDark ? "#facc15" : "#1f2937",
+          "#35D5A4",
           isDark ? "#e2e8f0" : "#374151",
         ],
         "line-opacity": [

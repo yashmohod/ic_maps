@@ -61,6 +61,7 @@
        bg-panel-muted text-panel-muted-foreground
        bg-brand text-brand-foreground
        bg-brand-accent text-brand-accent-foreground
+       bg-brand-cta text-brand-cta-foreground
   ----------------------------------------------------------------- */
   --color-panel: var(--panel);
   --color-panel-foreground: var(--panel-foreground);
@@ -71,6 +72,9 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-accent: var(--brand-accent);
   --color-brand-accent-foreground: var(--brand-accent-foreground);
+
+  --color-brand-cta: var(--brand-cta);
+  --color-brand-cta-foreground: var(--brand-cta-foreground);
 
   /* Radii */
   --radius-sm: calc(var(--radius) - 4px);
@@ -111,7 +115,7 @@
 
   --border: rgb(226 232 240);
   --input: rgb(226 232 240);
-  --ring: rgb(255 210 0);
+  --ring: rgb(53 213 164);
 
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -139,8 +143,15 @@
   --brand: rgb(0 60 113); /* #003c71 */
   --brand-foreground: rgb(255 255 255);
 
-  --brand-accent: rgb(255 210 0); /* #ffd200 */
-  --brand-accent-foreground: rgb(4 22 49); /* #041631 */
+  --brand-accent: rgb(53 213 164); /* #35D5A4 – unified with brand-cta (teal) */
+  --brand-accent-foreground: rgb(0 60 113); /* #003c71 – IC navy for 6.4:1 contrast */
+
+  /* IC CTA (teal from IC design system, dark navy foreground for 6.4:1 contrast) */
+  --brand-cta: rgb(53 213 164); /* #35D5A4 */
+  --brand-cta-foreground: rgb(0 60 113); /* #003c71 – IC navy, 6.4:1 on teal */
+
+  /* IC form focus ring (teal from IC design system) */
+  --brand-focus: rgb(60 212 191); /* #3CD4BF */
 
   /* Frosty surfaces */
   --panel: rgb(255 255 255 / 0.95); /* like bg-white/95 */
@@ -161,8 +172,8 @@
   --popover: rgb(11 31 58 / 0.9);
   --popover-foreground: rgb(255 255 255);
 
-  --primary: rgb(255 210 0);
-  --primary-foreground: rgb(4 22 49);
+  --primary: rgb(53 213 164); /* #35D5A4 – teal, consistent with brand-cta */
+  --primary-foreground: rgb(0 60 113); /* #003c71 – IC navy for 6.4:1 contrast */
 
   --secondary: rgb(19 44 79 / 0.8);
   --secondary-foreground: rgb(226 232 240);
@@ -177,7 +188,7 @@
 
   --border: rgb(255 255 255 / 0.15);
   --input: rgb(255 255 255 / 0.15);
-  --ring: rgb(255 210 0);
+  --ring: rgb(53 213 164);
 
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -202,8 +213,14 @@
   --brand: rgb(0 60 113); /* #003c71 */
   --brand-foreground: rgb(255 255 255);
 
-  --brand-accent: rgb(255 210 0); /* #ffd200 */
-  --brand-accent-foreground: rgb(4 22 49); /* #041631 */
+  --brand-accent: rgb(53 213 164); /* #35D5A4 – unified with brand-cta (teal) */
+  --brand-accent-foreground: rgb(0 60 113); /* #003c71 – IC navy for 6.4:1 contrast */
+
+  /* IC CTA (teal, dark navy foreground for 6.4:1 contrast) */
+  --brand-cta: rgb(53 213 164); /* #35D5A4 */
+  --brand-cta-foreground: rgb(0 60 113); /* #003c71 – IC navy */
+
+  --brand-focus: rgb(60 212 191); /* #3CD4BF */
 
   /* Frosty surfaces */
   --panel: rgb(11 31 58 / 0.9); /* #0b1f3a/90 */

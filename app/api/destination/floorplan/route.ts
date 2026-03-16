@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
+import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
 import { parsePositiveInt } from "@/lib/utils";
 
 export const runtime = "nodejs";
@@ -36,6 +38,11 @@ function sanitizeBaseFileName(fileName: string): string {
 }
 
 export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const formData = await req.formData();
     const file = formData.get("file");

@@ -55,8 +55,10 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { CircleDot, DoorOpen, Layers, MoveVertical, TrendingUp } from "lucide-react";
 import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
-import { useAppTheme } from "@/hooks/use-app-theme";
+import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
+import { panelClass } from "@/lib/panel-classes";
 
 // -----------------------------------------------------------------------------
 // Types: React Flow uses string ids; API uses numeric ids. NodeData carries kind and optional link to "outside" (door).
@@ -168,7 +170,7 @@ const ICON_SIZE = 12;
 const NODE_KIND_META: Record<NodeKind, { label: string; color: string; text: string }> = {
     generic: { label: "Generic Node", color: "#60a5fa", text: "N" },
     door: { label: "Door", color: "#34d399", text: "D" },
-    stairs: { label: "Stairs", color: "#f59e0b", text: "S" },
+    stairs: { label: "Stairs", color: "#35D5A4", text: "S" },
     elevator: { label: "Elevator", color: "#f472b6", text: "E" },
     ramp: { label: "Ramp", color: "#8b5cf6", text: "R" },
 };
@@ -525,14 +527,11 @@ function FloorPlanInner() {
     const flowContainerRef = useRef<HTMLDivElement | null>(null);
 
     // Map style (dark/light) and view state; when a door is selected we pan to its outside node lat/lng.
-    const { isDark } = useAppTheme();
-    const stylePath = isDark
-        ? "/styles/osm-bright/style-local-dark.json"
-        : "/styles/osm-bright/style-local-light.json";
-    const { baseStyle } = usePmtilesStyle({ stylePath });
+    const { isDark, mapStyle } = useMapStyle();
+    const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
     const canRenderMap = !!baseStyle;
 
-    const defaultMapCenter = { longitude: -76.494131, latitude: 42.422108, zoom: 15.5 };
+    const defaultMapCenter = { longitude: DEFAULT_CENTER.lng, latitude: DEFAULT_CENTER.lat, zoom: DEFAULT_ZOOM };
     const [mapViewState, setMapViewState] = useState(defaultMapCenter);
 
     useEffect(() => {
@@ -645,8 +644,6 @@ function FloorPlanInner() {
         [setNodes]
     );
 
-    const panelClass =
-        "border border-border bg-panel text-panel-foreground shadow backdrop-blur";
     const destinationItems = useMemo<ComboboxItem<number>[]>(
         () => destinations.map((d) => ({ value: d.id, label: d.name })),
         [destinations]

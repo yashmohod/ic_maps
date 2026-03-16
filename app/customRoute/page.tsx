@@ -11,14 +11,16 @@ import {
   type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import toast, { Toaster } from "react-hot-toast";
+import { toast } from "sonner";
 import maplibregl from "maplibre-gl";
 
 import { Button } from "@/components/ui/button";
-import { useAppTheme } from "@/hooks/use-app-theme";
+import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   IconPlus,
   IconPencil,
@@ -28,23 +30,19 @@ import {
 } from "@tabler/icons-react";
 
 
-type MarkerNode = { id: string | number; lng: number; lat: number };
+import {
+  surfacePanelClass,
+  surfaceSubtleClass,
+  borderMutedClass,
+  selectBaseClass,
+  selectFocusClass,
+} from "@/lib/panel-classes";
+import type {
+  SimpleMarkerNode,
+  GeoJSONFeatureCollection,
+} from "@/lib/types/map";
 
-type GeoJSONFeatureCollection = {
-  type: "FeatureCollection";
-  features: Array<{
-    type: "Feature";
-    properties: Record<string, any>;
-    geometry:
-    | { type: "Point"; coordinates: [number, number] }
-    | { type: "LineString"; coordinates: [number, number][] }
-    | { type: "Polygon"; coordinates: Array<Array<[number, number]>> }
-    | {
-      type: "MultiPolygon";
-      coordinates: Array<Array<Array<[number, number]>>>;
-    };
-  }>;
-};
+type MarkerNode = SimpleMarkerNode;
 
 type Route = {
   id: number;
@@ -61,18 +59,6 @@ type Destination = {
   description?: string;
   polygon?: string;
 };
-
-function Spinner({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <span
-      className={[
-        "inline-block animate-spin rounded-full border-2 border-current border-t-transparent",
-        className,
-      ].join(" ")}
-      aria-label="Loading"
-    />
-  );
-}
 
 /**
  * Some APIs store polygon as:
@@ -120,9 +106,9 @@ export default function CustomRoutesPage(): JSX.Element {
   /** ---------------- Map ---------------- */
   const defViewState = useMemo(
     () => ({
-      longitude: -76.494131,
-      latitude: 42.422108,
-      zoom: 15.5,
+      longitude: DEFAULT_CENTER.lng,
+      latitude: DEFAULT_CENTER.lat,
+      zoom: DEFAULT_ZOOM,
       bearing: 0,
       pitch: 0,
     }),
@@ -134,11 +120,8 @@ export default function CustomRoutesPage(): JSX.Element {
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  const { isDark } = useAppTheme();
-  const stylePath = isDark
-    ? "/styles/osm-bright/style-local-dark.json"
-    : "/styles/osm-bright/style-local-light.json";
-  const { baseStyle } = usePmtilesStyle({ stylePath });
+  const { isDark, mapStyle } = useMapStyle();
+  const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
 
   function ensureCenter(lng: number, lat: number, zoom = 18.5) {
@@ -164,13 +147,6 @@ export default function CustomRoutesPage(): JSX.Element {
     }
   }
 
-  /** ---------------- Theme tokens ---------------- */
-  const surfacePanelClass = "bg-panel text-panel-foreground";
-  const surfaceSubtleClass = "bg-panel-muted text-panel-muted-foreground";
-  const borderMutedClass = "border-border";
-  const selectBaseClass = "border-border bg-panel text-panel-foreground";
-  const selectFocusClass =
-    "focus:border-brand-accent focus:ring-brand-accent/30";
 
   /** ---------------- Data ---------------- */
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -438,8 +414,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
       setConfirmDeleteOpen(false);
       setDeleteRoute(null);
-    } catch (e) {
-      console.log(e);
+    } catch {
       toast.error("Route could not be deleted!");
     } finally {
       setDeletePending(false);
@@ -612,14 +587,12 @@ export default function CustomRoutesPage(): JSX.Element {
     "w-full rounded-2xl border px-3 py-3 text-sm font-medium",
     "bg-panel text-panel-foreground",
     borderMutedClass,
-    "focus:outline-none focus:ring-2 focus:ring-brand-accent/30 focus:border-brand-accent",
+    "focus:outline-none focus:ring-2 focus:ring-brand-cta/30 focus:border-brand-cta",
   ].join(" ");
 
   /** ---------------- Render ---------------- */
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
-      <Toaster position="top-right" reverseOrder />
-
       <div className="absolute left-3 top-3 z-40 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
@@ -694,7 +667,7 @@ export default function CustomRoutesPage(): JSX.Element {
                           "bg-panel-muted/40 hover:bg-panel-muted/60 transition",
                           borderMutedClass,
                           previewDestId === String(route.destinationId) &&
-                          "ring-2 ring-brand-accent/30",
+                          "ring-2 ring-brand-cta/30",
                         ]
                           .filter(Boolean)
                           .join(" ")}
@@ -1074,7 +1047,7 @@ export default function CustomRoutesPage(): JSX.Element {
                   id="boundary-fill"
                   type="fill"
                   paint={{
-                    "fill-color": isDark ? "#ffd200" : "#003c71",
+                    "fill-color": "#35D5A4",
                     "fill-opacity": 0.2,
                   }}
                 />
@@ -1082,7 +1055,7 @@ export default function CustomRoutesPage(): JSX.Element {
                   id="boundary-outline"
                   type="line"
                   paint={{
-                    "line-color": isDark ? "#ffd200" : "#003c71",
+                    "line-color": "#35D5A4",
                     "line-width": 2,
                   }}
                 />
@@ -1113,7 +1086,7 @@ export default function CustomRoutesPage(): JSX.Element {
                   type="circle"
                   paint={{
                     "circle-radius": 6,
-                    "circle-color": isDark ? "#ffd200" : "#003c71",
+                    "circle-color": "#35D5A4",
                     "circle-opacity": 0.45,
                   }}
                 />

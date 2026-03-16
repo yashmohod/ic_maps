@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import {
   Sidebar,
@@ -69,6 +70,7 @@ export default function Setting() {
       setUsers(data.users);
     } catch (err) {
       console.error(err);
+      toast.error("Failed to load users.");
     } finally {
       setUsersLoading(false);
     }
@@ -91,6 +93,7 @@ export default function Setting() {
         if (mounted) setIsAdmin(!!data.user?.isAdmin);
       } catch (err) {
         console.error(err);
+        toast.error("Failed to load admin status.");
       }
     };
     void loadIsAdmin();
@@ -111,7 +114,8 @@ export default function Setting() {
   }, [searchQuery, hasActiveSearch]);
 
   return (
-    <div className="relative min-h-svh w-full bg-background text-foreground">
+    <main id="main-content" className="relative min-h-svh w-full bg-background text-foreground">
+      <h1 className="sr-only">Settings</h1>
       <div className="flex w-full pt-20">
         <Sidebar
           side="left"
@@ -170,10 +174,10 @@ export default function Setting() {
           {isAdmin && activeSection === "account-management" ? (
             <section
               id="account-management"
-              className="rounded-2xl border border-border bg-panel p-6 shadow-sm ring-2 ring-brand-accent/30"
+              className="rounded-2xl border border-border bg-panel p-6 shadow-sm ring-2 ring-brand-cta/30"
             >
               <div className="flex flex-col gap-1">
-                <h1 className="text-lg font-semibold">Account Management</h1>
+                <h2 className="text-lg font-semibold">Account Management</h2>
                 <p className="text-sm text-panel-muted-foreground">
                   Manage user access and privileges.
                 </p>
@@ -194,12 +198,12 @@ export default function Setting() {
 
                 <div className="overflow-hidden rounded-xl border border-border">
                   <table className="w-full text-sm">
-                    <thead className="bg-panel-muted/50 text-left">
+                    <thead className="bg-brand text-brand-foreground text-left">
                       <tr>
-                        <th className="px-4 py-3 text-start font-semibold">User</th>
-                        <th className="px-4 py-3 text-start font-semibold">Email</th>
-                        <th className="px-4 py-3 text-start font-semibold">Role</th>
-                        <th className="px-4 py-3 text-end font-semibold">Actions</th>
+                        <th className="px-4 py-3 text-start font-semibold" scope="col">User</th>
+                        <th className="px-4 py-3 text-start font-semibold" scope="col">Email</th>
+                        <th className="px-4 py-3 text-start font-semibold" scope="col">Role</th>
+                        <th className="px-4 py-3 text-end font-semibold" scope="col">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -276,6 +280,7 @@ export default function Setting() {
                                         );
                                       } catch (err) {
                                         console.error(err);
+                                        toast.error("Failed to update admin status.");
                                       } finally {
                                         setAdminUpdatePending((prev) => {
                                           const next = new Set(prev);
@@ -320,7 +325,7 @@ export default function Setting() {
           {activeSection === "profile-info" ? (
             <section
               id="profile-info"
-              className="rounded-2xl border border-border bg-panel p-6 shadow-sm ring-2 ring-brand-accent/30"
+              className="rounded-2xl border border-border bg-panel p-6 shadow-sm ring-2 ring-brand-cta/30"
             >
               <div className="flex flex-col gap-1">
                 <h2 className="text-lg font-semibold">Profile Info</h2>
@@ -343,6 +348,7 @@ export default function Setting() {
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
+                    className="bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
                     disabled={profileSaving || !session?.user?.id}
                     onClick={async () => {
                       if (!session?.user?.id) return;
@@ -357,8 +363,9 @@ export default function Setting() {
                           const message = await resp.text();
                           throw new Error(message || "Failed to update profile");
                         }
-                      } catch (err) {
+                        } catch (err) {
                         console.error(err);
+                        toast.error("Failed to update profile.");
                       } finally {
                         setProfileSaving(false);
                       }
@@ -370,6 +377,19 @@ export default function Setting() {
               </div>
             </section>
           ) : null}
+
+          <section className="mt-8 rounded-2xl border border-border bg-panel p-6 shadow-sm">
+            <h2 className="text-lg font-semibold">Accessibility</h2>
+            <p className="mt-1 text-sm text-panel-muted-foreground">
+              We are committed to making IC Maps accessible to everyone. If you encounter any accessibility barriers, please let us know.
+            </p>
+            <a
+              href="mailto:accessibility@ithaca.edu?subject=IC%20Maps%20Accessibility%20Issue"
+              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-brand-cta bg-brand-cta/5 px-4 py-2 text-sm font-medium text-brand transition hover:bg-brand-cta/10"
+            >
+              Report an accessibility issue
+            </a>
+          </section>
         </SidebarInset>
       </div>
       <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
@@ -411,6 +431,7 @@ export default function Setting() {
                   setDeleteTarget(null);
                 } catch (err) {
                   console.error(err);
+                  toast.error("Failed to delete account.");
                 } finally {
                   setDeletePending(false);
                 }
@@ -421,6 +442,6 @@ export default function Setting() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div >
+    </main>
   );
 }

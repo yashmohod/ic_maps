@@ -253,20 +253,16 @@ export const edgeOutside = pgTable(
 );
 
 // outageLog
-export const outageLog = pgTable("outage_log",{ 
+export const outageLog = pgTable("outage_log", {
   id: serial("id").primaryKey(),
-  datetime:timestamp("datetime",{ precision: 6, withTimezone: true }).defaultNow(),
+  datetime: timestamp("datetime", {
+    precision: 6,
+    withTimezone: true,
+  }).defaultNow(),
   inside_node: boolean("inside_node").notNull().default(false),
   node_id: integer("node_id").notNull(),
   note: text("note").default(""),
-})
-
-//navmodes
-//export const navMode = pgTable("nav_mode", {
-//  id: serial("id").primaryKey(),
-//  name: varchar("name", { length: 256 }).notNull().unique(),
-//  through_building: boolean("through_building").notNull().default(false),
-//});
+});
 
 //buildings
 export const destination = pgTable("destination", {
@@ -298,15 +294,19 @@ export const route = pgTable(
   (t) => [unique("route_user_name_unique").on(t.user_id, t.name)],
 );
 
-export const route_destination = pgTable("route_destination", {
-  order: integer("order").notNull(),
-  destination_id: integer("destination_id")
-    .notNull()
-    .references(() => destination.id, { onDelete: "cascade" }),
-  route_id: integer("route_id")
-    .notNull()
-    .references(() => route.id, { onDelete: "cascade" }),
-});
+export const route_destination = pgTable(
+  "route_destination",
+  {
+    order: integer("order").notNull(),
+    destination_id: integer("destination_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+    route_id: integer("route_id")
+      .notNull()
+      .references(() => route.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.route_id, t.destination_id] })],
+);
 
 // Relations for route ↔ route_destination ↔ destination
 export const routeRelations = relations(route, ({ one, many }) => ({
@@ -359,7 +359,6 @@ export const schema = {
   nodeInside,
   edgeInside,
   edgeOutside,
-  navMode,
   destination,
   route,
   route_destination,
@@ -370,7 +369,7 @@ export type NodeOutside = InferSelectModel<typeof nodeOutside>;
 export type NodeInside = InferSelectModel<typeof nodeInside>;
 export type EdgeOutside = InferSelectModel<typeof edgeOutside>;
 export type EdgeInside = InferSelectModel<typeof edgeInside>;
-export type NavMode = InferSelectModel<typeof navMode>;
+
 export type Destination = InferSelectModel<typeof destination>;
 export type Route = InferSelectModel<typeof route>;
 export type RouteDestination = InferSelectModel<typeof route_destination>;
