@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { z } from "zod";
+import { auth } from "@/lib/auth";
 import { jsonError } from "@/lib/utils";
 import { closestNode, navigate } from "@/lib/navigation";
 
@@ -18,6 +20,11 @@ const navigateToSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
@@ -30,13 +37,20 @@ export async function POST(req: Request) {
       );
     }
 
-    const { destId, lat, lng, navConditions } = parsed.data;
+    const { destId, lat, lng, navConditions: rawConditions } = parsed.data;
+    const navConditions = rawConditions ?? {
+      is_pedestrian: true,
+      is_vehicular: false,
+      is_through_building: false,
+      is_avoid_stairs: false,
+      is_incline_limit: false,
+      max_incline: 0,
+    };
 
     console.log(`[API /api/map/navigateTo POST] called`, { destId, lat, lng, navConditions });
 
     const startNodeId: number = await closestNode(lat, lng, navConditions);
-    // console.log(startNodeId, destId, navConditions)
-    const path: number[] | null = await navigate(startNodeId, destId, navConditions)
+    const path: number[] | null = await navigate(startNodeId, destId, navConditions);
 
     return NextResponse.json({ path }, { status: 200 })
   } catch (err: unknown) {

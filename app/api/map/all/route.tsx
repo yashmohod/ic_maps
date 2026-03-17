@@ -1,17 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
-
-const includeDetail = process.env.NODE_ENV !== "production";
-function jsonError(message: string, status: number, detail?: unknown) {
-  return NextResponse.json(
-    {
-      error: message,
-      ...(includeDetail && detail != null ? { detail: String(detail) } : {}),
-    },
-    { status },
-  );
-}
+import { jsonError } from "@/lib/utils";
 
 
 const ROUTE = "/api/map/all";

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import { Source, Layer } from "@vis.gl/react-maplibre";
 import type { LayerProps } from "@vis.gl/react-maplibre";
 import { useAppTheme } from "@/hooks/use-app-theme";
@@ -14,18 +14,20 @@ type Path = {
 }
 type FeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Geometry, any>;
 
+/** Markers with at least id/lng/lat; id may be string or number; nav flags optional (missing treated as true). */
+type NavModeMarker = { id: string | number; lng: number; lat: number } &
+  Partial<Pick<MarkerNode, "isPedestrian" | "isVehicular">>;
+
+/** Edge with at least from/to; id or key for path highlight. Compatible with EdgeIndexEntry and route [id]'s RouteEdgeEntry. */
+type NavModeEdge = { from: number | string; to: number | string; id?: number | string; key?: string };
+
 type Props = {
   path: Path;
   curNavConditions: NavConditions;
-  markers: MarkerNode[];
-  edgeIndex: EdgeIndexEntry[];
-  setEdgeIndex: React.Dispatch<React.SetStateAction<EdgeIndexEntry[]>>;
+  markers: NavModeMarker[];
+  edgeIndex: NavModeEdge[];
+  setEdgeIndex?: React.Dispatch<React.SetStateAction<EdgeIndexEntry[]>>;
   showBaseGraph?: boolean;
-};
-
-type CachedFeatures = {
-  nodes?: MarkerNode[];
-  edges?: EdgeIndexEntry[];
 };
 
 export default function NavMode({
@@ -33,37 +35,37 @@ export default function NavMode({
   curNavConditions,
   markers,
   edgeIndex,
-  setEdgeIndex,
+  setEdgeIndex: _setEdgeIndex,
   showBaseGraph = true,
 }: Props) {
   const { isDark } = useAppTheme();
-  const featureCacheRef = useRef<Map<number, CachedFeatures>>(new Map());
-
 
   const edgesGeoJSON = useMemo<FeatureCollection>(() => {
 
     const features: GeoJSON.Feature[] = edgeIndex
-      .map(({ id, from, to }) => {
-        const a = markers.find((cur) => cur.id === from);
-        const b = markers.find((cur) => cur.id === to);
+      .map((e) => {
+        const { from, to } = e;
+        const edgeId = "id" in e && e.id != null ? e.id : "key" in e && e.key != null ? e.key : from;
+        const a = markers.find((cur) => cur.id === from || String(cur.id) === String(from));
+        const b = markers.find((cur) => cur.id === to || String(cur.id) === String(to));
         if (!a || !b) return null;
         if (curNavConditions.is_pedestrian) {
-          if (!a.isPedestrian || !b.isPedestrian) {
+          if (!(a.isPedestrian ?? true) || !(b.isPedestrian ?? true)) {
             return null;
           }
         }
         if (curNavConditions.is_vehicular) {
-          if (!a.isVehicular || !b.isVehicular) {
+          if (!(a.isVehicular ?? true) || !(b.isVehicular ?? true)) {
             return null;
           }
         }
         return {
           type: "Feature",
           properties: {
-            key: String(id),
+            key: String(edgeId),
             from: String(from),
             to: String(to),
-            path: path.path.has(id), // key can be string|number, isInPath handles it
+            path: path.path.has(Number(edgeId)),
           },
           geometry: {
             type: "LineString",

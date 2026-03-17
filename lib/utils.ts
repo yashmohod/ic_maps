@@ -27,13 +27,16 @@ export function calcDistance(
   return R * c;
 }
 
+const METERS_PER_DEGREE_LAT = 111_000;
+
 export function heuristic(
   lat1: number,
   lng1: number,
   lat2: number,
   lng2: number,
 ): number {
-  return Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lng1 - lng2, 2));
+  const deg = Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lng1 - lng2, 2));
+  return deg * METERS_PER_DEGREE_LAT;
 }
 
 export function cn(...inputs: ClassValue[]) {

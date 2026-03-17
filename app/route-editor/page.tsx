@@ -157,7 +157,16 @@ export default function RouteEditor(): JSX.Element {
     }
 
     return { type: "FeatureCollection", features };
-  }, [markers, edgeIndex, mode]);
+  }, [markers, edgeIndex, mode, curNavMode]);
+
+  const boundaryData = useMemo(() => {
+    if (!currentDestination?.polygon) return null;
+    try {
+      return JSON.parse(currentDestination.polygon) as GeoJSONFeatureCollection;
+    } catch {
+      return null;
+    }
+  }, [currentDestination?.id, currentDestination?.polygon]);
 
   /** ---------------- Layer specs (typed) ---------------- */
 
@@ -565,8 +574,7 @@ export default function RouteEditor(): JSX.Element {
   const selectedEdge =
     selectedEdgeId === null
       ? null
-      : edgeIndex.find((e) => e.id === selectedEdgeId) ??
-      edgeIndex.find((e) => e.id === selectedEdgeId);
+      : edgeIndex.find((e) => e.id === selectedEdgeId);
 
   useEffect(() => {
     if (selectedEdgeId === null) return;
@@ -925,8 +933,8 @@ export default function RouteEditor(): JSX.Element {
               );
             })}
 
-            {mode === "destination" && currentDestination && (
-              <Source id="boundary" type="geojson" data={(JSON.parse(currentDestination.polygon) as GeoJSONFeatureCollection) ?? null}>
+            {mode === "destination" && currentDestination && boundaryData && (
+              <Source id="boundary" type="geojson" data={boundaryData}>
                 <Layer
                   id="boundary-fill"
                   type="fill"

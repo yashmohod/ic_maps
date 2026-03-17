@@ -18,6 +18,10 @@ export async function GET(req: Request) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const userWithRole = session.user as { isAdmin?: boolean; role?: string };
+  if (!userWithRole.isAdmin && userWithRole.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { searchParams } = new URL(req.url);
   const parsed = usersGetSchema.safeParse({
@@ -36,7 +40,7 @@ export async function GET(req: Request) {
   console.log(`[API ${ROUTE} GET] called`, { search });
 
   try {
-    let query = db
+    const baseQuery = db
       .select({
         id: schema.user.id,
         name: schema.user.name,
@@ -45,13 +49,12 @@ export async function GET(req: Request) {
       })
       .from(schema.user);
 
-    if (pattern) {
-      query = query.where(
-        or(like(schema.user.name, pattern), like(schema.user.email, pattern)),
-      );
-    }
-
-    const users = await query.orderBy(asc(schema.user.name));
+    const users = await (pattern
+      ? baseQuery.where(
+          or(like(schema.user.name, pattern), like(schema.user.email, pattern)),
+        )
+      : baseQuery
+    ).orderBy(asc(schema.user.name));
 
     return NextResponse.json({ users });
   } catch (error) {

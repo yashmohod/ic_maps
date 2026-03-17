@@ -96,7 +96,7 @@ function orderNodeIdsFromEdges(edges: Array<{ from: string; to: string }>): stri
   while (cur != null) {
     ordered.push(cur);
     visited.add(cur);
-    const nextNode =
+    const nextNode: string | null =
       [...(adj.get(cur) ?? [])].find((n) => n !== prev && !visited.has(n)) ?? null;
     prev = cur;
     cur = nextNode;
@@ -120,7 +120,13 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     [],
   );
 
-  const [viewState, setViewState] = useState(defViewState);
+  const [viewState, setViewState] = useState<{
+    longitude: number;
+    latitude: number;
+    zoom: number;
+    bearing: number;
+    pitch: number;
+  }>(defViewState);
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
@@ -616,7 +622,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               curNavConditions={curNavConditions}
               markers={markers}
               edgeIndex={edgeIndex}
-              setEdgeIndex={setEdgeIndex}
             />
 
             {/* accuracy ring */}

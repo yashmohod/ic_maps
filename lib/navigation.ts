@@ -209,7 +209,7 @@ export async function navigate(
   navConditions: NavConditions,
 ): Promise<number[] | null> {
   const graph = await getGraph();
-  const startNode = graph.nodesOutside.get(start) as NodeOutside;
+  const startNode = graph.nodesOutside.get(start);
   const endNodes = await db
     .execute(
       sql`SELECT node_outside_id AS id FROM destination_node WHERE destination_id = ${destinationId}`,
@@ -385,7 +385,7 @@ function through_building_simple_bfs(
   buildingEntranceOutside: number,
   nav: NavConditions,
 ): number[] {
-  let start: any | undefined;
+  let start: NodeInside | undefined;
   for (const [, node] of graph.nodesInside) {
     if (node.node_outside_id === buildingEntranceOutside) {
       start = node;
@@ -418,9 +418,9 @@ function through_building_simple_bfs(
       const nextNode = graph.nodesInside.get(nextId);
       if (!nextNode) continue;
 
-      visited.add(nextId); // early mark is OK under node-only constraints
-
       if (!allowed(nextNode)) continue;
+
+      visited.add(nextId);
 
       if (nextNode.is_exit && nextNode.node_outside_id != null) {
         if (nextNode.node_outside_id !== buildingEntranceOutside) {

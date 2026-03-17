@@ -532,7 +532,11 @@ function FloorPlanInner() {
     const canRenderMap = !!baseStyle;
 
     const defaultMapCenter = { longitude: DEFAULT_CENTER.lng, latitude: DEFAULT_CENTER.lat, zoom: DEFAULT_ZOOM };
-    const [mapViewState, setMapViewState] = useState(defaultMapCenter);
+    const [mapViewState, setMapViewState] = useState<{
+      longitude: number;
+      latitude: number;
+      zoom: number;
+    }>(defaultMapCenter);
 
     useEffect(() => {
         if (selectedOutsideNodePos) {

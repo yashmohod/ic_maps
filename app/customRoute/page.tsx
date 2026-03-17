@@ -116,7 +116,13 @@ export default function CustomRoutesPage(): JSX.Element {
   );
 
   const { data: session, error, refetch, isPending } = authClient.useSession();
-  const [viewState, setViewState] = useState(defViewState);
+  const [viewState, setViewState] = useState<{
+    longitude: number;
+    latitude: number;
+    zoom: number;
+    bearing: number;
+    pitch: number;
+  }>(defViewState);
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
@@ -487,9 +493,13 @@ export default function CustomRoutesPage(): JSX.Element {
     const dest = destinations?.find((d) => String(d.id) === String(destinationId));
     if (dest) {
       const polyStr = dest.polygon;
-      const parsed = typeof polyStr === "string" ? JSON.parse(polyStr) : polyStr;
-      const normalized = normalizeToFeatureCollection(parsed);
-      setCurDestinationPoly(normalized);
+      try {
+        const parsed = typeof polyStr === "string" ? JSON.parse(polyStr) : polyStr;
+        const normalized = normalizeToFeatureCollection(parsed);
+        setCurDestinationPoly(normalized);
+      } catch {
+        setCurDestinationPoly(null);
+      }
 
       const rawLat = Number(dest.lat);
       const rawLng = Number(dest.lng);

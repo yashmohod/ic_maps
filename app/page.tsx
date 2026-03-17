@@ -116,11 +116,17 @@ export default function NavigationMap(): JSX.Element {
     lastNodeId: number;
   }
 
-  const [viewState, setViewState] = useState(defViewState);
+  const [viewState, setViewState] = useState<{
+    longitude: number;
+    latitude: number;
+    zoom: number;
+    bearing: number;
+    pitch: number;
+  }>(defViewState);
 
   const [[swLng, swLat], [neLng, neLat]] = CAMPUS_BOUNDS;
 
-  const [selectedDest, setSelectedDest] = useState<number>(-1);
+  const [selectedDest, setSelectedDest] = useState<number>(0);
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [userPos, setUserPos] = useState<UserPos | null>(null);
   const [destPos, setDestPos] = useState<LngLat | null>(null);
@@ -431,7 +437,14 @@ export default function NavigationMap(): JSX.Element {
     try {
       const curDestination: Destination | undefined = destinations.find((cur) => cur.id === id)
       if (!curDestination) return toast.error("Could not find the current destination.");
-      const curDestinationPoly = await JSON.parse(curDestination.polygon) as GeoJSONFeatureCollection;
+      let curDestinationPoly: GeoJSONFeatureCollection | null = null;
+      try {
+        if (curDestination.polygon) {
+          curDestinationPoly = JSON.parse(curDestination.polygon) as GeoJSONFeatureCollection;
+        }
+      } catch {
+        toast.error("Building has no boundary data.");
+      }
       setCurBuildingPoly(curDestinationPoly);
 
       const req: any = await apiClient.get(`/api/destination/outsideNode?id=${encodeURIComponent(id)}`);
@@ -516,7 +529,6 @@ export default function NavigationMap(): JSX.Element {
 
   const buildingNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!markers.length || !buildingNodes.size) return null;
-    const lastEdge = edgeIndex.find((cur) => cur.id === path.lastNodeId);
     return {
       type: "FeatureCollection",
       features: markers
@@ -571,7 +583,7 @@ export default function NavigationMap(): JSX.Element {
   /** -------- Route actions -------- */
 
   async function getRoute(): Promise<Path> {
-    if (!selectedDest) {
+    if (!selectedDest || selectedDest <= 0) {
       toast.error("Please select a destination before starting route.");
       return PATH_RESET;
     }
@@ -586,12 +598,20 @@ export default function NavigationMap(): JSX.Element {
       lng: userPos.lng,
       navConditions: curNavConditions,
     });
-    const resp = await req.json();
-    const orderedPath = resp?.path as number[]
-    const pnids: Set<number> = new Set(resp?.path as number[]);
-    const firstNodeId = edgeIndex.find((cur) => cur.id == orderedPath[0])?.from
-    const lastNodeId = edgeIndex.find((cur) => cur.id == orderedPath[orderedPath.length - 1])?.to
-    if (!lastNodeId || !firstNodeId || !pnids || pnids.size === 0) {
+    const resp = await req.json().catch(() => ({}));
+    if (req.status !== 200) {
+      toast.error((resp as { error?: string })?.error ?? "Failed to build route.");
+      throw new Error("Navigate request failed");
+    }
+    if (!Array.isArray(resp?.path) || resp.path.length === 0) {
+      toast.error("No route found for that selection.");
+      return PATH_RESET;
+    }
+    const orderedPath = resp.path as number[];
+    const pnids: Set<number> = new Set(resp.path as number[]);
+    const firstNodeId = edgeIndex.find((cur) => cur.id == orderedPath[0])?.from;
+    const lastNodeId = edgeIndex.find((cur) => cur.id == orderedPath[orderedPath.length - 1])?.to;
+    if (!lastNodeId || !firstNodeId || pnids.size === 0) {
       toast.error("No route found for that selection.");
       return PATH_RESET;
     }
@@ -628,7 +648,7 @@ export default function NavigationMap(): JSX.Element {
   }
 
   async function startTracking() {
-    if (!selectedDest) return toast.error("Please select a destination first.");
+    if (!selectedDest || selectedDest <= 0) return toast.error("Please select a destination first.");
     if (!userPos) return toast.error("Tap Locate Me first so I know where you are.");
 
     const firstNode = markers.find((cur) => cur.id == path.firstNodeId);
@@ -929,10 +949,14 @@ export default function NavigationMap(): JSX.Element {
       if (tracking) {
         setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
         setZoomed(true);
-        startTracking();
+        await startTracking().catch(() => {});
         return;
       } else {
-        showRoute();
+        try {
+          await showRoute();
+        } catch {
+          // showRoute already toasts on error
+        }
         setSheetPosition(0);
         setZoomed(true);
         return;

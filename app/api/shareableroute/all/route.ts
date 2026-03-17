@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { route, route_destination, destination } from "@/db/schema";
@@ -19,38 +19,42 @@ export async function GET() {
       .from(route)
       .where(eq(route.user_id, session.user.id));
 
-    const routes: Array<{
-      id: number;
-      name: string;
-      description?: string;
-      destinations: Array<{ id: number; name: string; isParkingLot: boolean; order: number }>;
-    }> = [];
-
-    for (const r of routeRows) {
-      const destRows = await db
-        .select({
-          order: route_destination.order,
-          id: destination.id,
-          name: destination.name,
-          is_parking_lot: destination.is_parking_lot,
-        })
-        .from(route_destination)
-        .innerJoin(destination, eq(destination.id, route_destination.destination_id))
-        .where(eq(route_destination.route_id, r.id))
-        .orderBy(asc(route_destination.order));
-
-      routes.push({
-        id: r.id,
-        name: r.name,
-        description: r.description ?? undefined,
-        destinations: destRows.map((d) => ({
-          id: d.id,
-          name: d.name,
-          isParkingLot: d.is_parking_lot,
-          order: d.order,
-        })),
-      });
+    const routeIds = routeRows.map((r) => r.id);
+    if (routeIds.length === 0) {
+      return NextResponse.json({ routes: [] }, { status: 200 });
     }
+
+    const destRows = await db
+      .select({
+        route_id: route_destination.route_id,
+        order: route_destination.order,
+        id: destination.id,
+        name: destination.name,
+        is_parking_lot: destination.is_parking_lot,
+      })
+      .from(route_destination)
+      .innerJoin(destination, eq(destination.id, route_destination.destination_id))
+      .where(inArray(route_destination.route_id, routeIds))
+      .orderBy(asc(route_destination.route_id), asc(route_destination.order));
+
+    const destByRoute = new Map<number, Array<{ id: number; name: string; isParkingLot: boolean; order: number }>>();
+    for (const d of destRows) {
+      const list = destByRoute.get(d.route_id) ?? [];
+      list.push({
+        id: d.id,
+        name: d.name,
+        isParkingLot: d.is_parking_lot,
+        order: d.order,
+      });
+      destByRoute.set(d.route_id, list);
+    }
+
+    const routes = routeRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      destinations: destByRoute.get(r.id) ?? [],
+    }));
 
     return NextResponse.json({ routes }, { status: 200 });
   } catch (err: unknown) {

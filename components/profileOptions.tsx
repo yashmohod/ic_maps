@@ -9,7 +9,7 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar"
-import React, { useEffect } from "react";
+import React from "react";
 import { authClient, type Session } from "@/lib/auth-client"
 import {
   IconSettings,
@@ -26,10 +26,6 @@ export default function ProfileOptions({ session }: profileOptions) {
   const router = useRouter();
   const { isDark, toggleTheme } = useAppTheme();
   const label = isDark ? "Switch to light mode" : "Switch to dark mode";
-  useEffect(() => {
-  }, [session])
-
-
 
   return <>
     <Popover>

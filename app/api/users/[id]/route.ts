@@ -8,6 +8,11 @@ export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { id } = await context.params;
   console.log(`[API ${ROUTE} GET] called`, { id });
   try {
