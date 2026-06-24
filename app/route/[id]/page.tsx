@@ -4,8 +4,6 @@
 import React, { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   Map as ReactMap,
-  Source,
-  Layer,
   Marker,
   type MapRef,
   type ViewStateChangeEvent,
@@ -13,97 +11,75 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { toast } from "sonner";
 import { useParams } from "next/navigation";
+import maplibregl from "maplibre-gl";
+import {
+  CheckIcon,
+  Maximize2,
+  Minimize2,
+  Navigation,
+  NavigationOff,
+  Route,
+  XIcon,
+} from "lucide-react";
 
-import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
+import { Toggle } from "@/components/ui/toggle";
+import { Slider } from "@/components/ui/slider";
 
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
-import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
+import {
+  CAMPUS_BOUNDS,
+  DEFAULT_CENTER,
+  DEFAULT_ZOOM,
+} from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
-import { Spinner } from "@/components/ui/spinner";
 import type { NavConditions } from "@/lib/navigation";
 import apiClient from "@/lib/apiClient";
-import { makeCircleGeoJSON } from "@/lib/geo";
+import { bearingTo, makeCircleGeoJSON } from "@/lib/geo";
 import {
-  surfacePanelClass,
   surfaceSubtleClass,
   borderMutedClass,
+  mapFloatingActionClass,
+  mapSheetPeekMinVisibleCompactPx,
+  mapSheetPeekMinVisiblePx,
+  mapSheetToolbarOverlapPx,
 } from "@/lib/panel-classes";
 import type {
   LngLat,
   UserPos,
   SimpleMarkerNode,
   GeoJSONFeatureCollection,
+  NavigateToResponse,
+  RouteLegMetrics,
 } from "@/lib/types/map";
+import {
+  formatRouteDistance,
+  formatRouteEtaSummary,
+  formatRouteDuration,
+} from "@/lib/distance-display";
+import { useNavigationProgress } from "@/hooks/use-navigation-progress";
 
 import NavModeMap from "@/components/NavMode";
+import ComboboxSelect from "@/components/DropDown";
+import { MapBottomSheet } from "@/components/MapBottomSheet";
+import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
+import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
+import { RoutePathLayer } from "@/components/RoutePathLayer";
 import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
+import type { NavStep } from "@/lib/navigation-types";
+import { useDistanceUnits } from "@/hooks/use-distance-units";
 
 type MarkerNode = SimpleMarkerNode;
-type RouteEdgeEntry = { id: string; from: string | number; to: string | number };
+type RouteEdgeEntry = {
+  id: string;
+  from: string | number;
+  to: string | number;
+};
 
-/** Extract path (edge IDs) from navigateTo response */
-function extractPath(resp: { path?: unknown }): number[] {
-  if (!resp?.path || !Array.isArray(resp.path)) return [];
-  return resp.path.filter((x): x is number => typeof x === "number");
-}
-
-function makeLookups(markersLocal: MarkerNode[], edgeIndexLocal: RouteEdgeEntry[]) {
-  const nodesById = new Map<string, { lng: number; lat: number }>(
-    markersLocal.map((m) => [String(m.id), { lng: m.lng, lat: m.lat }]),
-  );
-
-  const edgesByKey = new Map<string, { from: string; to: string }>(
-    edgeIndexLocal.map((e) => [String(e.id), { from: String(e.from), to: String(e.to) }]),
-  );
-
-  return { nodesById, edgesByKey };
-}
-
-/** Fallback: if key is literally "nodeA__nodeB" and not present in edgeIndex */
-function parseEdgeKeyFallback(key: string): { from: string; to: string } | null {
-  if (!key || typeof key !== "string") return null;
-  const parts = key.split("__");
-  if (parts.length !== 2) return null;
-  const from = parts[0]?.trim();
-  const to = parts[1]?.trim();
-  if (!from || !to) return null;
-  return { from, to };
-}
-
-/** Order node ids from edges (same style as your NavigationMap helper) */
-function orderNodeIdsFromEdges(edges: Array<{ from: string; to: string }>): string[] {
-  const adj = new Map<string, Set<string>>();
-  const add = (u: string, v: string) => {
-    if (!adj.has(u)) adj.set(u, new Set());
-    if (!adj.has(v)) adj.set(v, new Set());
-    adj.get(u)!.add(v);
-    adj.get(v)!.add(u);
-  };
-
-  for (const e of edges) add(e.from, e.to);
-  if (adj.size === 0) return [];
-
-  const endpoints = [...adj.entries()].filter(([, s]) => s.size === 1).map(([id]) => id);
-  const start = endpoints[0] ?? [...adj.keys()][0];
-
-  const ordered: string[] = [];
-  const visited = new Set<string>();
-  let cur: string | null = start;
-  let prev: string | null = null;
-
-  while (cur != null) {
-    ordered.push(cur);
-    visited.add(cur);
-    const nextNode: string | null =
-      [...(adj.get(cur) ?? [])].find((n) => n !== prev && !visited.has(n)) ?? null;
-    prev = cur;
-    cur = nextNode;
-  }
-
-  return ordered;
-}
+const MAX_INCLINE = 45;
+const SHARE_SHEET_PEEK = 0.7;
+const SHARE_SHEET_SNAP_POINTS = [0, SHARE_SHEET_PEEK];
 
 export default function ShareRouteNavigatePage(): JSX.Element {
   const params = useParams<{ id: string }>();
@@ -111,8 +87,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   const defViewState = useMemo(
     () => ({
-      longitude: DEFAULT_CENTER.lng,
-      latitude: DEFAULT_CENTER.lat,
+      longitude: DEFAULT_CENTER.lng as number,
+      latitude: DEFAULT_CENTER.lat as number,
       zoom: DEFAULT_ZOOM,
       bearing: 0,
       pitch: 0,
@@ -134,13 +110,23 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
 
+  type RouteInfo = {
+    name: string;
+    destinationId: number;
+    parkingLots: Array<{
+      id: number;
+      name: string;
+      lat?: number;
+      lng?: number;
+    }>;
+  } | null;
 
-  /** Route from shareable link: GET /api/shareableroute?id=... */
-  type RouteInfo = { name: string; destinationId: number } | null;
   const [routeInfo, setRouteInfo] = useState<RouteInfo>(null);
+  const [selectedParkingId, setSelectedParkingId] = useState<number | null>(
+    null,
+  );
   const [routeLoadPending, setRouteLoadPending] = useState(true);
 
-  /** Nav conditions for navigateTo (single-destination routing) */
   const [curNavConditions, setCurNavConditions] = useState<NavConditions>({
     is_pedestrian: true,
     is_vehicular: false,
@@ -150,7 +136,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     max_incline: 0,
   });
 
-  /** Load shareable route by id to get first destination */
   async function loadRoute() {
     if (!routeIdRaw) {
       setRouteLoadPending(false);
@@ -167,16 +152,36 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         setRouteInfo(null);
         return;
       }
-      const firstDest = data.destinations?.[0];
+      const firstDest =
+        data.destinations?.find(
+          (d: { isParkingLot?: boolean }) => !d.isParkingLot,
+        ) ?? data.destinations?.[0];
       if (!firstDest?.id) {
         toast.error("This route has no destination.");
         setRouteInfo(null);
         return;
       }
+      const parkingLots = Array.isArray(data.parkingLots)
+        ? data.parkingLots.map(
+            (p: { id: number; name: string; lat?: number; lng?: number }) => ({
+              id: Number(p.id),
+              name: String(p.name),
+              lat: p.lat != null ? Number(p.lat) : undefined,
+              lng: p.lng != null ? Number(p.lng) : undefined,
+            }),
+          )
+        : [];
       setRouteInfo({
         name: data.name ?? "Route",
         destinationId: Number(firstDest.id),
+        parkingLots,
       });
+      if (parkingLots.length === 1) {
+        setSelectedParkingId(parkingLots[0].id);
+      } else {
+        setSelectedParkingId(null);
+      }
+      void prefetchGraph();
     } catch (e) {
       console.error(e);
       toast.error("Failed to load route.");
@@ -186,46 +191,90 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
   }
 
-  /** Load graph (nodes + edges) from GET /api/map/all */
-  const [graphLoaded, setGraphLoaded] = useState(false);
-  async function loadGraph() {
-    try {
-      const res = await apiClient.get("/api/map/all");
-      if (res.status !== 200) {
-        toast.error("Failed to load map data.");
-        return;
+  const graphPrefetchRef = useRef<Promise<void> | null>(null);
+  const [markers, setMarkers] = useState<MarkerNode[]>([]);
+  const [edgeIndex, setEdgeIndex] = useState<RouteEdgeEntry[]>([]);
+
+  async function prefetchGraph() {
+    if (markers.length > 0) return;
+    if (graphPrefetchRef.current) return graphPrefetchRef.current;
+    graphPrefetchRef.current = (async () => {
+      try {
+        const res = await apiClient.get("/api/map/all");
+        if (res.status !== 200) return;
+        const data = await res.json();
+        setMarkers(data.nodes ?? []);
+        setEdgeIndex(
+          (data.edges ?? []).map(
+            (e: { id: number; from: number; to: number }) => ({
+              id: String(e.id),
+              from: e.from,
+              to: e.to,
+            }),
+          ),
+        );
+      } catch (e) {
+        console.error(e);
+      } finally {
+        graphPrefetchRef.current = null;
       }
-      const data = await res.json();
-      const nodes = data.nodes ?? [];
-      const edges = (data.edges ?? []).map(
-        (e: { id: number; from: number; to: number }) => ({
-          id: String(e.id),
-          from: e.from,
-          to: e.to,
-        }),
-      );
-      setMarkers(nodes);
-      setEdgeIndex(edges);
-      setGraphLoaded(true);
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to load map data.");
-    }
+    })();
+    return graphPrefetchRef.current;
   }
 
-  /** -------- nav modes (simplified: pedestrian / vehicular toggle) -------- */
   const navModeOptions = useMemo(
     () => [
-      { id: "pedestrian", label: "Pedestrian", conditions: { is_pedestrian: true, is_vehicular: false } as const },
-      { id: "vehicular", label: "Vehicular", conditions: { is_pedestrian: false, is_vehicular: true } as const },
+      {
+        id: "pedestrian",
+        label: "Pedestrian",
+        conditions: { is_pedestrian: true, is_vehicular: false } as const,
+      },
+      {
+        id: "vehicular",
+        label: "Vehicular",
+        conditions: { is_pedestrian: false, is_vehicular: true } as const,
+      },
     ],
     [],
   );
 
-  /** -------- (removed legacy nav modes / getAllNavModes) -------- */
-  /** -------- user location -------- */
   const [userPos, setUserPos] = useState<UserPos | null>(null);
   const [locating, setLocating] = useState(false);
+  const [tracking, setTracking] = useState(false);
+  const [isZoomed, setZoomed] = useState(false);
+  const [sheetPosition, setSheetPosition] = useState(SHARE_SHEET_PEEK);
+  const [effectiveSheetPeek, setEffectiveSheetPeek] =
+    useState(SHARE_SHEET_PEEK);
+  const [routePending, setRoutePending] = useState(false);
+  const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
+  const [routeEta, setRouteEta] = useState<{
+    distanceMeters: number;
+    durationSeconds: number;
+    legs: RouteLegMetrics[];
+  } | null>(null);
+  const [routeSteps, setRouteSteps] = useState<NavStep[]>([]);
+  const { units: distanceUnits } = useDistanceUnits();
+  const [destPos, setDestPos] = useState<LngLat | null>(null);
+  const [parkingPos, setParkingPos] = useState<LngLat | null>(null);
+
+  const routeCoordsRef = useRef<Array<[number, number]>>([]);
+  const watchIdRef = useRef<number | null>(null);
+  const pendingRouteStartRef = useRef(false);
+  const routeStartNodeRef = useRef<{
+    id: number;
+    lat: number;
+    lng: number;
+  } | null>(null);
+
+  const sheetCollapsed = sheetPosition >= effectiveSheetPeek * 0.92;
+  const navigating = routeCoords.length >= 2;
+
+  const navProgress = useNavigationProgress(
+    routeSteps,
+    userPos,
+    routeCoords,
+    tracking,
+  );
 
   function ensureCenter(lng: number, lat: number, minZoom = 16) {
     const map = mapRef.current?.getMap?.();
@@ -262,7 +311,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         ensureCenter(longitude, latitude, 16);
         setLocating(false);
       },
-      (err) => {
+      () => {
         toast.error("Could not get your location.");
         setLocating(false);
       },
@@ -270,118 +319,334 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     );
   }
 
-  /** -------- graph data (from NavModeMap) -------- */
-  const [markers, setMarkers] = useState<MarkerNode[]>([]);
-  const [edgeIndex, setEdgeIndex] = useState<RouteEdgeEntry[]>([]);
-
-  /** -------- route state -------- */
-  const [routePending, setRoutePending] = useState(false);
-  const [pathKeys, setPathKeys] = useState<string[]>([]);
-  const [pathSet, setPathSet] = useState<Set<string>>(new Set());
-
-  const [routeFC, setRouteFC] = useState<GeoJSONFeatureCollection | null>(null);
-  const [destPos, setDestPos] = useState<LngLat | null>(null);
-
-  const routeLineLayer = useMemo<LineLayerSpecification>(
-    () => ({
-      id: "route-line",
-      type: "line",
-      source: "route",
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: {
-        "line-width": 7,
-        "line-color": "#35D5A4",
-        "line-opacity": 0.95,
-        "line-blur": 0.2,
-      },
-    }),
-    [],
-  );
-
   const accuracyGeoJSON = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!userPos?.accuracy) return null;
-    return makeCircleGeoJSON(userPos.lng, userPos.lat, Math.max(userPos.accuracy, 5), 64);
+    return makeCircleGeoJSON(
+      userPos.lng,
+      userPos.lat,
+      Math.max(userPos.accuracy, 5),
+      64,
+    );
   }, [userPos]);
 
   function fitToUserAndRoute(coords: Array<[number, number]>) {
     const map = mapRef.current?.getMap?.();
-    if (!map) return;
-    if (!coords?.length) return;
+    if (!map || !coords.length) return;
 
     const all: Array<[number, number]> = [];
     if (userPos) all.push([userPos.lng, userPos.lat]);
     all.push(...coords);
-
     if (all.length < 2) return;
 
     const lngs = all.map((c) => c[0]);
     const lats = all.map((c) => c[1]);
-    const west = Math.min(...lngs);
-    const east = Math.max(...lngs);
-    const south = Math.min(...lats);
-    const north = Math.max(...lats);
-
-    const isMobile =
-      typeof window !== "undefined"
-        ? (window.matchMedia?.("(max-width: 768px)")?.matches ?? false)
-        : false;
-
-    const padding = isMobile
-      ? { top: 90, right: 24, bottom: 120, left: 24 }
-      : { top: 96, right: 420, bottom: 96, left: 32 };
+    const padding = { top: 90, right: 24, bottom: 220, left: 24 };
 
     map.fitBounds(
       [
-        [west, south],
-        [east, north],
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
       ],
       { padding, maxZoom: 19, duration: 900, essential: true },
     );
   }
 
-  /** Fetch path from our API (user -> route's first destination) */
+  function aimCamera(
+    map: maplibregl.Map | undefined,
+    lng: number,
+    lat: number,
+    bearingDeg: number,
+    {
+      zoom = 16,
+      pitch = 60,
+      duration = 400,
+    }: { zoom?: number; pitch?: number; duration?: number } = {},
+  ) {
+    if (!map) return;
+    map.easeTo({
+      center: [lng, lat],
+      zoom,
+      bearing: bearingDeg ?? 0,
+      pitch,
+      duration,
+      essential: true,
+    });
+    setViewState((v) => ({
+      ...v,
+      longitude: lng,
+      latitude: lat,
+      zoom,
+      bearing: bearingDeg ?? 0,
+      pitch,
+    }));
+  }
+
+  function showCampusOverview() {
+    const map = mapRef.current?.getMap?.();
+    if (!map) return;
+
+    map.fitBounds(CAMPUS_BOUNDS, {
+      padding: { top: 48, bottom: 80, left: 48, right: 48 },
+      duration: 900,
+      essential: true,
+    });
+  }
+
+  function stopTracking() {
+    if (watchIdRef.current != null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setTracking(false);
+    if (routeCoordsRef.current.length >= 2) {
+      fitToUserAndRoute(routeCoordsRef.current);
+      setViewState((v) => ({ ...v, bearing: 0, pitch: 0 }));
+    } else {
+      setViewState(defViewState);
+    }
+  }
+
+  function startTracking() {
+    if (!userPos) {
+      toast.error("Tap Locate Me first so I know where you are.");
+      return;
+    }
+    if (routeCoordsRef.current.length < 2) {
+      toast.error("Build a route before starting live navigation.");
+      return;
+    }
+
+    const firstNode =
+      routeStartNodeRef.current ??
+      (routeCoordsRef.current[1]
+        ? {
+            lng: routeCoordsRef.current[1][0],
+            lat: routeCoordsRef.current[1][1],
+          }
+        : null);
+
+    if (!firstNode) {
+      toast.error("Navigation could not start.");
+      return;
+    }
+
+    const [lng1, lat1] = [userPos.lng, userPos.lat];
+    const [lng2, lat2] = [firstNode.lng, firstNode.lat];
+    const forward =
+      typeof userPos.heading === "number"
+        ? userPos.heading
+        : bearingTo(lng1, lat1, lng2, lat2);
+
+    aimCamera(mapRef.current?.getMap?.(), lng1, lat1, forward, {
+      pitch: 60,
+      duration: 600,
+      zoom: 20,
+    });
+
+    if (watchIdRef.current != null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { longitude, latitude, heading } = pos.coords;
+        setUserPos((up) =>
+          up
+            ? { ...up, lng: longitude, lat: latitude, heading }
+            : { lng: longitude, lat: latitude, heading },
+        );
+
+        let brg: number;
+        if (typeof heading === "number" && !Number.isNaN(heading)) {
+          brg = heading;
+        } else if (routeCoordsRef.current.length >= 2) {
+          const [nx, ny] = routeCoordsRef.current[1];
+          brg = bearingTo(longitude, latitude, nx, ny);
+        } else {
+          brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
+        }
+
+        aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
+          pitch: 60,
+          duration: 300,
+          zoom: 20,
+        });
+      },
+      (err) => {
+        toast.error(err.message || "Tracking error");
+        stopTracking();
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 },
+    );
+
+    watchIdRef.current = id;
+    setTracking(true);
+  }
+
+  async function handleZoom() {
+    if (isZoomed) {
+      showCampusOverview();
+      setZoomed(false);
+      return;
+    }
+
+    if (navigating) {
+      if (tracking) {
+        setSheetPosition(effectiveSheetPeek);
+        setZoomed(true);
+        return;
+      }
+      if (routeCoordsRef.current.length >= 2) {
+        fitToUserAndRoute(routeCoordsRef.current);
+        setSheetPosition(0);
+      }
+      setZoomed(true);
+      return;
+    }
+
+    if (userPos) {
+      ensureCenter(userPos.lng, userPos.lat, 16);
+    } else {
+      await locateOnce();
+    }
+    setZoomed(true);
+  }
+
+  async function handleNavButton() {
+    if (!routeInfo?.destinationId) {
+      toast.error("Route not loaded.");
+      return;
+    }
+    if (!userPos) {
+      pendingRouteStartRef.current = true;
+      await locateOnce();
+      return;
+    }
+    if (showParkingOptions && selectedParkingId == null) {
+      toast.error("Select a parking lot first.");
+      return;
+    }
+
+    if (!navigating && !tracking) {
+      await refreshRoute();
+      setSheetPosition(effectiveSheetPeek);
+      setZoomed(true);
+      return;
+    }
+
+    if (navigating) {
+      if (tracking) {
+        setSheetPosition(0);
+        stopTracking();
+      } else {
+        setSheetPosition(effectiveSheetPeek);
+        startTracking();
+      }
+    }
+  }
+
+  const hasParkingLots = (routeInfo?.parkingLots.length ?? 0) > 0;
+  const showParkingOptions = hasParkingLots && curNavConditions.is_vehicular;
+
+  const parkingComboboxItems = useMemo(
+    () =>
+      (routeInfo?.parkingLots ?? []).map((lot) => ({
+        value: lot.id,
+        label: lot.name,
+      })),
+    [routeInfo?.parkingLots],
+  );
+
+  const canNavigate =
+    !!userPos &&
+    !!routeInfo?.destinationId &&
+    (!showParkingOptions || selectedParkingId != null);
+
   async function refreshRoute() {
-    if (!routeIdRaw) return;
-    if (!userPos) return;
-    if (!routeInfo?.destinationId) return;
-    if (routePending) return;
+    if (!routeIdRaw || !userPos || !routeInfo?.destinationId || routePending)
+      return;
+    if (showParkingOptions && selectedParkingId == null) {
+      toast.error("Select a parking lot first.");
+      return;
+    }
 
     setRoutePending(true);
     try {
-      const res = await apiClient.post("/api/map/navigateTo", {
-        destId: routeInfo.destinationId,
+      const body: Record<string, unknown> = {
         lat: userPos.lat,
         lng: userPos.lng,
         navConditions: curNavConditions,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPathKeys([]);
-        setPathSet(new Set());
-        setRouteFC(null);
+      };
+
+      if (showParkingOptions && selectedParkingId != null) {
+        body.viaDestIds = [selectedParkingId, routeInfo.destinationId];
+      } else {
+        body.destId = routeInfo.destinationId;
+      }
+
+      const res = await apiClient.post("/api/map/navigateTo", body);
+      const data = (await res
+        .json()
+        .catch(() => ({}))) as NavigateToResponse & {
+        error?: string;
+      };
+
+      if (!res.ok || !Array.isArray(data.path) || data.path.length === 0) {
+        setRouteCoords([]);
+        routeCoordsRef.current = [];
+        routeStartNodeRef.current = null;
+        setRouteEta(null);
+        setRouteSteps([]);
         setDestPos(null);
+        setParkingPos(null);
         toast.error(data?.error ?? "No path returned.");
         return;
       }
 
-      const path = extractPath(data);
-      if (!path.length) {
-        setPathKeys([]);
-        setPathSet(new Set());
-        setRouteFC(null);
-        setDestPos(null);
-        toast.error("No path returned for that route.");
-        return;
+      const coords = data.geometry?.coordinates ?? [];
+      setRouteCoords(coords);
+      routeCoordsRef.current = coords;
+      if (data.startNode) {
+        routeStartNodeRef.current = data.startNode;
+      }
+      if (
+        typeof data.distanceMeters === "number" &&
+        typeof data.durationSeconds === "number"
+      ) {
+        setRouteEta({
+          distanceMeters: data.distanceMeters,
+          durationSeconds: data.durationSeconds,
+          legs: Array.isArray(data.legs) ? data.legs : [],
+        });
+      } else {
+        setRouteEta(null);
+      }
+      setRouteSteps(Array.isArray(data.steps) ? data.steps : []);
+
+      if (coords.length >= 2) {
+        const end = coords[coords.length - 1];
+        setDestPos({ lng: end[0], lat: end[1] });
+        setTimeout(() => fitToUserAndRoute(coords), 0);
       }
 
-      const keys = path.map(String);
-      setPathKeys(keys);
-      setPathSet(new Set(keys));
+      if (showParkingOptions && selectedParkingId != null) {
+        const lot = routeInfo.parkingLots.find(
+          (p) => p.id === selectedParkingId,
+        );
+        if (lot?.lat != null && lot?.lng != null) {
+          setParkingPos({ lat: Number(lot.lat), lng: Number(lot.lng) });
+        }
+      } else {
+        setParkingPos(null);
+      }
     } catch (e) {
       console.error(e);
-      setPathKeys([]);
-      setPathSet(new Set());
-      setRouteFC(null);
+      setRouteCoords([]);
+      routeCoordsRef.current = [];
+      routeStartNodeRef.current = null;
+      setRouteEta(null);
+      setRouteSteps([]);
       setDestPos(null);
       toast.error("Failed to load route.");
     } finally {
@@ -389,80 +654,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
   }
 
-  /** Build GeoJSON using markers+edgeIndex (exactly like your BlueLight page) */
-  useEffect(() => {
-    if (!pathKeys.length) {
-      setRouteFC(null);
-      setDestPos(null);
-      return;
-    }
-    if (!markers.length || !edgeIndex.length) {
-      // wait until NavModeMap loads graph
-      return;
-    }
-
-    const { nodesById, edgesByKey } = makeLookups(markers, edgeIndex);
-
-    const resolvedEdges: Array<{ from: string; to: string }> = [];
-    const segments: Array<Array<[number, number]>> = [];
-
-    for (const key of pathKeys) {
-      const edge =
-        edgesByKey.get(String(key)) ??
-        parseEdgeKeyFallback(String(key)); // fallback for "n1__n2" form
-
-      if (!edge) continue;
-
-      const from = nodesById.get(edge.from);
-      const to = nodesById.get(edge.to);
-      if (!from || !to) continue;
-
-      resolvedEdges.push({ from: edge.from, to: edge.to });
-      segments.push([
-        [from.lng, from.lat],
-        [to.lng, to.lat],
-      ]);
-    }
-
-    if (!segments.length) {
-      setRouteFC(null);
-      setDestPos(null);
-      toast.error("Path edges did not match any loaded graph edges for this nav mode.");
-      return;
-    }
-
-    // destination marker: try to order the nodes, else just use last segment end
-    const orderedNodeIds = orderNodeIdsFromEdges(resolvedEdges);
-    const lastId = orderedNodeIds[orderedNodeIds.length - 1];
-
-    if (lastId) {
-      const p = nodesById.get(String(lastId));
-      if (p) setDestPos({ lng: p.lng, lat: p.lat });
-      else setDestPos(null);
-    } else {
-      const lastSeg = segments[segments.length - 1];
-      const end = lastSeg?.[1];
-      setDestPos(end ? { lng: end[0], lat: end[1] } : null);
-    }
-
-    setRouteFC({
-      type: "FeatureCollection",
-      features: segments.map((coords) => ({
-        type: "Feature",
-        properties: {},
-        geometry: { type: "LineString", coordinates: coords },
-      })),
-    });
-
-    // fit bounds using ALL segment coords
-    const allCoords: Array<[number, number]> = [];
-    for (const seg of segments) {
-      allCoords.push(seg[0], seg[1]);
-    }
-    setTimeout(() => fitToUserAndRoute(allCoords), 0);
-  }, [pathKeys, markers, edgeIndex, userPos?.lat, userPos?.lng]);
-
-  /** lifecycle: load route and graph on mount */
   useEffect(() => {
     if (!routeIdRaw) {
       toast.error("Missing route id in URL.");
@@ -470,138 +661,59 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       return;
     }
     void loadRoute();
-    void loadGraph();
     void locateOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeIdRaw]);
 
-  /** Refresh route when destination, location, or nav conditions change */
   useEffect(() => {
-    if (!routeInfo?.destinationId || !userPos || !graphLoaded) return;
+    if (!canNavigate) return;
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeInfo?.destinationId, userPos?.lat, userPos?.lng, curNavConditions, graphLoaded]);
+  }, [
+    routeInfo?.destinationId,
+    selectedParkingId,
+    userPos?.lat,
+    userPos?.lng,
+    curNavConditions,
+  ]);
+
+  useEffect(() => {
+    if (!pendingRouteStartRef.current) return;
+    if (!userPos || !canNavigate) return;
+    pendingRouteStartRef.current = false;
+    void refreshRoute();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userPos, canNavigate]);
+
+  useEffect(() => {
+    setSheetPosition((pos) =>
+      pos >= effectiveSheetPeek * 0.92 ? effectiveSheetPeek : pos,
+    );
+  }, [effectiveSheetPeek]);
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, []);
 
   const emptyPath = useMemo(
     () => ({ path: new Set<number>(), firstNodeId: -1, lastNodeId: -1 }),
     [],
   );
-  /** UI */
+
   return (
-    <div className="relative h-screen w-full bg-background text-foreground">
-      <div className="absolute left-3 top-20 z-40 flex items-center gap-2 md:top-3">
-        <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
-        <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
+    <div className="relative h-[100dvh] w-full bg-background text-foreground">
+      <div className="absolute left-3 top-3 z-40 flex items-center gap-2">
+        <HomeLogoLink className="h-11 min-h-[44px] px-3 py-2 shadow-xl backdrop-blur" />
+        <ThemeToggleButton className="h-11 min-h-[44px] w-11 shadow-xl backdrop-blur" />
       </div>
 
-      {/* Top bar */}
-      <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[820px] md:-translate-x-1/2">
-        <div
-          className={[
-            "rounded-[22px] border px-4 py-3 shadow-xl backdrop-blur",
-            borderMutedClass,
-            surfacePanelClass,
-          ].join(" ")}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-70">
-                Shareable Route
-              </p>
-              <p className="truncate text-sm font-semibold">
-                {routeLoadPending
-                  ? "Loading…"
-                  : routeInfo
-                    ? routeInfo.name
-                    : `Route ID: ${routeIdRaw || "—"}`}
-              </p>
-              <p className="mt-1 text-xs text-panel-muted-foreground">
-                {routePending
-                  ? "Refreshing route…"
-                  : routeInfo
-                    ? "Route to destination from your current location."
-                    : "Load a route to see directions."}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                className={[
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition",
-                  borderMutedClass,
-                  surfaceSubtleClass,
-                  "hover:bg-panel",
-                  "disabled:opacity-60",
-                ].join(" ")}
-                onClick={locateOnce}
-                disabled={locating}
-                title="Update your location"
-                aria-label="Locate me"
-              >
-                {locating ? <Spinner /> : null}
-                Locate me
-              </button>
-
-              <button
-                className={[
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition",
-                  borderMutedClass,
-                  surfaceSubtleClass,
-                  "hover:bg-panel",
-                  "disabled:opacity-60",
-                ].join(" ")}
-                onClick={refreshRoute}
-                disabled={!userPos || !routeInfo?.destinationId || routePending}
-                title="Refresh route"
-                aria-label="Refresh route"
-              >
-                {routePending ? <Spinner /> : null}
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          {/* Nav mode: Pedestrian / Vehicular */}
-          <div className="mt-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-panel-muted-foreground">
-              Mode
-            </span>
-            <div className="mt-2 -mx-1 flex gap-2">
-              {navModeOptions.map((opt) => {
-                const active =
-                  (opt.id === "pedestrian" && curNavConditions.is_pedestrian) ||
-                  (opt.id === "vehicular" && curNavConditions.is_vehicular);
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() =>
-                      setCurNavConditions((prev) => ({
-                        ...prev,
-                        ...opt.conditions,
-                      }))
-                    }
-                    disabled={routePending}
-                    className={[
-                      "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition",
-                      active
-                        ? "bg-brand-cta text-brand-cta-foreground"
-                        : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-                      routePending && "opacity-60",
-                    ].join(" ")}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Map */}
       <div className="h-full w-full">
         {!canRenderMap ? (
-          <div className="h-full w-full grid place-items-center text-sm opacity-70">
+          <div className="grid h-full w-full place-items-center text-sm opacity-70">
             Loading basemap...
           </div>
         ) : (
@@ -615,43 +727,56 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             mapStyle={baseStyle as any}
             onLoad={() => setMapReady(true)}
           >
-            {/* ✅ Load the graph (markers + edgeIndex) exactly like your working pages */}
-            {/* Pass empty path so NavModeMap doesn't draw cyan highlights (we draw the teal route ourselves) */}
             <NavModeMap
               path={emptyPath}
               curNavConditions={curNavConditions}
               markers={markers}
               edgeIndex={edgeIndex}
+              showBaseGraph={edgeIndex.length > 0 && routeCoords.length > 0}
             />
 
-            {/* accuracy ring */}
             {accuracyGeoJSON && (
               <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
 
-            {/* route line (segments FC) */}
-            {routeFC && (
-              <Source id="route" type="geojson" data={routeFC as any}>
-                <Layer {...routeLineLayer} />
-              </Source>
+            {routeCoords.length >= 2 && (
+              <RoutePathLayer coordinates={routeCoords} id="share-route" />
             )}
 
-            {/* destination pulse */}
-            {destPos && (
-              <Marker longitude={destPos.lng} latitude={destPos.lat} anchor="center">
-                <div className="relative flex items-center justify-center">
-                  <div className="absolute h-8 w-8 rounded-full bg-red-600 opacity-40 animate-ping" />
-                  <div className="h-4 w-4 rounded-full border-2 border-red-700 bg-brand shadow-lg" />
+            {parkingPos && (
+              <Marker
+                longitude={parkingPos.lng}
+                latitude={parkingPos.lat}
+                anchor="center"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-brand text-[10px] font-bold text-brand-foreground shadow-lg">
+                  P
                 </div>
               </Marker>
             )}
 
-            {/* user marker */}
+            {destPos && (
+              <Marker
+                longitude={destPos.lng}
+                latitude={destPos.lat}
+                anchor="center"
+              >
+                <div className="relative flex items-center justify-center">
+                  <div className="absolute h-8 w-8 animate-ping rounded-full bg-brand-cta opacity-40" />
+                  <div className="h-4 w-4 rounded-full border-2 border-white bg-brand-cta shadow-lg" />
+                </div>
+              </Marker>
+            )}
+
             {userPos && (
-              <Marker longitude={userPos.lng} latitude={userPos.lat} anchor="center">
+              <Marker
+                longitude={userPos.lng}
+                latitude={userPos.lat}
+                anchor="center"
+              >
                 <div
                   title={`You are here (${userPos.lat.toFixed(6)}, ${userPos.lng.toFixed(6)})`}
-                  className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
+                  className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30"
                 />
               </Marker>
             )}
@@ -659,29 +784,340 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         )}
       </div>
 
-      {/* bottom-right status */}
-      <div className="absolute z-30 right-3 bottom-6">
-        <div
-          className={[
-            "rounded-2xl border px-3 py-2 text-xs shadow-xl backdrop-blur",
-            borderMutedClass,
-            surfacePanelClass,
-          ].join(" ")}
-        >
-          <div className="flex items-center gap-2">
-            {routePending ? <Spinner className="h-3.5 w-3.5" /> : null}
-            <span className="text-panel-muted-foreground">
-              {routePending
-                ? "Building route…"
-                : pathKeys.length
-                  ? `${pathKeys.length} edges`
-                  : userPos
-                    ? "No route yet"
-                    : "Waiting for location"}
-            </span>
+      <MapBottomSheet
+        hidden={routeLoadPending && !routeInfo}
+        fitContent
+        maxHeight="88dvh"
+        snapPoints={SHARE_SHEET_SNAP_POINTS}
+        position={sheetPosition}
+        onPositionChange={setSheetPosition}
+        onEffectivePeekChange={setEffectiveSheetPeek}
+        toolbarOverlapPx={mapSheetToolbarOverlapPx}
+        compactHeader={navigating && sheetCollapsed}
+        peekMinVisiblePx={
+          navigating && sheetCollapsed
+            ? mapSheetPeekMinVisibleCompactPx
+            : mapSheetPeekMinVisiblePx
+        }
+        title={
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-70">
+            Shareable Route
+          </p>
+        }
+        subtitle={
+          <>
+            {navigating && sheetCollapsed && routeEta ? (
+              <p className="w-full text-center text-base font-semibold text-brand-cta">
+                {formatRouteDistance(routeEta.distanceMeters)}
+              </p>
+            ) : (
+              <>
+                <p className="truncate text-base font-semibold">
+                  {routeLoadPending
+                    ? "Loading…"
+                    : (routeInfo?.name ?? `Route ${routeIdRaw || "—"}`)}
+                </p>
+                {routeEta && routeCoords.length > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-brand-cta">
+                    {formatRouteEtaSummary(
+                      routeEta.durationSeconds,
+                      routeEta.distanceMeters,
+                    )}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </>
+        }
+        toolbar={
+          routeInfo ? (
+            <div className="pointer-events-none grid w-full grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-end gap-x-2">
+              <button
+                type="button"
+                className={`pointer-events-auto shrink-0 ${mapFloatingActionClass}`}
+                onClick={() => void handleZoom()}
+                aria-label={
+                  isZoomed
+                    ? "Zoom out to campus overview"
+                    : "Zoom in to destination"
+                }
+              >
+                {isZoomed ? (
+                  <Maximize2 className="text-current" size={32} />
+                ) : (
+                  <Minimize2 className="text-current" size={32} />
+                )}
+              </button>
+
+              {navigating && routeSteps.length > 0 ? (
+                <div className="pointer-events-auto flex min-w-0 justify-center">
+                  <NavigationNextTurnBanner
+                    steps={routeSteps}
+                    currentStepIndex={navProgress.currentStepIndex}
+                    distanceToNextMeters={navProgress.distanceToNextMeters}
+                    units={distanceUnits}
+                    tracking={tracking}
+                    onAdvance={navProgress.advanceStep}
+                    className="w-full max-w-[min(15rem,calc(100vw-7rem))]"
+                  />
+                </div>
+              ) : (
+                <div aria-hidden />
+              )}
+
+              <button
+                type="button"
+                className={`pointer-events-auto shrink-0 ${mapFloatingActionClass}`}
+                onClick={() => void handleNavButton()}
+                disabled={routePending || locating}
+                aria-label={
+                  !tracking && !navigating
+                    ? "Show route"
+                    : navigating && tracking
+                      ? "Stop tracking"
+                      : "Start live navigation"
+                }
+              >
+                {!tracking && !navigating ? (
+                  <Route className="text-current" size={32} />
+                ) : null}
+                {navigating ? (
+                  tracking ? (
+                    <NavigationOff className="text-current" size={32} />
+                  ) : (
+                    <Navigation className="text-current" size={32} />
+                  )
+                ) : null}
+              </button>
+            </div>
+          ) : null
+        }
+      >
+        <div className="mt-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
+            Mode
+          </span>
+          <div className="mt-2 flex gap-2">
+            {navModeOptions.map((opt) => {
+              const active =
+                (opt.id === "pedestrian" && curNavConditions.is_pedestrian) ||
+                (opt.id === "vehicular" && curNavConditions.is_vehicular);
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setCurNavConditions((prev) => ({
+                      ...prev,
+                      ...opt.conditions,
+                    }));
+                    if (opt.id === "pedestrian") {
+                      setSelectedParkingId(null);
+                      setParkingPos(null);
+                    }
+                  }}
+                  disabled={routePending}
+                  className={[
+                    "min-h-[44px] flex-1 rounded-[15px] px-4 py-2 text-xs font-semibold uppercase transition",
+                    active
+                      ? "bg-brand-cta text-brand-cta-foreground"
+                      : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground`,
+                    routePending && "opacity-60",
+                  ].join(" ")}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
         </div>
-      </div>
+
+        {showParkingOptions && routeInfo && (
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
+              Parking lot
+            </p>
+            <p className="mt-1 text-xs text-panel-muted-foreground">
+              Drive to parking, then walk to the destination.
+            </p>
+            <div className="mt-2">
+              <ComboboxSelect
+                placeholder="Select parking…"
+                searchPlaceholder="Search parking lots…"
+                value={selectedParkingId}
+                items={parkingComboboxItems}
+                onChange={(id) => setSelectedParkingId(Number(id))}
+                widthClassName="w-full min-h-11"
+                disabled={routePending}
+              />
+            </div>
+          </div>
+        )}
+
+        {curNavConditions.is_pedestrian ? (
+          <details
+            className={`mt-4 rounded-2xl border ${borderMutedClass} ${surfaceSubtleClass}`}
+          >
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold min-h-11">
+              Route options
+            </summary>
+            <div className="space-y-2 border-t border-border px-3 pb-3 pt-2">
+              <Toggle
+                className={
+                  curNavConditions.is_through_building
+                    ? "bg-brand-cta text-brand-cta-foreground w-full min-h-11 justify-start"
+                    : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel w-full min-h-11 justify-start"
+                }
+                aria-label="Through Building"
+                size="sm"
+                variant="outline"
+                pressed={curNavConditions.is_through_building}
+                onPressedChange={(pressed) =>
+                  setCurNavConditions((prev) => ({
+                    ...prev,
+                    is_through_building: pressed,
+                  }))
+                }
+              >
+                {curNavConditions.is_through_building ? (
+                  <CheckIcon className="group-aria-pressed/toggle:fill-foreground" />
+                ) : (
+                  <XIcon className="group-aria-pressed/toggle:fill-foreground" />
+                )}
+                Through Building
+              </Toggle>
+              <Toggle
+                className={
+                  curNavConditions.is_avoid_stairs
+                    ? "bg-brand-cta text-brand-cta-foreground w-full min-h-11 justify-start"
+                    : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel w-full min-h-11 justify-start"
+                }
+                aria-label="Avoid Stairs"
+                size="sm"
+                variant="outline"
+                pressed={curNavConditions.is_avoid_stairs}
+                onPressedChange={(pressed) =>
+                  setCurNavConditions((prev) => ({
+                    ...prev,
+                    is_avoid_stairs: pressed,
+                  }))
+                }
+              >
+                {curNavConditions.is_avoid_stairs ? (
+                  <CheckIcon className="group-aria-pressed/toggle:fill-foreground" />
+                ) : (
+                  <XIcon className="group-aria-pressed/toggle:fill-foreground" />
+                )}
+                Avoid Stairs
+              </Toggle>
+              <Toggle
+                className={
+                  curNavConditions.is_incline_limit
+                    ? "bg-brand-cta text-brand-cta-foreground w-full min-h-11 justify-start"
+                    : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel w-full min-h-11 justify-start"
+                }
+                aria-label="Limit Incline"
+                size="sm"
+                variant="outline"
+                pressed={curNavConditions.is_incline_limit}
+                onPressedChange={(pressed) =>
+                  setCurNavConditions((prev) => ({
+                    ...prev,
+                    is_incline_limit: pressed,
+                  }))
+                }
+              >
+                {curNavConditions.is_incline_limit ? (
+                  <CheckIcon className="group-aria-pressed/toggle:fill-foreground" />
+                ) : (
+                  <XIcon className="group-aria-pressed/toggle:fill-foreground" />
+                )}
+                Limit Incline
+              </Toggle>
+              {curNavConditions.is_incline_limit ? (
+                <div className="rounded-xl border border-border bg-panel px-3 py-3">
+                  <div className="mb-2 text-center text-sm text-muted-foreground">
+                    Max incline: {curNavConditions.max_incline}°
+                  </div>
+                  <Slider
+                    id="share-route-max-incline-slider"
+                    value={[curNavConditions.max_incline]}
+                    onValueChange={(val) => {
+                      setCurNavConditions((prev) => ({
+                        ...prev,
+                        max_incline: val[0],
+                      }));
+                    }}
+                    min={0}
+                    max={MAX_INCLINE}
+                    step={1}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+
+        {routeSteps.length > 0 && routeCoords.length > 0 ? (
+          <NavigationStepsPanel
+            steps={routeSteps}
+            currentStepIndex={navProgress.currentStepIndex}
+            distanceToNextMeters={navProgress.distanceToNextMeters}
+            units={distanceUnits}
+            tracking={tracking}
+            onAdvance={navProgress.advanceStep}
+            hideLiveBanner
+            className="mt-4"
+          />
+        ) : null}
+
+        {routeEta && routeEta.legs.length > 1 && routeCoords.length > 0 ? (
+          <div
+            className={`mt-4 rounded-2xl border px-4 py-3 ${borderMutedClass} ${surfaceSubtleClass}`}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
+              Leg estimates
+            </p>
+            <ul className="mt-2 space-y-2">
+              {routeEta.legs.map((leg, index) => {
+                const parkingName = routeInfo?.parkingLots.find(
+                  (p) => p.id === leg.destinationId,
+                )?.name;
+                const destName =
+                  leg.destinationId === routeInfo?.destinationId
+                    ? routeInfo?.name
+                    : parkingName;
+                const label = destName ?? `Leg ${index + 1}`;
+                return (
+                  <li
+                    key={`${leg.destinationId}-${index}`}
+                    className="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <span className="truncate">{label}</span>
+                    <span className="shrink-0 font-medium text-brand-cta">
+                      ~{formatRouteDuration(leg.durationSeconds)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+
+        <p className="mt-4 text-center text-xs text-panel-muted-foreground">
+          {routePending
+            ? "Building route…"
+            : routeCoords.length
+              ? tracking
+                ? "Live navigation active — follow the teal path."
+                : "Follow the teal path on the map. Tap the navigation button for live tracking."
+              : showParkingOptions && !selectedParkingId
+                ? "Choose parking, then tap the route button above."
+                : userPos
+                  ? "Tap the route button above to build your path."
+                  : "Allow location to build your route."}
+        </p>
+      </MapBottomSheet>
     </div>
   );
 }

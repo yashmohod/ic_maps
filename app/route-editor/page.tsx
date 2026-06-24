@@ -38,6 +38,8 @@ import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import apiClient from "@/lib/apiClient";
 import { panelClass } from "@/lib/panel-classes";
+import { useRequireAdmin } from "@/hooks/use-require-admin";
+import { Spinner } from "@/components/ui/spinner";
 import type {
   LngLat,
   MarkerNode,
@@ -51,6 +53,7 @@ type Destination = MapDestination;
 /** ---------------- Component ---------------- */
 
 export default function RouteEditor(): JSX.Element {
+  const { isPending, allowed } = useRequireAdmin();
   const [viewState, setViewState] = useState<ViewStateLite>({
     longitude: DEFAULT_CENTER.lng,
     latitude: DEFAULT_CENTER.lat,
@@ -75,15 +78,12 @@ export default function RouteEditor(): JSX.Element {
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [inclineInput, setInclineInput] = useState<string>("0");
 
-
-
   // Buildings
   const [destinations, setDestinations] = useState<Destination[]>([]);
-  const [currentDestination, setCurrentDestination] = useState<
-    Destination | null
-  >(null);
+  const [currentDestination, setCurrentDestination] =
+    useState<Destination | null>(null);
   const [curDestinationNodes, setCurDestinationNodes] = useState<Set<number>>(
-    () => new Set()
+    () => new Set(),
   );
 
   type NavModeKey = 0 | 1 | 3 | 4 | 5;
@@ -111,10 +111,9 @@ export default function RouteEditor(): JSX.Element {
     | "delete"
     | "navMode"
     | "destination"
-    ;
+    | "deadFeature";
   const [mode, setMode] = useState<EditorMode>("select");
   const [showNodes, setShowNodes] = useState<boolean>(true);
-
 
   const mapRef = useRef<MapRef | null>(null);
   const modeRef = useRef<EditorMode>(mode);
@@ -125,7 +124,6 @@ export default function RouteEditor(): JSX.Element {
   /** ---------------- Helpers ---------------- */
 
   const findMarker = (id: number) => markers.find((m) => m.id === id) ?? null;
-
 
   /** ---------------- GeoJSON (Edges) ---------------- */
 
@@ -140,7 +138,12 @@ export default function RouteEditor(): JSX.Element {
 
       if (!a || !b) continue;
       let nmc = false;
-      if (mode == "navMode" && a[navModes[curNavMode].param] && b[navModes[curNavMode].param]) nmc = true;
+      if (
+        mode == "navMode" &&
+        a[navModes[curNavMode].param] &&
+        b[navModes[curNavMode].param]
+      )
+        nmc = true;
 
       const edgeId = e.id;
       features.push({
@@ -152,7 +155,13 @@ export default function RouteEditor(): JSX.Element {
           ada: nmc,
           bidir: Boolean(e.biDirectional),
         },
-        geometry: { type: "LineString", coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [a.lng, a.lat],
+            [b.lng, b.lat],
+          ],
+        },
       });
     }
 
@@ -192,7 +201,7 @@ export default function RouteEditor(): JSX.Element {
         "line-opacity": 0.95,
       },
     }),
-    []
+    [],
   );
 
   const oneWayArrows = useMemo<SymbolLayerSpecification>(
@@ -216,13 +225,8 @@ export default function RouteEditor(): JSX.Element {
         "text-halo-width": 1,
       },
     }),
-    []
+    [],
   );
-
-  /** Invalidate the server-side navigation graph after map edits */
-  function invalidateNavGraph() {
-    apiClient.post("/api/map/reload", {}).catch(() => {});
-  }
 
   /** ---------------- Graph ops ---------------- */
 
@@ -236,7 +240,7 @@ export default function RouteEditor(): JSX.Element {
         to,
         biDirectionalEdges,
       });
-      const resp = await req.json()
+      const resp = await req.json();
       if (req.status === 201) {
         setEdgeIndex((list) => [
           ...list,
@@ -248,7 +252,6 @@ export default function RouteEditor(): JSX.Element {
             incline: 0,
           },
         ]);
-        invalidateNavGraph();
       } else {
         toast.error("Edge could not be added.");
       }
@@ -261,12 +264,11 @@ export default function RouteEditor(): JSX.Element {
   async function deleteNode(id: number) {
     try {
       const req = await apiClient.del("/api/map/node", { id });
-      if (req.status !== 200) return toast.error("Feature could not be deleted.");
+      if (req.status !== 200)
+        return toast.error("Feature could not be deleted.");
 
       setMarkers((prev) => prev.filter((m) => m.id !== id));
       setEdgeIndex((list) => list.filter((e) => e.from !== id && e.to !== id));
-      invalidateNavGraph();
-
 
       setCurDestinationNodes((prev) => {
         if (!prev.has(id)) return prev;
@@ -285,14 +287,10 @@ export default function RouteEditor(): JSX.Element {
   async function deleteEdgeByKey(id: number) {
     try {
       const req = await apiClient.del("/api/map/edge", { id });
-      if (req.status !== 200) return toast.error("Feature could not be deleted.");
+      if (req.status !== 200)
+        return toast.error("Feature could not be deleted.");
 
-      setEdgeIndex((list) =>
-        list.filter(
-          (e) => e.id !== id,
-        ),
-      );
-      invalidateNavGraph();
+      setEdgeIndex((list) => list.filter((e) => e.id !== id));
     } catch (err) {
       console.error(err);
       toast.error("Failed to delete edge.");
@@ -301,16 +299,17 @@ export default function RouteEditor(): JSX.Element {
 
   async function setEdgeIncline(edgeId: number, incline: number) {
     try {
-      const req = await apiClient.post("/api/map/incline", { id: edgeId, incline });
+      const req = await apiClient.post("/api/map/incline", {
+        id: edgeId,
+        incline,
+      });
       if (req.status !== 200) {
         toast.error("Could not update incline.");
         return;
       }
       setEdgeIndex((list) =>
         list.map((e) =>
-          e.id === edgeId
-            ? { ...e, id: e.id ?? edgeId, incline }
-            : e,
+          e.id === edgeId ? { ...e, id: e.id ?? edgeId, incline } : e,
         ),
       );
       toast.success("Incline updated.");
@@ -319,10 +318,6 @@ export default function RouteEditor(): JSX.Element {
       toast.error("Failed to update incline.");
     }
   }
-
-
-
-  /** ---------------- NavMode ops (Sets) ---------------- */
 
   async function setNavModeNode(id: number) {
     const nm = navModes[curNavMode];
@@ -333,7 +328,11 @@ export default function RouteEditor(): JSX.Element {
 
     let nextValue = !cur[nm.param];
     try {
-      const req = await apiClient.post("/api/map/setFeatureStatus", { id, value: nextValue, navMode: nm.param })
+      const req = await apiClient.post("/api/map/setFeatureStatus", {
+        id,
+        value: nextValue,
+        navMode: nm.param,
+      });
       const resp = await req.json();
 
       if (req.status === 200) {
@@ -349,7 +348,35 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
+  async function toggleDeadFeatureNode(id: number) {
+    const cur = markers.find((m) => m.id === id);
+    if (!cur) return;
 
+    const nextValue = !cur.isDead;
+    try {
+      const req = await apiClient.post("/api/map/dead-feature", {
+        scope: "outside",
+        id,
+        value: nextValue,
+      });
+      if (req.status !== 200) {
+        toast.error("Could not update dead feature status.");
+        return;
+      }
+      const lists = (await req.json()) as {
+        outsideIds: number[];
+        insideIds: number[];
+      };
+      const deadOutside = new Set(lists.outsideIds);
+      setMarkers((prev) =>
+        prev.map((m) => ({ ...m, isDead: deadOutside.has(m.id) })),
+      );
+      toast.success(nextValue ? "Marked as dead." : "Removed from dead list.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update dead feature.");
+    }
+  }
 
   /** ---------------- Buildings ---------------- */
 
@@ -361,9 +388,13 @@ export default function RouteEditor(): JSX.Element {
     }
     setCurrentDestination(curDest);
     try {
-      const req: any = await apiClient.get(`/api/destination/outsideNode?id=${encodeURIComponent(id)}`);
+      const req: any = await apiClient.get(
+        `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
+      );
       const resp = await req.json();
-      const ids: number[] = (resp?.nodes || [])
+      const ids: number[] = (resp?.nodes || []).map((id: unknown) =>
+        Number(id),
+      );
       setCurDestinationNodes(new Set(ids));
     } catch (err) {
       console.error(err);
@@ -378,7 +409,10 @@ export default function RouteEditor(): JSX.Element {
 
     try {
       if (isSelected) {
-        const req = await apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
+        const req = await apiClient.del("/api/destination/outsideNode", {
+          destId: currentDestination.id,
+          nodeId,
+        });
         if (req.status !== 200) return toast.error("Failed to detach node.");
 
         setCurDestinationNodes((prev) => {
@@ -386,9 +420,11 @@ export default function RouteEditor(): JSX.Element {
           next.delete(nodeId);
           return next;
         });
-
       } else {
-        const req = await apiClient.post("/api/destination/outsideNode", { destId: currentDestination.id, nodeId });
+        const req = await apiClient.post("/api/destination/outsideNode", {
+          destId: currentDestination.id,
+          nodeId,
+        });
 
         if (req.status !== 200) return toast.error("Failed to attach node.");
 
@@ -397,7 +433,6 @@ export default function RouteEditor(): JSX.Element {
           next.add(nodeId);
           return next;
         });
-
       }
     } catch (err) {
       console.error(err);
@@ -411,7 +446,12 @@ export default function RouteEditor(): JSX.Element {
     try {
       const ids = Array.from(curDestinationNodes);
       const results = await Promise.allSettled(
-        ids.map((nid) => apiClient.del("/api/destination/outsideNode", { destId: currentDestination.id, nodeId: nid }))
+        ids.map((nid) =>
+          apiClient.del("/api/destination/outsideNode", {
+            destId: currentDestination.id,
+            nodeId: nid,
+          }),
+        ),
       );
       const failures = results.filter((r) => r.status === "rejected");
       if (failures.length > 0) {
@@ -424,7 +464,6 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
-
   /** ---------------- Map events ---------------- */
 
   //add node
@@ -434,20 +473,26 @@ export default function RouteEditor(): JSX.Element {
       try {
         const req = await apiClient.post("/api/map/node", { lng, lat });
         const resp = await req.json();
-        if (req.status === 201) setMarkers((prev) => [...prev, {
-          id: resp.id,
-          lng,
-          lat,
-          isPedestrian: false,
-          isVehicular: false,
-          isStairs: false,
-          isElevator: false,
-          isBlueLight: false
-        }]);
+        if (req.status === 201)
+          setMarkers((prev) => [
+            ...prev,
+            {
+              id: resp.id,
+              lng,
+              lat,
+              isPedestrian: false,
+              isVehicular: false,
+              isStairs: false,
+              isElevator: false,
+              isBlueLight: false,
+              isDead: false,
+            },
+          ]);
         else {
-          const msg = (resp as { detail?: string; error?: string }).detail
-            ?? (resp as { detail?: string; error?: string }).error
-            ?? "Node could not be added.";
+          const msg =
+            (resp as { detail?: string; error?: string }).detail ??
+            (resp as { detail?: string; error?: string }).error ??
+            "Node could not be added.";
           toast.error(msg);
         }
       } catch (err) {
@@ -469,6 +514,8 @@ export default function RouteEditor(): JSX.Element {
     if (modeRef.current === "delete") return void deleteNode(id);
     if (modeRef.current === "destination") return void addToBuildingGroup(id);
     if (modeRef.current === "navMode") return void setNavModeNode(id);
+    if (modeRef.current === "deadFeature")
+      return void toggleDeadFeatureNode(id);
 
     if (modeRef.current === "select") {
       const cur = selectedRef.current;
@@ -486,7 +533,7 @@ export default function RouteEditor(): JSX.Element {
       const req = await apiClient.put("/api/map/node", { id, lng, lat });
       if (req.status === 200) {
         setMarkers((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, lng, lat } : m))
+          prev.map((m) => (m.id === id ? { ...m, lng, lat } : m)),
         );
       } else {
         toast.error("Node could not be edited.");
@@ -534,18 +581,14 @@ export default function RouteEditor(): JSX.Element {
 
   async function getAllFeature() {
     try {
-      const req = await apiClient.get("/api/map/all")
+      const req = await apiClient.get("/api/map/all");
       if (req.status !== 200) {
         toast.error("Failed to fetch map features!");
         return;
       }
-      const data = await req.json()
-      setMarkers(
-        data.nodes as MarkerNode[]
-      );
-      setEdgeIndex(
-        data.edges as EdgeIndexEntry[]
-      );
+      const data = await req.json();
+      setMarkers(data.nodes as MarkerNode[]);
+      setEdgeIndex(data.edges as EdgeIndexEntry[]);
     } catch (err) {
       console.error(err);
       toast.error("Failed to fetch map features!");
@@ -566,9 +609,6 @@ export default function RouteEditor(): JSX.Element {
       toast.error("Failed to load buildings!");
     }
   }
-
-
-
 
   // Selected edge for toolbox (support both id and key from API)
   const selectedEdge =
@@ -595,8 +635,6 @@ export default function RouteEditor(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
-
   function toggleNodes() {
     setShowNodes((v) => {
       if (v && selectedRef.current) setSelectedId(null);
@@ -604,31 +642,33 @@ export default function RouteEditor(): JSX.Element {
     });
   }
 
-
   /** ---------------- Combobox items ---------------- */
-  const navModeItems: ComboboxItem<NavModeKey>[] =
-    (Object.keys(navModes) as unknown as NavModeKey[]).map((k) => ({
-      value: k,
-      label: navModes[k].name,
-    }));
-
+  const navModeItems: ComboboxItem<NavModeKey>[] = (
+    Object.keys(navModes) as unknown as NavModeKey[]
+  ).map((k) => ({
+    value: k,
+    label: navModes[k].name,
+  }));
 
   const destinationItems = useMemo<ComboboxItem<string | number>[]>(() => {
     return destinations.map((b) => ({ value: b.id, label: b.name }));
   }, [destinations]);
 
-
   /* --------------------- Import / Export ----------------------*/
 
-  function exportMapData() {
+  function exportMapData() {}
 
-  }
-
-  function importMapData() {
-
-  }
+  function importMapData() {}
 
   /** ---------------- Render ---------------- */
+
+  if (isPending || !allowed) {
+    return (
+      <div className="grid h-screen place-items-center bg-background text-foreground">
+        <Spinner className="size-10" />
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-screen w-full bg-background text-foreground">
@@ -637,228 +677,209 @@ export default function RouteEditor(): JSX.Element {
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
       </div>
 
-      {/* Top Toolbar */}
-      <div
-        className={`absolute z-20 top-3 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 ${panelClass}`}
-      >
-        <span className="text-sm font-medium">Mode:</span>
+      {/* Toolbar stack: main mode bar + mode-specific panels below */}
+      <div className="absolute z-20 top-14 left-2 right-2 flex max-w-[calc(100vw-16px)] flex-col items-start gap-2 md:top-3 md:left-3 md:right-auto md:max-w-none">
+        <div
+          className={`w-full rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 md:w-auto ${panelClass}`}
+        >
+          <span className="text-sm font-medium">Mode:</span>
 
-        <button
-          className={`px-2 py-1 rounded ${mode === "select"
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary text-secondary-foreground"
+          <button
+            className={`min-h-11 px-3 py-2 rounded ${
+              mode === "select"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground"
             }`}
-          onClick={() => setMode("select")}
-        >
-          Draw
-        </button>
+            onClick={() => setMode("select")}
+          >
+            Draw
+          </button>
 
-        <button
-          className={`px-2 py-1 rounded ${mode === "edit"
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary text-secondary-foreground"
+          <button
+            className={`min-h-11 px-3 py-2 rounded ${
+              mode === "edit"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground"
             }`}
-          onClick={() => setMode("edit")}
-        >
-          Edit
-        </button>
+            onClick={() => setMode("edit")}
+          >
+            Edit
+          </button>
 
-        <button
-          className={`px-2 py-1 rounded ${mode === "delete"
-            ? "bg-destructive text-white"
-            : "bg-secondary text-secondary-foreground"
+          <button
+            className={`min-h-11 px-3 py-2 rounded ${
+              mode === "delete"
+                ? "bg-destructive text-white"
+                : "bg-secondary text-secondary-foreground"
             }`}
-          onClick={() => setMode("delete")}
-        >
-          Delete
-        </button>
+            onClick={() => setMode("delete")}
+          >
+            Delete
+          </button>
 
-        <button
-          className={`px-2 py-1 rounded ${mode === "navMode"
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary text-secondary-foreground"
+          <button
+            className={`min-h-11 px-3 py-2 rounded ${
+              mode === "navMode"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground"
             }`}
-          onClick={() => setMode("navMode")}
-        >
-          Map Mode Select
-        </button>
+            onClick={() => setMode("navMode")}
+          >
+            Map Mode Select
+          </button>
 
-        <button
-          className={`px-2 py-1 rounded ${mode === "destination"
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary text-secondary-foreground"
+          <button
+            className={`min-h-11 px-3 py-2 rounded ${
+              mode === "destination"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground"
             }`}
-          onClick={() => setMode("destination")}
-        >
-          Building Select
-        </button>
+            onClick={() => setMode("destination")}
+          >
+            Destination Select
+          </button>
 
+          <button
+            className={`min-h-11 px-3 py-2 rounded ${
+              mode === "deadFeature"
+                ? "bg-destructive text-white"
+                : "bg-secondary text-secondary-foreground"
+            }`}
+            onClick={() => setMode("deadFeature")}
+          >
+            Dead Feature
+          </button>
 
-        <div className="mx-2 w-px h-5 bg-border" />
+          <div className="mx-2 w-px h-5 bg-border" />
 
-        {/* <button
-          className="px-2 py-1 rounded bg-primary text-primary-foreground"
-        // onClick={exportMapData}
-        >
-          Export
-        </button>
+          <button
+            className="px-2 py-1 rounded bg-secondary text-secondary-foreground"
+            onClick={toggleNodes}
+          >
+            {showNodes ? "Hide Nodes" : "Show Nodes"}
+          </button>
+        </div>
 
-        <label className="px-2 py-1 rounded bg-secondary text-secondary-foreground cursor-pointer">
-          Import
-          <input
-            type="file"
-            accept=".json,.geojson,application/geo+json"
-            // onChange={importMapData}
-            hidden
-          />
-        </label> */}
+        {mode === "select" && (
+          <div
+            className={`rounded-xl px-3 py-2 flex items-center gap-3 ${panelClass}`}
+          >
+            <span className="text-sm font-medium">Bi Directional Mode</span>
+            <button
+              onClick={() => {
+                setBiDirectionalEdges(!biDirectionalEdges);
+              }}
+              className={`px-2 py-1 rounded ${
+                !biDirectionalEdges
+                  ? "bg-destructive text-white"
+                  : "bg-secondary text-secondary-foreground"
+              }`}
+            >
+              {biDirectionalEdges ? "On" : "Off"}
+            </button>
 
-        <div className="mx-2 w-px h-5 bg-border" />
+            {!biDirectionalEdges ? (
+              <>
+                <div className="mx-2 w-px h-5 bg-border" />
+                <span className="text-sm font-medium">
+                  Note: The order of marker selection decides the direction of
+                  the edge!
+                </span>
+              </>
+            ) : null}
+          </div>
+        )}
 
-        <button
-          className="px-2 py-1 rounded bg-secondary text-secondary-foreground"
-          onClick={toggleNodes}
-        >
-          {showNodes ? "Hide Nodes" : "Show Nodes"}
-        </button>
+        {mode === "select" && selectedEdgeId !== null && (
+          <div
+            className={`rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
+          >
+            <span className="text-sm font-medium">Edge incline (m)</span>
+            <Input
+              type="number"
+              step="0.1"
+              min="-100"
+              max="100"
+              value={inclineInput}
+              onChange={(e) => setInclineInput(e.target.value)}
+              className="w-24 h-8"
+              placeholder="0"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                const value = Number.parseFloat(inclineInput);
+                if (!Number.isFinite(value)) {
+                  toast.error("Enter a valid number.");
+                  return;
+                }
+                void setEdgeIncline(selectedEdgeId, value);
+              }}
+            >
+              Set incline
+            </Button>
+            <button
+              type="button"
+              className="text-sm text-muted-foreground hover:text-foreground"
+              onClick={() => setSelectedEdgeId(null)}
+              aria-label="Close"
+            >
+              Close
+            </button>
+          </div>
+        )}
+
+        {mode === "deadFeature" && (
+          <div className={`rounded-xl px-3 py-2 ${panelClass}`}>
+            <span className="text-sm font-medium">
+              Click nodes to add or remove from the dead feature list. Dead
+              nodes are highlighted in red.
+            </span>
+          </div>
+        )}
+
+        {mode === "navMode" && (
+          <div
+            className={`rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
+          >
+            <ComboboxSelect
+              label="Navigation Mode"
+              placeholder="Select Nav Mode..."
+              items={navModeItems}
+              value={curNavMode}
+              onChange={(v) => {
+                setCurNavMode(v);
+              }}
+              widthClassName="w-[280px]"
+            />
+          </div>
+        )}
+
+        {mode === "destination" && (
+          <div
+            className={`rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
+          >
+            <ComboboxSelect
+              label="Current Building"
+              placeholder="Select building..."
+              items={destinationItems}
+              value={currentDestination?.name ?? ""}
+              onChange={(v) => void handelBuildingSelect(Number(v))}
+              widthClassName="w-[320px]"
+            />
+
+            <button
+              className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground disabled:opacity-50"
+              disabled={!currentDestination || curDestinationNodes.size === 0}
+              onClick={clearAllBuildingNodes}
+              title="Detach all nodes from current building"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
-
-
-
-      {mode === "select" && (
-        <div
-          className={`absolute z-20 top-16 left-3 rounded-xl px-3 py-2 flex items-center gap-3 ${panelClass}`}
-        >
-          <span className="text-sm font-medium">Bi Directional Mode</span>
-          <button
-            onClick={() => {
-              setBiDirectionalEdges(!biDirectionalEdges);
-            }}
-            className={`px-2 py-1 rounded ${!biDirectionalEdges
-              ? "bg-destructive text-white"
-              : "bg-secondary text-secondary-foreground"
-              }`}
-          >
-            {biDirectionalEdges ? "On" : "Off"}
-          </button>
-
-          {!biDirectionalEdges ? (
-            <>
-              <div className="mx-2 w-px h-5 bg-border" />
-              <span className="text-sm font-medium">
-                Note: The order of marker selection decides the direction of the
-                edge!
-              </span>
-            </>
-          ) : null}
-        </div>
-      )}
-
-      {/* Edge incline toolbox: shown in select mode when an edge is selected */}
-      {mode === "select" && selectedEdgeId !== null && (
-        <div
-          className={`absolute z-20 top-40 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
-        >
-          <span className="text-sm font-medium">Edge incline (m)</span>
-          <Input
-            type="number"
-            step="0.1"
-            min="-100"
-            max="100"
-            value={inclineInput}
-            onChange={(e) => setInclineInput(e.target.value)}
-            className="w-24 h-8"
-            placeholder="0"
-          />
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              const value = Number.parseFloat(inclineInput);
-              if (!Number.isFinite(value)) {
-                toast.error("Enter a valid number.");
-                return;
-              }
-              void setEdgeIncline(selectedEdgeId, value);
-            }}
-          >
-            Set incline
-          </Button>
-          <button
-            type="button"
-            className="text-sm text-muted-foreground hover:text-foreground"
-            onClick={() => setSelectedEdgeId(null)}
-            aria-label="Close"
-          >
-            Close
-          </button>
-        </div>
-      )}
-
-      {/* Nav mode selector (left, under toolbar) */}
-      {mode === "navMode" && (
-        <div
-          className={`absolute z-20 top-16 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
-        >
-          <ComboboxSelect
-            label="Navigation Mode"
-            placeholder="Select Nav Mode..."
-            items={navModeItems}
-            value={curNavMode}
-            onChange={(v) => {
-              setCurNavMode(v);
-            }}
-            widthClassName="w-[280px]"
-          />
-          {/* 
-          <button
-            className={`px-2 py-1 rounded ${showOnlyNavMode
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-              }`}
-            onClick={() => setShowOnlyNavMode((v) => !v)}
-            title={
-              showOnlyNavMode ? "Show all edges" : "Show only selected edges"
-            }
-          >
-            {showOnlyNavMode ? "Show All" : "Show Only Selected"}
-          </button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => { console.log(curNavMode) }}
-          >
-            Manage Nav Modes
-          </Button>
-          */}
-        </div>
-      )}
-
-      {/* Building selector (left, under toolbar) */}
-      {mode === "destination" && (
-        <div
-          className={`absolute z-20 top-16 left-3 rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
-        >
-          <ComboboxSelect
-            label="Current Building"
-            placeholder="Select building..."
-            items={destinationItems}
-            value={currentDestination?.name ?? ""}
-            onChange={(v) => void handelBuildingSelect(Number(v))}
-            widthClassName="w-[320px]"
-          />
-
-          <button
-            className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground disabled:opacity-50"
-            disabled={!currentDestination || curDestinationNodes.size === 0}
-            onClick={clearAllBuildingNodes}
-            title="Detach all nodes from current building"
-          >
-            Clear all
-          </button>
-        </div>
-      )}
 
       <div className="w-full h-full">
         {!canRenderMap ? (
@@ -889,21 +910,23 @@ export default function RouteEditor(): JSX.Element {
               <Layer {...(oneWayArrows as any)} />
             </Source>
 
-
             {markers.map((m) => {
               const isBuildingSel =
                 mode === "destination" && curDestinationNodes.has(m.id);
               const isNavModeSet =
                 mode === "navMode" && Boolean(m[navModes[curNavMode].param]);
+              const isDeadFeature = mode === "deadFeature" && m.isDead;
               const isDrawSel = mode === "select" && m.id === selectedId;
-              if (mode === "navMode" && false)
-                return null;
+              if (mode === "navMode" && false) return null;
 
-              const colorClass = isBuildingSel
-                ? "bg-brand-cta"
-                : isNavModeSet || isDrawSel
+              const colorClass =
+                isDrawSel || isNavModeSet || isDeadFeature
                   ? "bg-destructive"
-                  : "bg-brand-cta";
+                  : isBuildingSel
+                    ? "bg-brand-cta"
+                    : m.isDead
+                      ? "bg-destructive/70"
+                      : "bg-brand";
 
               return (
                 <Marker
@@ -953,12 +976,9 @@ export default function RouteEditor(): JSX.Element {
                 />
               </Source>
             )}
-
-
           </ReactMap>
         )}
       </div>
-
     </div>
   );
 }

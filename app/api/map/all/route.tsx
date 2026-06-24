@@ -3,7 +3,6 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { jsonError } from "@/lib/utils";
 
-
 const ROUTE = "/api/map/all";
 export async function GET() {
   try {
@@ -17,6 +16,7 @@ export async function GET() {
       is_vehicular: boolean;
       is_elevator: boolean;
       is_stairs: boolean;
+      is_dead: boolean;
     }>`
     SELECT
       id,
@@ -26,7 +26,8 @@ export async function GET() {
       is_pedestrian,
       is_vehicular,
       is_elevator,
-      is_stairs
+      is_stairs,
+      is_dead
     FROM node_outside;
   `);
 
@@ -40,9 +41,9 @@ export async function GET() {
         isVehicular: Boolean(n.is_vehicular),
         isElevator: Boolean(n.is_elevator),
         isStairs: Boolean(n.is_stairs),
+        isDead: Boolean(n.is_dead),
       };
     });
-
 
     const resultedge = await db.execute(sql<{
       id: number;
@@ -73,8 +74,6 @@ export async function GET() {
         incline: Number(curedge.incline),
       };
     });
-
-
 
     return NextResponse.json({ nodes, edges }, { status: 200 });
   } catch (err: unknown) {

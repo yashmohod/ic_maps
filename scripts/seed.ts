@@ -4,7 +4,7 @@ import { db, pool } from "@/db"; // adjust path alias if needed
 import { createReadStream } from "node:fs";
 import * as readline from "node:readline";
 import path from "node:path";
-import { calcDistance } from "@/lib/utils";
+import { calcDistance } from "@/lib/geo";
 
 type node = {
   id: number;

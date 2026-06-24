@@ -1,8 +1,10 @@
-
 "use client";
 
-import { authClient, type Session } from "@/lib/auth-client";
+import { type Session } from "@/lib/auth-client";
+import { useEffectiveSession } from "@/hooks/use-effective-session";
+import { useIsIcUser } from "@/hooks/use-is-ic-user";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import Link from "next/link";
 import {
   Map as ReactMap,
   Source,
@@ -17,18 +19,12 @@ import maplibregl from "maplibre-gl";
 import { Button } from "@/components/ui/button";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  IconPlus,
-  IconPencil,
-  IconQrcode,
-  IconShare2,
-  IconTrash,
-} from "@tabler/icons-react";
-
+import { Pencil, Plus, QrCode, Share2, Trash2 } from "lucide-react";
 
 import {
   surfacePanelClass,
@@ -36,6 +32,11 @@ import {
   borderMutedClass,
   selectBaseClass,
   selectFocusClass,
+  touchTargetClass,
+  mapPageClass,
+  mapBottomSheetClass,
+  sheetHandleClass,
+  safeAreaTopClass,
 } from "@/lib/panel-classes";
 import type {
   SimpleMarkerNode,
@@ -58,6 +59,7 @@ type Destination = {
   lng?: number;
   description?: string;
   polygon?: string;
+  isParkingLot?: boolean;
 };
 
 /**
@@ -72,7 +74,8 @@ function normalizeToFeatureCollection(
 ): GeoJSONFeatureCollection | null {
   if (!input) return null;
 
-  if (input.type === "FeatureCollection") return input as GeoJSONFeatureCollection;
+  if (input.type === "FeatureCollection")
+    return input as GeoJSONFeatureCollection;
 
   if (input.type === "Feature") {
     return {
@@ -115,7 +118,10 @@ export default function CustomRoutesPage(): JSX.Element {
     [],
   );
 
-  const { data: session, error, refetch, isPending } = authClient.useSession();
+  const { session, error, refetch, isPending, isSignedIn, devMode } =
+    useEffectiveSession();
+  const { isIcUser } = useIsIcUser();
+  const canUseCustomRoutes = isIcUser || devMode;
   const [viewState, setViewState] = useState<{
     longitude: number;
     latitude: number;
@@ -152,7 +158,6 @@ export default function CustomRoutesPage(): JSX.Element {
       }));
     }
   }
-
 
   /** ---------------- Data ---------------- */
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -197,8 +202,24 @@ export default function CustomRoutesPage(): JSX.Element {
     setEditingRouteId(route.id);
     setEditName(route.name ?? "");
     setEditDestinationId(route.destinationId ?? "");
+    setEditParkingLotIds([]);
 
-    // Preview destination on map when opening editor
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/shareableroute?id=${encodeURIComponent(String(route.id))}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data.parkingLots)) {
+          setEditParkingLotIds(
+            data.parkingLots.map((p: { id: number }) => Number(p.id)),
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+
     void showBuilding(String(route.destinationId));
   }
 
@@ -216,7 +237,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
     if (!name) return toast.error("Route name is required.");
     if (!destinationId) return toast.error("Destination is required.");
-    if (!session) return toast.error("Please sign in");
+    if (!canUseCustomRoutes) return toast.error("Please sign in");
 
     setSaveEditPendingId(routeId);
     try {
@@ -228,6 +249,7 @@ export default function CustomRoutesPage(): JSX.Element {
           routeId,
           name,
           destinationIds: [Number(destinationId)],
+          parkingLotIds: editParkingLotIds,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -250,12 +272,13 @@ export default function CustomRoutesPage(): JSX.Element {
   /** ---------------- New Route form ---------------- */
   const [newName, setNewName] = useState("");
   const [newRouteId, setNewRouteId] = useState("");
+  const [newParkingLotIds, setNewParkingLotIds] = useState<number[]>([]);
+  const [editParkingLotIds, setEditParkingLotIds] = useState<number[]>([]);
 
   /** ---------------- Share URL + QR ---------------- */
   const shareUrl = useMemo(() => {
     if (!shareRoute) return "";
     if (typeof window === "undefined") return "";
-    // ✅ CHANGED: /route/:id
     return `${window.location.origin}/route/${shareRoute.id}`;
   }, [shareRoute]);
 
@@ -305,7 +328,7 @@ export default function CustomRoutesPage(): JSX.Element {
   }
 
   async function getRoutes() {
-    if (!session) {
+    if (!canUseCustomRoutes) {
       setRoutesFirstLoadPending(false);
       return;
     }
@@ -317,7 +340,11 @@ export default function CustomRoutesPage(): JSX.Element {
       const data = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(data?.routes)) {
         const mapped: Route[] = data.routes.map(
-          (r: { id: number; name: string; destinations: Array<{ id: number; name: string }> }) => {
+          (r: {
+            id: number;
+            name: string;
+            destinations: Array<{ id: number; name: string }>;
+          }) => {
             const first = r.destinations?.[0];
             return {
               id: r.id,
@@ -359,10 +386,12 @@ export default function CustomRoutesPage(): JSX.Element {
 
     if (!name) return toast.error("Route name is required.");
     if (!destinationId) return toast.error("Destination is required.");
-    if (!session) return toast.error("Please sign in");
+    if (!canUseCustomRoutes) return toast.error("Please sign in");
 
     if (wouldDuplicateRoute(name, destinationId)) {
-      return toast.error("That route already exists (same name + destination).");
+      return toast.error(
+        "That route already exists (same name + destination).",
+      );
     }
 
     setCreatePending(true);
@@ -374,6 +403,7 @@ export default function CustomRoutesPage(): JSX.Element {
         body: JSON.stringify({
           name,
           destinationIds: [Number(destinationId)],
+          parkingLotIds: newParkingLotIds,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -459,6 +489,25 @@ export default function CustomRoutesPage(): JSX.Element {
   /** ---------------- Destinations list ---------------- */
   const [destinations, setDestinations] = useState<Destination[]>();
 
+  const buildingDestinations = useMemo(
+    () => destinations?.filter((d) => !d.isParkingLot) ?? [],
+    [destinations],
+  );
+
+  const parkingDestinations = useMemo(
+    () => destinations?.filter((d) => d.isParkingLot) ?? [],
+    [destinations],
+  );
+
+  function toggleParkingLot(
+    id: number,
+    setter: React.Dispatch<React.SetStateAction<number[]>>,
+  ) {
+    setter((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
   async function getDestinations() {
     try {
       const res = await fetch("/api/destination");
@@ -490,11 +539,14 @@ export default function CustomRoutesPage(): JSX.Element {
     setPreviewDestId(String(destinationId));
 
     // 1) Polygon + lat/lng from destinations array (already loaded)
-    const dest = destinations?.find((d) => String(d.id) === String(destinationId));
+    const dest = destinations?.find(
+      (d) => String(d.id) === String(destinationId),
+    );
     if (dest) {
       const polyStr = dest.polygon;
       try {
-        const parsed = typeof polyStr === "string" ? JSON.parse(polyStr) : polyStr;
+        const parsed =
+          typeof polyStr === "string" ? JSON.parse(polyStr) : polyStr;
         const normalized = normalizeToFeatureCollection(parsed);
         setCurDestinationPoly(normalized);
       } catch {
@@ -514,36 +566,25 @@ export default function CustomRoutesPage(): JSX.Element {
       setPreviewDestPos(null);
     }
 
-    // 2) Fetch node ids for this destination, then get coords from map/node
+    // 2) Building entrance nodes from nodeDetails
     setBuildingNodesPending(true);
     try {
       const nodeRes = await fetch(
         `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
       );
       const nodeData = await nodeRes.json().catch(() => ({}));
-      const nodeIds: number[] = Array.isArray(nodeData?.nodes) ? nodeData.nodes : [];
-      if (nodeIds.length === 0) {
-        setBuildingNodes([]);
-        return;
-      }
-      const mapRes = await fetch("/api/map/node");
-      const mapData = await mapRes.json().catch(() => ({}));
-      const rows = Array.isArray(mapData?.rows) ? mapData.rows : [];
-      const idSet = new Set(nodeIds);
-      const cleaned: MarkerNode[] = rows
-        .filter((row: { id?: number }) => row.id != null && idSet.has(Number(row.id)))
-        .map((row: { id: number; lat: number; lng: number }) => ({
+      const details: Array<{ id: number; lat: number; lng: number }> =
+        Array.isArray(nodeData?.nodeDetails) ? nodeData.nodeDetails : [];
+      const cleaned: MarkerNode[] = details
+        .map((row) => ({
           id: row.id,
           lng: Number(row.lng),
           lat: Number(row.lat),
         }))
-        .filter(
-          (n: MarkerNode) =>
-            Number.isFinite(n.lng) && Number.isFinite(n.lat),
-        );
+        .filter((n) => Number.isFinite(n.lng) && Number.isFinite(n.lat));
       setBuildingNodes(cleaned);
     } catch (err) {
-      console.error("getAllBuildingNodes failed", err);
+      console.error("Building nodes failed", err);
       toast.error("Building nodes did not load!");
       setBuildingNodes([]);
     } finally {
@@ -569,10 +610,16 @@ export default function CustomRoutesPage(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!session) return;
+    if (!canUseCustomRoutes) return;
     void getRoutes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, refetch]);
+  }, [canUseCustomRoutes, refetch]);
+
+  useEffect(() => {
+    if (!canUseCustomRoutes && !isPending) {
+      setRoutesFirstLoadPending(false);
+    }
+  }, [canUseCustomRoutes, isPending]);
 
   /** ---------------- Modal styles ---------------- */
   const modalOverlay = [
@@ -601,22 +648,39 @@ export default function CustomRoutesPage(): JSX.Element {
   ].join(" ");
 
   /** ---------------- Render ---------------- */
+  if (isPending) {
+    return (
+      <div
+        className={`grid place-items-center bg-background text-foreground ${mapPageClass}`}
+      >
+        <Spinner className="size-10" />
+      </div>
+    );
+  }
+
   return (
-    <div className="relative h-screen w-full bg-background text-foreground">
-      <div className="absolute left-3 top-3 z-40 flex items-center gap-2">
+    <div
+      className={`relative flex w-full flex-col bg-background text-foreground md:block ${mapPageClass}`}
+    >
+      <div
+        className={`absolute left-3 z-40 flex items-center gap-2 ${safeAreaTopClass}`}
+      >
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
       </div>
 
-      {/* Routes panel */}
-      <div className="absolute left-3 top-20 z-30 w-[380px] max-w-[calc(100vw-24px)]">
+      {/* Routes panel — mobile: bottom sheet style; desktop: left panel */}
+      <div className="relative z-30 order-2 max-h-[55vh] w-full overflow-y-auto md:absolute md:left-3 md:top-20 md:max-h-[calc(100dvh-6rem)] md:w-[380px] md:max-w-[calc(100vw-24px)]">
         <div
           className={[
-            "rounded-3xl border shadow-2xl backdrop-blur",
-            surfacePanelClass,
-            borderMutedClass,
+            "shadow-2xl backdrop-blur",
+            mapBottomSheetClass,
+            "md:rounded-3xl md:border",
           ].join(" ")}
         >
+          <div className="md:hidden">
+            <div className={sheetHandleClass} aria-hidden="true" />
+          </div>
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -636,7 +700,54 @@ export default function CustomRoutesPage(): JSX.Element {
 
             {/* List */}
             <div className="mt-4 space-y-2">
-              {routesFirstLoadPending && (
+              {!canUseCustomRoutes ? (
+                <div
+                  className={[
+                    "rounded-2xl border p-4 text-sm",
+                    borderMutedClass,
+                    surfaceSubtleClass,
+                  ].join(" ")}
+                >
+                  {isSignedIn ? (
+                    <>
+                      <p className="font-medium">
+                        Shareable routes are for @ithaca.edu accounts
+                      </p>
+                      <p className="mt-1 text-panel-muted-foreground">
+                        Sign in with your Ithaca College Microsoft account to
+                        create and manage campus routes.
+                      </p>
+                      <Button
+                        asChild
+                        variant="outline"
+                        className={`mt-4 w-full ${touchTargetClass}`}
+                      >
+                        <Link href="/">Back to map</Link>
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium">
+                        Sign in to manage shareable routes
+                      </p>
+                      <p className="mt-1 text-panel-muted-foreground">
+                        {IC_SSO_REQUIRED_MESSAGE} Create, edit, and share campus
+                        routes with a link or QR code.
+                      </p>
+                      <Button
+                        asChild
+                        className={`mt-4 w-full bg-brand-cta text-brand-cta-foreground ${touchTargetClass}`}
+                      >
+                        <Link href="/account/login?callbackUrl=/customRoute">
+                          Sign in
+                        </Link>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
+
+              {canUseCustomRoutes && routesFirstLoadPending && (
                 <div
                   className={[
                     "rounded-2xl border p-4 text-sm",
@@ -652,19 +763,22 @@ export default function CustomRoutesPage(): JSX.Element {
                 </div>
               )}
 
-              {!routesFirstLoadPending && routes.length === 0 && (
-                <div
-                  className={[
-                    "rounded-2xl border p-4 text-sm",
-                    borderMutedClass,
-                    surfaceSubtleClass,
-                  ].join(" ")}
-                >
-                  No routes yet. Create one.
-                </div>
-              )}
+              {canUseCustomRoutes &&
+                !routesFirstLoadPending &&
+                routes.length === 0 && (
+                  <div
+                    className={[
+                      "rounded-2xl border p-4 text-sm",
+                      borderMutedClass,
+                      surfaceSubtleClass,
+                    ].join(" ")}
+                  >
+                    No routes yet. Create one.
+                  </div>
+                )}
 
-              {!routesFirstLoadPending &&
+              {canUseCustomRoutes &&
+                !routesFirstLoadPending &&
                 routes.map((route) => {
                   const isEditing = editingRouteId === route.id;
                   const isSavingThisEdit = saveEditPendingId === route.id;
@@ -677,7 +791,7 @@ export default function CustomRoutesPage(): JSX.Element {
                           "bg-panel-muted/40 hover:bg-panel-muted/60 transition",
                           borderMutedClass,
                           previewDestId === String(route.destinationId) &&
-                          "ring-2 ring-brand-cta/30",
+                            "ring-2 ring-brand-cta/30",
                         ]
                           .filter(Boolean)
                           .join(" ")}
@@ -699,7 +813,8 @@ export default function CustomRoutesPage(): JSX.Element {
                           <div className="flex shrink-0 items-center gap-2">
                             <button
                               className={[
-                                "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
+                                "inline-flex items-center gap-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition min-h-11",
+                                touchTargetClass,
                                 borderMutedClass,
                                 "bg-panel hover:bg-panel-muted",
                               ].join(" ")}
@@ -709,13 +824,14 @@ export default function CustomRoutesPage(): JSX.Element {
                               }}
                               title="Share"
                             >
-                              <IconShare2 size={14} />
+                              <Share2 size={14} />
                               Share
                             </button>
 
                             <button
                               className={[
-                                "inline-flex h-8 w-8 items-center justify-center rounded-full border transition",
+                                "inline-flex items-center justify-center rounded-full border transition",
+                                touchTargetClass,
                                 borderMutedClass,
                                 isEditing
                                   ? "bg-panel-muted"
@@ -727,12 +843,13 @@ export default function CustomRoutesPage(): JSX.Element {
                               }}
                               title={isEditing ? "Close editor" : "Edit route"}
                             >
-                              <IconPencil size={16} />
+                              <Pencil size={16} />
                             </button>
 
                             <button
                               className={[
-                                "inline-flex h-8 w-8 items-center justify-center rounded-full border transition",
+                                "inline-flex items-center justify-center rounded-full border transition",
+                                touchTargetClass,
                                 borderMutedClass,
                                 "bg-panel hover:bg-panel-muted",
                               ].join(" ")}
@@ -742,7 +859,7 @@ export default function CustomRoutesPage(): JSX.Element {
                               }}
                               title="Delete route"
                             >
-                              <IconTrash size={16} />
+                              <Trash2 size={16} />
                             </button>
                           </div>
                         </div>
@@ -813,7 +930,7 @@ export default function CustomRoutesPage(): JSX.Element {
                                   <option value="">
                                     Search campus buildings…
                                   </option>
-                                  {destinations?.map((d) => (
+                                  {buildingDestinations.map((d) => (
                                     <option
                                       key={String(d.id)}
                                       value={String(d.id)}
@@ -823,38 +940,76 @@ export default function CustomRoutesPage(): JSX.Element {
                                   ))}
                                 </select>
                               </div>
+                            </div>
 
-                              <div className="mt-3 flex gap-2">
-                                <Button
-                                  variant="secondary"
-                                  className={[
-                                    "h-9 flex-1 rounded-2xl",
-                                    "bg-panel hover:bg-panel-muted",
-                                    `border ${borderMutedClass}`,
-                                    "disabled:opacity-60",
-                                  ].join(" ")}
-                                  onClick={() => saveEdit(route.id)}
-                                  disabled={isSavingThisEdit}
-                                >
-                                  {isSavingThisEdit ? (
-                                    <span className="inline-flex items-center gap-2">
-                                      <Spinner />
-                                      Saving…
-                                    </span>
-                                  ) : (
-                                    "Save changes"
-                                  )}
-                                </Button>
-
-                                <Button
-                                  variant="ghost"
-                                  className="h-9 flex-1 rounded-2xl hover:bg-panel disabled:opacity-60"
-                                  onClick={cancelEdit}
-                                  disabled={isSavingThisEdit}
-                                >
-                                  Cancel
-                                </Button>
+                            {parkingDestinations.length > 0 && (
+                              <div>
+                                <label className="text-xs font-medium text-panel-muted-foreground">
+                                  Parking options (guest picks one)
+                                </label>
+                                <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+                                  {parkingDestinations.map((d) => {
+                                    const id = Number(d.id);
+                                    const checked =
+                                      editParkingLotIds.includes(id);
+                                    return (
+                                      <label
+                                        key={String(d.id)}
+                                        className={[
+                                          "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2 text-sm",
+                                          borderMutedClass,
+                                        ].join(" ")}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="size-4 accent-brand-cta"
+                                          checked={checked}
+                                          onChange={() =>
+                                            toggleParkingLot(
+                                              id,
+                                              setEditParkingLotIds,
+                                            )
+                                          }
+                                          disabled={isSavingThisEdit}
+                                        />
+                                        {d.name}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
                               </div>
+                            )}
+
+                            <div className="mt-3 flex gap-2">
+                              <Button
+                                variant="secondary"
+                                className={[
+                                  "min-h-11 flex-1 rounded-2xl",
+                                  "bg-panel hover:bg-panel-muted",
+                                  `border ${borderMutedClass}`,
+                                  "disabled:opacity-60",
+                                ].join(" ")}
+                                onClick={() => saveEdit(route.id)}
+                                disabled={isSavingThisEdit}
+                              >
+                                {isSavingThisEdit ? (
+                                  <span className="inline-flex items-center gap-2">
+                                    <Spinner />
+                                    Saving…
+                                  </span>
+                                ) : (
+                                  "Save changes"
+                                )}
+                              </Button>
+
+                              <Button
+                                variant="ghost"
+                                className="min-h-11 flex-1 rounded-2xl hover:bg-panel disabled:opacity-60"
+                                onClick={cancelEdit}
+                                disabled={isSavingThisEdit}
+                              >
+                                Cancel
+                              </Button>
                             </div>
                           </div>
                         </div>
@@ -865,26 +1020,27 @@ export default function CustomRoutesPage(): JSX.Element {
             </div>
 
             {/* Footer actions */}
-            {!newModalOpen ? (
+            {canUseCustomRoutes && !newModalOpen ? (
               <div className="mt-4 flex gap-2">
                 <Button
                   variant="secondary"
                   className={[
-                    "h-9 flex-1 rounded-2xl",
+                    "flex-1 rounded-2xl min-h-11",
+                    touchTargetClass,
                     "bg-panel hover:bg-panel-muted",
                     `border ${borderMutedClass}`,
                   ].join(" ")}
                   onClick={openNewModal}
                   disabled={createPending || saveEditPendingId != null}
                 >
-                  <IconPlus size={16} className="mr-2" />
+                  <Plus size={16} className="mr-2" />
                   New
                 </Button>
               </div>
             ) : null}
 
             {/* Inline Create panel */}
-            {newModalOpen && (
+            {canUseCustomRoutes && newModalOpen && (
               <div
                 className={[
                   "mt-3 rounded-3xl border p-4 shadow-lg",
@@ -947,7 +1103,7 @@ export default function CustomRoutesPage(): JSX.Element {
                         disabled={createPending}
                       >
                         <option value="">Search campus buildings…</option>
-                        {destinations?.map((d) => (
+                        {buildingDestinations.map((d) => (
                           <option key={String(d.id)} value={String(d.id)}>
                             {d.name}
                           </option>
@@ -955,11 +1111,45 @@ export default function CustomRoutesPage(): JSX.Element {
                       </select>
                     </div>
 
-                    <div className="mt-3 flex gap-2">
+                    {parkingDestinations.length > 0 && (
+                      <div className="mt-3">
+                        <label className="text-xs font-medium text-panel-muted-foreground">
+                          Parking options (guest picks one)
+                        </label>
+                        <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+                          {parkingDestinations.map((d) => {
+                            const id = Number(d.id);
+                            const checked = newParkingLotIds.includes(id);
+                            return (
+                              <label
+                                key={String(d.id)}
+                                className={[
+                                  "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2 text-sm",
+                                  borderMutedClass,
+                                ].join(" ")}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-brand-cta"
+                                  checked={checked}
+                                  onChange={() =>
+                                    toggleParkingLot(id, setNewParkingLotIds)
+                                  }
+                                  disabled={createPending}
+                                />
+                                {d.name}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="sticky bottom-0 mt-3 flex gap-2 bg-inherit pt-2">
                       <Button
                         variant="secondary"
                         className={[
-                          "h-9 flex-1 rounded-2xl",
+                          "min-h-11 flex-1 rounded-2xl",
                           "bg-panel hover:bg-panel-muted",
                           `border ${borderMutedClass}`,
                           "disabled:opacity-60",
@@ -989,7 +1179,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
                       <Button
                         variant="ghost"
-                        className="h-9 flex-1 rounded-2xl hover:bg-panel disabled:opacity-60"
+                        className="min-h-11 flex-1 rounded-2xl hover:bg-panel disabled:opacity-60"
                         onClick={() => setNewModalOpen(false)}
                         disabled={createPending}
                       >
@@ -1013,8 +1203,8 @@ export default function CustomRoutesPage(): JSX.Element {
         </div>
       </div>
 
-      {/* Map */}
-      <div className="h-full w-full">
+      {/* Map — full-bleed on desktop; top half on mobile */}
+      <div className="order-1 h-[45vh] min-h-[240px] w-full md:absolute md:inset-0 md:h-full">
         {!canRenderMap ? (
           <div className="h-full w-full grid place-items-center text-sm opacity-70">
             Loading basemap...
@@ -1052,7 +1242,11 @@ export default function CustomRoutesPage(): JSX.Element {
 
             {/* Building polygon */}
             {previewDestId && curDestinationPoly && (
-              <Source id="boundary" type="geojson" data={curDestinationPoly as any}>
+              <Source
+                id="boundary"
+                type="geojson"
+                data={curDestinationPoly as any}
+              >
                 <Layer
                   id="boundary-fill"
                   type="fill"
@@ -1077,19 +1271,21 @@ export default function CustomRoutesPage(): JSX.Element {
               <Source
                 id="nodes-loading-dot"
                 type="geojson"
-                data={{
-                  type: "FeatureCollection",
-                  features: [
-                    {
-                      type: "Feature",
-                      properties: {},
-                      geometry: {
-                        type: "Point",
-                        coordinates: [previewDestPos.lng, previewDestPos.lat],
+                data={
+                  {
+                    type: "FeatureCollection",
+                    features: [
+                      {
+                        type: "Feature",
+                        properties: {},
+                        geometry: {
+                          type: "Point",
+                          coordinates: [previewDestPos.lng, previewDestPos.lat],
+                        },
                       },
-                    },
-                  ],
-                } as any}
+                    ],
+                  } as any
+                }
               >
                 <Layer
                   id="nodes-loading-dot-layer"
@@ -1110,7 +1306,9 @@ export default function CustomRoutesPage(): JSX.Element {
       {confirmDeleteOpen && deleteRoute && (
         <div
           className={modalOverlay}
-          onMouseDown={() => (deletePending ? null : setConfirmDeleteOpen(false))}
+          onMouseDown={() =>
+            deletePending ? null : setConfirmDeleteOpen(false)
+          }
         >
           <div className={modalCard} onMouseDown={(e) => e.stopPropagation()}>
             <div className={modalHeader}>
@@ -1143,7 +1341,7 @@ export default function CustomRoutesPage(): JSX.Element {
                 <Button
                   variant="secondary"
                   className={[
-                    "h-9 flex-1 rounded-2xl",
+                    "min-h-11 flex-1 rounded-2xl",
                     "bg-panel hover:bg-panel-muted",
                     `border ${borderMutedClass}`,
                     "disabled:opacity-60",
@@ -1163,7 +1361,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
                 <Button
                   variant="ghost"
-                  className="h-9 flex-1 rounded-2xl hover:bg-panel disabled:opacity-60"
+                  className="min-h-11 flex-1 rounded-2xl hover:bg-panel disabled:opacity-60"
                   onClick={() => setConfirmDeleteOpen(false)}
                   disabled={deletePending}
                 >
@@ -1238,7 +1436,7 @@ export default function CustomRoutesPage(): JSX.Element {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs font-medium text-panel-muted-foreground">
-                    <IconQrcode size={16} />
+                    <QrCode size={16} />
                     QR Code
                   </div>
                 </div>
@@ -1266,7 +1464,7 @@ export default function CustomRoutesPage(): JSX.Element {
                   <Button
                     variant="secondary"
                     className={[
-                      "h-9 flex-1 rounded-2xl",
+                      "min-h-11 flex-1 rounded-2xl",
                       "bg-panel hover:bg-panel-muted",
                       `border ${borderMutedClass}`,
                     ].join(" ")}
@@ -1278,7 +1476,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
                   <Button
                     variant="ghost"
-                    className="h-9 flex-1 rounded-2xl hover:bg-panel"
+                    className="min-h-11 flex-1 rounded-2xl hover:bg-panel"
                     onClick={() => setShareModalOpen(false)}
                   >
                     Done

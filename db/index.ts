@@ -27,10 +27,15 @@ export { pool };
 
 export async function getUser(userId: string) {
   if (!userId) return null;
-  return {
-    id: userId,
-    name: userId.split("@")[0] || "Guest",
-    email: userId.includes("@") ? userId : `${userId}@local.icmaps`,
-    isAdmin: false,
-  };
+  const [row] = await db
+    .select({
+      id: schema.user.id,
+      name: schema.user.name,
+      email: schema.user.email,
+      isAdmin: schema.user.isAdmin,
+    })
+    .from(schema.user)
+    .where(eq(schema.user.id, userId))
+    .limit(1);
+  return row ?? null;
 }

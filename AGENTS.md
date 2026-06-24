@@ -48,8 +48,14 @@ Use this file to onboard quickly. Do not edit the plan file (e.g. `codebase_refa
 
 ## API and auth
 
-- **Mutating routes** (POST/PUT/PATCH/DELETE) and sensitive GETs (e.g. user list) **must** check session and return 401 when unauthenticated. Pattern: `const session = await auth.api.getSession({ headers: await headers() }); if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });`
+- **Public (no login)**: Building/destination reads (`GET /api/destination`, `GET /api/destination/outsideNode`, floorplan reads), routing (`POST /api/map/navigateTo`), and shareable route views (`GET /api/shareableroute?id=…`).
+- **Session required**: Favorites (`/api/favorites`), favorite trips (`/api/destination-chains`), account profile updates (`PATCH /api/users/[id]` for self), and shareable route management (`POST/PUT/DELETE /api/shareableroute`, `GET /api/shareableroute/all`).
+- **Admin required**: Map/destination mutations (nodes, edges, buildings), user list (`GET /api/users`), admin flag changes (`PATCH /api/users/[id]` `isAdmin`), and user deletion (`DELETE /api/users/[id]`).
+- **DEV Mode**: In development only, set `DEV_Mode=true` in `.env` to skip all page/API auth guards (`lib/dev-mode.ts`; client receives the flag via `DevModeProvider` in `app/layout.tsx`). Ignored when `NODE_ENV=production`.
+- **Page guards**: `/account/setting` requires login; editor pages require admin. Login and signup stay public.
+- **Pattern**: `const session = await auth.api.getSession({ headers: await headers() }); if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });`
 - **Input validation**: Use Zod on `/api/map/navigateTo`, `/api/map/edge`, `/api/users`, etc. Return 400 with error details on failure.
+- **`POST /api/map/navigateTo`**: Session-optional for read-only routing (destId/lat/lng/viaDestIds). Guests on `/route/[id]` can start navigation without logging in.
 - **Graph invalidation**: After creating/updating/deleting nodes or edges in the route editor, the app calls `invalidateNavGraph()` (POST `/api/map/reload`) so navigation uses fresh data.
 
 ---

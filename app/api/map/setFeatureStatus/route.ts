@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { db } from "@/db/index";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
+import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
 import { jsonError, parseBoolean, parseId } from "@/lib/utils";
 
 const navModeColumnMap = {
@@ -18,10 +18,8 @@ const navModeColumnMap = {
 const ROUTE = "/api/map/setFeatureStatus";
 
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -50,6 +48,7 @@ export async function POST(req: Request) {
       return jsonError("Feature not found", 404);
     }
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({ id, navMode: navModeRaw, value }, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} POST] error`, err);

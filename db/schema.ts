@@ -150,10 +150,12 @@ export const nodeInside = pgTable(
     is_stairs: boolean("is_stairs").notNull().default(false),
     is_ramp: boolean("is_ramp").notNull().default(false),
     is_group: boolean("is_group").notNull().default(false),
+    is_dead: boolean("is_dead").notNull().default(false),
     image_url: text("image_url"),
     incline: doublePrecision("incline").default(0),
     width: doublePrecision("width"),
     height: doublePrecision("height"),
+    name: text("name"),
 
     destination_id: integer("destination_id")
       .notNull()
@@ -213,6 +215,7 @@ export const nodeOutside = pgTable(
     is_elevator: boolean("is_elevator").notNull().default(false),
     is_stairs: boolean("is_stairs").notNull().default(false),
     is_blue_light: boolean("is_blue_light").notNull().default(false),
+    is_dead: boolean("is_dead").notNull().default(false),
 
     // PostGIS point: x = lng, y = lat
     location: geometry("location", {
@@ -308,10 +311,24 @@ export const route_destination = pgTable(
   (t) => [primaryKey({ columns: [t.route_id, t.destination_id] })],
 );
 
+export const route_parking_lot = pgTable(
+  "route_parking_lot",
+  {
+    route_id: integer("route_id")
+      .notNull()
+      .references(() => route.id, { onDelete: "cascade" }),
+    destination_id: integer("destination_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.route_id, t.destination_id] })],
+);
+
 // Relations for route ↔ route_destination ↔ destination
 export const routeRelations = relations(route, ({ one, many }) => ({
   user: one(user, { fields: [route.user_id], references: [user.id] }),
   route_destinations: many(route_destination),
+  route_parking_lots: many(route_parking_lot),
 }));
 
 export const routeDestinationRelations = relations(
@@ -330,7 +347,103 @@ export const routeDestinationRelations = relations(
 
 export const destinationRelations = relations(destination, ({ many }) => ({
   route_destinations: many(route_destination),
+  route_parking_lots: many(route_parking_lot),
 }));
+
+export const routeParkingLotRelations = relations(
+  route_parking_lot,
+  ({ one }) => ({
+    route: one(route, {
+      fields: [route_parking_lot.route_id],
+      references: [route.id],
+    }),
+    destination: one(destination, {
+      fields: [route_parking_lot.destination_id],
+      references: [destination.id],
+    }),
+  }),
+);
+
+export const user_favorite_destination = pgTable(
+  "user_favorite_destination",
+  {
+    user_id: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    destination_id: integer("destination_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.user_id, t.destination_id] })],
+);
+
+export const destination_chain = pgTable(
+  "destination_chain",
+  {
+    id: serial("id").primaryKey(),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 256 }).notNull(),
+    created_at: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique("destination_chain_user_name_unique").on(t.user_id, t.name)],
+);
+
+export const destination_chain_stop = pgTable(
+  "destination_chain_stop",
+  {
+    chain_id: integer("chain_id")
+      .notNull()
+      .references(() => destination_chain.id, { onDelete: "cascade" }),
+    destination_id: integer("destination_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+    sort_order: integer("sort_order").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.chain_id, t.sort_order] })],
+);
+
+export const userFavoriteDestinationRelations = relations(
+  user_favorite_destination,
+  ({ one }) => ({
+    user: one(user, {
+      fields: [user_favorite_destination.user_id],
+      references: [user.id],
+    }),
+    destination: one(destination, {
+      fields: [user_favorite_destination.destination_id],
+      references: [destination.id],
+    }),
+  }),
+);
+
+export const destinationChainRelations = relations(
+  destination_chain,
+  ({ one, many }) => ({
+    user: one(user, {
+      fields: [destination_chain.user_id],
+      references: [user.id],
+    }),
+    stops: many(destination_chain_stop),
+  }),
+);
+
+export const destinationChainStopRelations = relations(
+  destination_chain_stop,
+  ({ one }) => ({
+    chain: one(destination_chain, {
+      fields: [destination_chain_stop.chain_id],
+      references: [destination_chain.id],
+    }),
+    destination: one(destination, {
+      fields: [destination_chain_stop.destination_id],
+      references: [destination.id],
+    }),
+  }),
+);
 
 //join table: destination <-> nodes
 export const destinationNode = pgTable(
@@ -350,6 +463,41 @@ export const destinationNode = pgTable(
   ],
 );
 
+export const bugReport = pgTable("bug_report", {
+  id: serial("id").primaryKey(),
+  text: text("text").notNull(),
+  photo_path: text("photo_path"),
+  created_at: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+export const accessibilityReport = pgTable("accessibility_report", {
+  id: serial("id").primaryKey(),
+  text: text("text").notNull(),
+  photo_path: text("photo_path"),
+  created_at: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  user_id: text("user_id").references(() => user.id, { onDelete: "set null" }),
+});
+
+export const routeReport = pgTable("route_report", {
+  id: serial("id").primaryKey(),
+  text: text("text"),
+  location_type: varchar("location_type", { length: 32 }).notNull(),
+  destination_id: integer("destination_id").references(() => destination.id, {
+    onDelete: "set null",
+  }),
+  feature_type: varchar("feature_type", { length: 32 }),
+  node_outside_id: integer("node_outside_id").references(() => nodeOutside.id, {
+    onDelete: "set null",
+  }),
+  node_inside_id: integer("node_inside_id").references(() => nodeInside.id, {
+    onDelete: "set null",
+  }),
+  pin_lat: doublePrecision("pin_lat"),
+  pin_lng: doublePrecision("pin_lng"),
+  created_at: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  user_id: text("user_id").references(() => user.id, { onDelete: "set null" }),
+});
+
 export const schema = {
   user,
   session,
@@ -362,7 +510,14 @@ export const schema = {
   destination,
   route,
   route_destination,
+  route_parking_lot,
   destinationNode,
+  user_favorite_destination,
+  destination_chain,
+  destination_chain_stop,
+  bugReport,
+  accessibilityReport,
+  routeReport,
 };
 export type User = InferSelectModel<typeof user>;
 export type NodeOutside = InferSelectModel<typeof nodeOutside>;
@@ -373,4 +528,15 @@ export type EdgeInside = InferSelectModel<typeof edgeInside>;
 export type Destination = InferSelectModel<typeof destination>;
 export type Route = InferSelectModel<typeof route>;
 export type RouteDestination = InferSelectModel<typeof route_destination>;
+export type RouteParkingLot = InferSelectModel<typeof route_parking_lot>;
 export type DestinationNode = InferSelectModel<typeof destinationNode>;
+export type UserFavoriteDestination = InferSelectModel<
+  typeof user_favorite_destination
+>;
+export type DestinationChain = InferSelectModel<typeof destination_chain>;
+export type DestinationChainStop = InferSelectModel<
+  typeof destination_chain_stop
+>;
+export type BugReport = InferSelectModel<typeof bugReport>;
+export type AccessibilityReport = InferSelectModel<typeof accessibilityReport>;
+export type RouteReport = InferSelectModel<typeof routeReport>;

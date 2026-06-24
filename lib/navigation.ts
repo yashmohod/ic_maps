@@ -1,20 +1,40 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { calcDistance, heuristic } from "./utils";
+import {
+  durationSecondsFromDistance,
+  lineStringLengthMeters,
+  STAIR_DISTANCE_FACTOR,
+} from "@/lib/route-metrics";
 
 import "server-only";
 import {
-  type NodeOutside,
+  type DestinationNode,
+  type EdgeInside,
   type EdgeOutside,
   type NodeInside,
-  type EdgeInside,
-  DestinationNode,
+  type NodeOutside,
 } from "@/db/schema";
 import { MinHeap } from "./minHeap";
+import {
+  buildGraph,
+  endNodeFromPath,
+  nextNodeFromEdge,
+  through_building_bfs_with_cost,
+  type Graph,
+  type NavConditions,
+} from "@/lib/navigation-graph";
+
+export type { Graph, NavConditions } from "@/lib/navigation-graph";
+export {
+  buildGraph,
+  endNodeFromPath,
+  nextNodeFromEdge,
+  reconstructIndoorPath,
+} from "@/lib/navigation-graph";
 
 const FILE = "navigation.ts";
-function logReturnNull(_reason: string): void {
-}
+function logReturnNull(_reason: string): void {}
 
 /** Closest outdoor node to a (lat, lng) point (for outdoor routing), filtered by nav mode. */
 export async function closestNode(
@@ -37,98 +57,6 @@ export async function closestNode(
 }
 
 ///////////////////////////////// --  Graph -- ////////////////////////////////////////
-export type NavConditions = {
-  is_pedestrian: boolean;
-  is_vehicular: boolean;
-  is_avoid_stairs: boolean;
-  is_incline_limit: boolean;
-  is_through_building: boolean;
-  max_incline: number;
-};
-
-export type Graph = {
-  nodesInside: Map<number, NodeInside>;
-  nodesOutside: Map<number, NodeOutside>;
-  adjInside: Map<number, Array<{ to: number; edgeId: number }>>;
-  adjOutside: Map<
-    number,
-    Array<{ to: number; distance: number; edgeId: number; incline: number }>
-  >;
-  /** destination_id -> one representative node_outside_id (for reference) */
-  buildingNodeOutside: Map<number, number>;
-  /** Outdoor node IDs that are building entrances (in destination_node). Used to trigger through-building. */
-  buildingEntranceNodeIds: Set<number>;
-  version: number; // for debugging / cache sanity
-};
-
-export function buildGraph(
-  _node_inside: NodeInside[],
-  _edge_inside: EdgeInside[],
-  node_outside: NodeOutside[],
-  edge_outside: EdgeOutside[],
-  destinationNodeOutside: DestinationNode[],
-  version = 1,
-): Graph {
-  const nodeMapInside = new Map<number, NodeInside>();
-  for (const n of _node_inside) nodeMapInside.set(n.id, n);
-
-  const nodeMapOutside = new Map<number, NodeOutside>();
-  for (const n of node_outside) nodeMapOutside.set(n.id, n);
-
-  const adjInside = new Map<number, Array<{ to: number; edgeId: number }>>();
-  const adjOutside = new Map<
-    number,
-    Array<{ to: number; distance: number; edgeId: number; incline: number }>
-  >();
-  const pushOutside = (
-    from: number,
-    to: number,
-    distance: number,
-    edgeId: number,
-    incline: number,
-  ) => {
-    const arr = adjOutside.get(from) ?? [];
-    arr.push({ to, distance, edgeId, incline });
-    adjOutside.set(from, arr);
-  };
-
-  for (const e of edge_outside) {
-    const from = e.node_a_id;
-    const to = e.node_b_id;
-    const distance = e.distance ?? 0;
-    pushOutside(from, to, distance, e.id, e.incline);
-    if (e.bi_directional) pushOutside(to, from, distance, e.id, e.incline);
-  }
-
-  const pushInside = (from: number, to: number, edgeId: number) => {
-    const arr = adjInside.get(from) ?? [];
-    arr.push({ to, edgeId });
-    adjInside.set(from, arr);
-  };
-
-  for (const e of _edge_inside) {
-    const from = e.node_a_id;
-    const to = e.node_b_id;
-    pushInside(from, to, e.id);
-    if (e.bi_directional) pushInside(to, from, e.id);
-  }
-
-  const buildingNodeOutside = new Map<number, number>();
-  const buildingEntranceNodeIds = new Set<number>();
-  for (const cur of destinationNodeOutside) {
-    buildingNodeOutside.set(cur.destination_id, cur.node_outside_id);
-    buildingEntranceNodeIds.add(cur.node_outside_id);
-  }
-  return {
-    nodesInside: nodeMapInside,
-    nodesOutside: nodeMapOutside,
-    buildingNodeOutside,
-    buildingEntranceNodeIds,
-    adjInside,
-    adjOutside,
-    version,
-  };
-}
 
 type GraphStore = {
   graph: Graph | null;
@@ -266,6 +194,246 @@ export async function navigate(
   return path;
 }
 
+function dedupeCoords(coords: [number, number][]): [number, number][] {
+  if (coords.length <= 1) return coords;
+  const out: [number, number][] = [coords[0]];
+  for (let i = 1; i < coords.length; i++) {
+    const prev = out[out.length - 1];
+    const cur = coords[i];
+    if (prev[0] !== cur[0] || prev[1] !== cur[1]) out.push(cur);
+  }
+  return out;
+}
+
+export type RouteLegMetrics = {
+  destinationId: number;
+  distanceMeters: number;
+  durationSeconds: number;
+};
+
+export type RouteMetrics = {
+  distanceMeters: number;
+  durationSeconds: number;
+  legs: RouteLegMetrics[];
+};
+
+function pathDistanceMeters(
+  graph: Graph,
+  startNodeId: number,
+  path: number[],
+  navConditions: NavConditions,
+): number {
+  if (path.length === 0) return 0;
+
+  let total = 0;
+  let currentNodeId = startNodeId;
+
+  for (const edgeId of path) {
+    const neighbors = graph.adjOutside.get(currentNodeId);
+    const edge = neighbors?.find((n) => n.edgeId === edgeId);
+    if (!edge) {
+      currentNodeId =
+        nextNodeFromEdge(graph, currentNodeId, edgeId) ?? currentNodeId;
+      continue;
+    }
+
+    const nextId = edge.to;
+    const fromNode = graph.nodesOutside.get(currentNodeId);
+    const toNode = graph.nodesOutside.get(nextId);
+    let segment = edge.distance;
+
+    if (
+      navConditions.is_pedestrian &&
+      (fromNode?.is_stairs || toNode?.is_stairs)
+    ) {
+      segment *= STAIR_DISTANCE_FACTOR;
+    }
+
+    total += segment;
+    currentNodeId = nextId;
+  }
+
+  const geometry = pathToRouteGeometry(graph, path, startNodeId);
+  const geometryLength = lineStringLengthMeters(geometry.coordinates);
+  return Math.max(total, geometryLength);
+}
+
+export function computePathMetrics(
+  graph: Graph,
+  startNodeId: number,
+  path: number[],
+  navConditions: NavConditions,
+): RouteMetrics {
+  const distanceMeters = pathDistanceMeters(
+    graph,
+    startNodeId,
+    path,
+    navConditions,
+  );
+  const durationSeconds = durationSecondsFromDistance(
+    distanceMeters,
+    navConditions,
+  );
+  return { distanceMeters, durationSeconds, legs: [] };
+}
+
+export async function computeRouteMetrics(
+  startNodeId: number,
+  destIds: number[],
+  navConditions: NavConditions,
+): Promise<RouteMetrics | null> {
+  if (destIds.length === 0) {
+    return { distanceMeters: 0, durationSeconds: 0, legs: [] };
+  }
+
+  const graph = await getGraph();
+  const usePedestrianFinalLeg =
+    navConditions.is_vehicular && destIds.length > 1;
+
+  if (destIds.length === 1) {
+    const segment = await navigate(startNodeId, destIds[0]!, navConditions);
+    if (!segment) return null;
+    const metrics = computePathMetrics(
+      graph,
+      startNodeId,
+      segment,
+      navConditions,
+    );
+    return {
+      ...metrics,
+      legs: [
+        {
+          destinationId: destIds[0]!,
+          distanceMeters: metrics.distanceMeters,
+          durationSeconds: metrics.durationSeconds,
+        },
+      ],
+    };
+  }
+
+  let currentStart = startNodeId;
+  const legs: RouteLegMetrics[] = [];
+  let totalDistance = 0;
+  let totalDuration = 0;
+
+  for (let i = 0; i < destIds.length; i++) {
+    const destId = destIds[i]!;
+    const legNav =
+      usePedestrianFinalLeg && i === destIds.length - 1
+        ? pedestrianNavConditions(navConditions)
+        : navConditions;
+
+    const segment = await navigate(currentStart, destId, legNav);
+    if (!segment) return null;
+
+    const legMetrics = computePathMetrics(graph, currentStart, segment, legNav);
+    legs.push({
+      destinationId: destId,
+      distanceMeters: legMetrics.distanceMeters,
+      durationSeconds: legMetrics.durationSeconds,
+    });
+    totalDistance += legMetrics.distanceMeters;
+    totalDuration += legMetrics.durationSeconds;
+    currentStart = endNodeFromPath(graph, currentStart, segment);
+  }
+
+  return {
+    distanceMeters: totalDistance,
+    durationSeconds: totalDuration,
+    legs,
+  };
+}
+
+export function pathToRouteGeometry(
+  graph: Graph,
+  path: number[],
+  startNodeId: number,
+): { type: "LineString"; coordinates: [number, number][] } {
+  const coords: [number, number][] = [];
+  const startNode = graph.nodesOutside.get(startNodeId);
+  if (startNode) coords.push([startNode.lng, startNode.lat]);
+
+  let currentNodeId = startNodeId;
+  for (const edgeId of path) {
+    const nextId = nextNodeFromEdge(graph, currentNodeId, edgeId);
+    if (nextId == null) continue;
+    const nextNode = graph.nodesOutside.get(nextId);
+    if (nextNode) coords.push([nextNode.lng, nextNode.lat]);
+    currentNodeId = nextId;
+  }
+
+  return { type: "LineString", coordinates: dedupeCoords(coords) };
+}
+
+export async function navigateMulti(
+  startOutdoorNodeId: number,
+  destIds: number[],
+  navConditions: NavConditions,
+): Promise<number[] | null> {
+  if (destIds.length === 0) return [];
+
+  let currentStart = startOutdoorNodeId;
+  const fullPath: number[] = [];
+
+  for (const destId of destIds) {
+    const segment = await navigate(currentStart, destId, navConditions);
+    if (segment === null) return null;
+    fullPath.push(...segment);
+    const graph = await getGraph();
+    currentStart = endNodeFromPath(graph, currentStart, segment);
+  }
+
+  return fullPath;
+}
+
+/** Vehicular legs for all but the last destination; final leg uses pedestrian routing. */
+export function pedestrianNavConditions(base: NavConditions): NavConditions {
+  return {
+    ...base,
+    is_pedestrian: true,
+    is_vehicular: false,
+    is_through_building: true,
+  };
+}
+
+export async function navigateMultiWithPedestrianFinalLeg(
+  startOutdoorNodeId: number,
+  destIds: number[],
+  vehicularConditions: NavConditions,
+): Promise<number[] | null> {
+  if (destIds.length === 0) return [];
+  if (destIds.length === 1) {
+    return navigate(startOutdoorNodeId, destIds[0]!, vehicularConditions);
+  }
+
+  const vehicularLegDests = destIds.slice(0, -1);
+  const finalDestId = destIds[destIds.length - 1]!;
+
+  let currentStart = startOutdoorNodeId;
+  const fullPath: number[] = [];
+
+  const vehPath = await navigateMulti(
+    currentStart,
+    vehicularLegDests,
+    vehicularConditions,
+  );
+  if (vehPath === null) return null;
+  fullPath.push(...vehPath);
+
+  const graph = await getGraph();
+  currentStart = endNodeFromPath(graph, currentStart, vehPath);
+
+  const pedPath = await navigate(
+    currentStart,
+    finalDestId,
+    pedestrianNavConditions(vehicularConditions),
+  );
+  if (pedPath === null) return null;
+  fullPath.push(...pedPath);
+
+  return fullPath;
+}
+
 type AStarNode = { f: number; g: number; id: number };
 
 async function aStar(
@@ -308,6 +476,7 @@ async function aStar(
     for (const neighbor of neighbors) {
       const neighborNode = graph.nodesOutside.get(neighbor.to);
       if (!neighborNode) continue;
+      if (neighborNode.is_dead) continue;
 
       let check = false;
 
@@ -345,91 +514,36 @@ async function aStar(
     if (
       navConditions.is_through_building &&
       navConditions.is_pedestrian &&
-      graph.buildingEntranceNodeIds.has(cur.id)
+      graph.buildingEntranceNodeIds.has(cur.id) &&
+      !curNode.is_dead
     ) {
-      const possibleBuildingExits = through_building_simple_bfs(
+      const possibleBuildingExits = through_building_bfs_with_cost(
         graph,
         cur.id,
         navConditions,
       );
       if (!possibleBuildingExits) continue;
-      for (const exit of possibleBuildingExits) {
-        const exitNode = graph.nodesOutside.get(exit);
+      for (const { exitOutsideId, indoorCost } of possibleBuildingExits) {
+        const exitNode = graph.nodesOutside.get(exitOutsideId);
         if (!exitNode) continue;
 
-        const gNew =
-          cur.g +
-          calcDistance(curNode.lat, curNode.lng, exitNode.lat, exitNode.lng);
-        const bestG = gScore.get(exit);
+        const gNew = cur.g + indoorCost;
+        const bestG = gScore.get(exitOutsideId);
         if (bestG !== undefined && gNew >= bestG) continue;
 
-        pathTree.set(exit, cur.id);
-        gScore.set(exit, gNew);
+        pathTree.set(exitOutsideId, cur.id);
+        gScore.set(exitOutsideId, gNew);
         const h = heuristic(
           exitNode.lat,
           exitNode.lng,
           destinationPos.lat,
           destinationPos.lng,
         );
-        openSet.add({ f: gNew + h, g: gNew, id: exit });
+        openSet.add({ f: gNew + h, g: gNew, id: exitOutsideId });
       }
     }
   }
 
   logReturnNull("aStar exhausted openSet without reaching any end node");
   return null;
-}
-
-function through_building_simple_bfs(
-  graph: Graph,
-  buildingEntranceOutside: number,
-  nav: NavConditions,
-): number[] {
-  let start: NodeInside | undefined;
-  for (const [, node] of graph.nodesInside) {
-    if (node.node_outside_id === buildingEntranceOutside) {
-      start = node;
-      break;
-    }
-  }
-  if (!start) return [];
-
-  const exits = new Set<number>();
-
-  const queue: number[] = [start.id];
-  let head = 0;
-
-  // Here "visited" means "seen (maybe rejected)"
-  const visited = new Set<number>([start.id]);
-  const allowed = (n: any) =>
-    (nav.is_avoid_stairs ? !n.is_stairs : true) &&
-    (nav.is_incline_limit ? (n.incline ?? 0) <= nav.max_incline : true);
-
-  while (head < queue.length) {
-    const nodeId = queue[head++];
-
-    const neighbors = graph.adjInside.get(nodeId);
-    if (!neighbors) continue;
-
-    for (const edge of neighbors) {
-      const nextId = edge.to;
-      if (visited.has(nextId)) continue;
-
-      const nextNode = graph.nodesInside.get(nextId);
-      if (!nextNode) continue;
-
-      if (!allowed(nextNode)) continue;
-
-      visited.add(nextId);
-
-      if (nextNode.is_exit && nextNode.node_outside_id != null) {
-        if (nextNode.node_outside_id !== buildingEntranceOutside) {
-          exits.add(nextNode.node_outside_id);
-        }
-      }
-
-      queue.push(nextId);
-    }
-  }
-  return [...exits];
 }

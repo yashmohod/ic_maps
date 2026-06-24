@@ -33,6 +33,9 @@ import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
+import { useRequireAdmin } from "@/hooks/use-require-admin";
+import { Spinner } from "@/components/ui/spinner";
+import { mapPageClass } from "@/lib/panel-classes";
 
 import type { ViewStateLite } from "@/lib/types/map";
 
@@ -114,6 +117,7 @@ const MapSection = React.memo(function MapSection({
 /** ---------------- Main Component ---------------- */
 
 export default function BuildingEditor(): JSX.Element {
+  const { isPending, allowed } = useRequireAdmin();
   const mapRef = useRef<MapRef | null>(null);
   const buildingsRef = useRef<BuildingRow[]>([]);
   const { isDark, mapStyle } = useMapStyle();
@@ -199,7 +203,20 @@ export default function BuildingEditor(): JSX.Element {
         ...prev,
         isParkingLot: v,
         ...(v ? { openTime: "00:00:00", closeTime: "23:59:59" } : {}),
-      }))
+      }));
+      setBuildings((prev) => {
+        const next = prev.map((b) =>
+          b.id === currentBuilding.id
+            ? {
+                ...b,
+                isParkingLot: v,
+                ...(v ? { openTime: "00:00:00", closeTime: "23:59:59" } : {}),
+              }
+            : b,
+        );
+        buildingsRef.current = next;
+        return next;
+      });
     } catch (err) {
       console.error(err);
       toast.error("Failed to update parking lot status.");
@@ -316,6 +333,14 @@ export default function BuildingEditor(): JSX.Element {
           old.map((p) => (Number(p.properties?.destId) === feature?.properties?.destId ? feature : p)),
         );
         setCurrentBuilding((prev) => { return { ...prev, id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon } });
+        const destId = Number(feature?.properties?.destId);
+        setBuildings((prev) => {
+          const next = prev.map((b) =>
+            b.id === destId ? { ...b, name: feature?.properties?.name as string, lat, lng, polygon } : b,
+          );
+          buildingsRef.current = next;
+          return next;
+        });
       } else {
         toast.error(resp?.error ?? "Failed to update polygon");
       }
@@ -361,14 +386,20 @@ export default function BuildingEditor(): JSX.Element {
     if (!currentBuilding.id) return toast.error("Select a building first.");
     let curBuildingCopy = currentBuilding;
     try {
-      const resp: any = await apiClient.put("/api/destination", { ...curBuildingCopy })
-      if (resp) {
-        toast.success("Name Updated!");
-        // keep local list in sync
-
-      } else {
-        toast.error(resp?.message ?? "Name could not be updated!");
+      const resp = await apiClient.put("/api/destination", { ...curBuildingCopy });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        toast.error(data?.error ?? "Name could not be updated!");
+        return;
       }
+      toast.success("Name Updated!");
+      setBuildings((prev) => {
+        const next = prev.map((b) =>
+          b.id === curBuildingCopy.id ? { ...b, ...curBuildingCopy } : b,
+        );
+        buildingsRef.current = next;
+        return next;
+      });
     } catch (err) {
       console.error(err);
       toast.error("Failed to save building info.");
@@ -376,8 +407,16 @@ export default function BuildingEditor(): JSX.Element {
   };
 
   /** Render */
+  if (isPending || !allowed) {
+    return (
+      <div className={`grid place-items-center bg-background text-foreground ${mapPageClass}`}>
+        <Spinner className="size-10" />
+      </div>
+    );
+  }
+
   return (
-    <div className="relative h-screen w-full bg-background text-foreground">
+    <div className={`relative w-full bg-background text-foreground ${mapPageClass}`}>
       <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />

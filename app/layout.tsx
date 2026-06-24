@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToasterClient } from "@/components/toaster-client";
+import { DevModeProvider } from "@/components/dev-mode-provider";
+import { isDevModeEnabled } from "@/lib/dev-mode";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -20,6 +21,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "IC Map",
   description: "Handy tool to navigate IC",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
 };
 
 export default function RootLayout({
@@ -42,18 +49,20 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <SidebarProvider defaultOpen={false}>
-            <ToasterClient />
+        <DevModeProvider enabled={isDevModeEnabled()}>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <SidebarProvider defaultOpen={false}>
+              <ToasterClient />
 
-            {children}
-          </SidebarProvider>
-        </ThemeProvider>
+              {children}
+            </SidebarProvider>
+          </ThemeProvider>
+        </DevModeProvider>
       </body>
     </html>
   );

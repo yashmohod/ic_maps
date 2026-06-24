@@ -11,16 +11,12 @@ import {
 } from "@/components/ui/avatar"
 import React from "react";
 import { authClient, type Session } from "@/lib/auth-client"
-import {
-  IconSettings,
-  IconLogin2,
-} from "@tabler/icons-react";
+import { LogIn, Moon, Settings, Sun } from "lucide-react";
 interface profileOptions {
   session: Session;
 }
 import { useRouter } from "next/navigation";
 import { useAppTheme } from "@/hooks/use-app-theme";
-import { IconMoon, IconSun } from "@tabler/icons-react";
 
 export default function ProfileOptions({ session }: profileOptions) {
   const router = useRouter();
@@ -44,10 +40,10 @@ export default function ProfileOptions({ session }: profileOptions) {
         <div className="grid gap-2  w-full text-center">
           <h1 className="mb-2"> Hi {session.user.name} !</h1>
           <Button onClick={toggleTheme} aria-label={label}>{isDark ?
-            <>  Light Mode<IconSun size={18} /></>
-            : <>  Dark Mode<IconMoon size={18} /></>}</Button>
-          <Button onClick={() => { router.replace("/account/setting"); }}>Settings <IconSettings /></Button>
-          <Button onClick={async () => { await authClient.signOut(); }}>Logout <IconLogin2 /></Button>
+            <>  Light Mode<Sun size={18} /></>
+            : <>  Dark Mode<Moon size={18} /></>}</Button>
+          <Button onClick={() => { router.replace("/account/setting"); }}>Settings <Settings size={18} /></Button>
+          <Button onClick={async () => { await authClient.signOut(); }}>Logout <LogIn size={18} /></Button>
         </div>
       </PopoverContent>
     </Popover>

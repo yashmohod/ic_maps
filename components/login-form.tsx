@@ -28,22 +28,35 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Spinner } from "@/components/ui/spinner"
-import React, { useState} from "react";
+import { Spinner } from "@/components/ui/spinner";
+import React, { useState } from "react";
 import { authClient } from "@/lib/auth-client";
-const formSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-});
+import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
+import { signInWithMicrosoft } from "@/lib/microsoft-sign-in";
+const formSchema = z
+  .object({
+    email: z.string().email(),
+    password: z.string(),
+  })
+  .superRefine((values, ctx) => {
+    if (isIthacaEduEmail(values.email)) return;
+    if (values.password.length < 8) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Password must be at least 8 characters",
+        path: ["password"],
+      });
+    }
+  });
 
 export function LoginForm({
   className,
+  callbackUrl = "/",
   ...props
-}: React.ComponentProps<"div">) {
-
-  const [loading,setLoading]= useState(false);
+}: React.ComponentProps<"div"> & { callbackUrl?: string }) {
+  const [loading, setLoading] = useState(false);
+  const [microsoftLoading, setMicrosoftLoading] = useState(false);
   const router = useRouter();
-  // 1. Define your form.
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -51,28 +64,52 @@ export function LoginForm({
       password: "",
     },
   });
-
-  // 2. Define a submit handler.
+  const emailValue = form.watch("email");
+  const requiresMicrosoftSso = isIthacaEduEmail(emailValue ?? "");
   async function onSubmit(values: z.infer<typeof formSchema>) {
+    if (isIthacaEduEmail(values.email)) {
+      toast.message(IC_SSO_REQUIRED_MESSAGE);
+      setMicrosoftLoading(true);
+      await signInWithMicrosoft({
+        callbackURL: callbackUrl,
+        loginHint: values.email.trim(),
+      });
+      setMicrosoftLoading(false);
+      return;
+    }
+
     setLoading(true);
 
-  const { data, error } = await authClient.signIn.email({
-    email: values.email,
-    password: values.password,
-    // if supported in your setup:
-    rememberMe: true,
-  });
+    const { data, error } = await authClient.signIn.email({
+      email: values.email,
+      password: values.password,
+      // if supported in your setup:
+      rememberMe: true,
+    });
 
-  if (error) {
-    toast.error(error.message);
+    if (error) {
+      toast.error(error.message);
+      setLoading(false);
+      return;
+    }
+
+    toast.success("Logged in successfully");
+    router.replace(callbackUrl);
+    router.refresh(); // optional
     setLoading(false);
-    return;
   }
 
-  toast.success("Logged in successfully");
-  router.replace("/");
-  router.refresh(); // optional
-  setLoading(false);  }
+  async function handleMicrosoftSignIn() {
+    setMicrosoftLoading(true);
+    try {
+      await signInWithMicrosoft({
+        callbackURL: callbackUrl,
+        loginHint: requiresMicrosoftSso ? emailValue.trim() : undefined,
+      });
+    } finally {
+      setMicrosoftLoading(false);
+    }
+  }
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -84,9 +121,16 @@ export function LoginForm({
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-                <FieldGroup>
+              <FieldGroup>
                 <Field>
-                  <Button variant="outline" type="button">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    className="w-full"
+                    disabled={microsoftLoading || loading}
+                    aria-busy={microsoftLoading}
+                    onClick={() => void handleMicrosoftSignIn()}
+                  >
                     <Image
                       src="/assets/ic_logo_up.png"
                       alt="Ithaca College logo"
@@ -103,6 +147,11 @@ export function LoginForm({
                     />
                     IC Net Pass
                   </Button>
+                  {requiresMicrosoftSso ? (
+                    <p className="mt-2 text-center text-xs text-brand-cta">
+                      {IC_SSO_REQUIRED_MESSAGE}
+                    </p>
+                  ) : null}
                   {/* <Button variant="outline" type="button">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                     <path
@@ -122,41 +171,82 @@ export function LoginForm({
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Email <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
+                        <FormLabel>
+                          Email{" "}
+                          <span className="text-xs text-muted-foreground">
+                            (required)
+                          </span>
+                        </FormLabel>
                         <FormControl>
-                          <Input placeholder="name@example.com" autoComplete="email" aria-required="true" {...field} />
+                          <Input
+                            placeholder="name@example.com"
+                            autoComplete="email"
+                            aria-required="true"
+                            {...field}
+                          />
                         </FormControl>
-                        <div aria-live="polite"><FormMessage /></div>
+                        <div aria-live="polite">
+                          <FormMessage />
+                        </div>
                       </FormItem>
                     )}
                   />
                 </Field>
-                <Field>
-                  <FormField
-                    control={form.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Password <span className="text-xs text-muted-foreground">(required)</span></FormLabel>
+                {!requiresMicrosoftSso ? (
+                  <Field>
+                    <FormField
+                      control={form.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            Password{" "}
+                            <span className="text-xs text-muted-foreground">
+                              (required)
+                            </span>
+                          </FormLabel>
 
-                        <FormControl>
-                          <Input placeholder="**********" type="password" autoComplete="current-password" aria-required="true" {...field} />
-                        </FormControl>
-                        <div aria-live="polite"><FormMessage /></div>
-                        <a
-                          href="/account/forgot-password"
-                          className="ml-auto text-sm underline-offset-4 hover:underline"
-                        >
-                          Forgot your password?
-                        </a>
-                      </FormItem>
-                    )}
-                  />
-                </Field>
+                          <FormControl>
+                            <Input
+                              placeholder="**********"
+                              type="password"
+                              autoComplete="current-password"
+                              aria-required="true"
+                              {...field}
+                            />
+                          </FormControl>
+                          <div aria-live="polite">
+                            <FormMessage />
+                          </div>
+                          <a
+                            href="/account/forgot-password"
+                            className="ml-auto text-sm underline-offset-4 hover:underline"
+                          >
+                            Forgot your password?
+                          </a>
+                        </FormItem>
+                      )}
+                    />
+                  </Field>
+                ) : null}
                 <Field>
-                  <Button type="submit" disabled={loading} aria-busy={loading} className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90">{loading ? <><Spinner /><span className="sr-only">Loading</span></> : null}Login</Button>
+                  <Button
+                    type="submit"
+                    disabled={loading || microsoftLoading}
+                    aria-busy={loading}
+                    className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
+                  >
+                    {loading ? (
+                      <>
+                        <Spinner />
+                        <span className="sr-only">Loading</span>
+                      </>
+                    ) : null}
+                    {requiresMicrosoftSso ? "Continue with Microsoft" : "Login"}
+                  </Button>
                   <FieldDescription className="text-center">
-                    Don&apos;t have an account? <a href="/account/signup">Sign up</a>
+                    Don&apos;t have an account?{" "}
+                    <a href="/account/signup">Sign up</a>
                   </FieldDescription>
                 </Field>
               </FieldGroup>

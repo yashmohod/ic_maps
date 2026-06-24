@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "react-day-picker/style.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -144,7 +145,9 @@
   --brand-foreground: rgb(255 255 255);
 
   --brand-accent: rgb(53 213 164); /* #35D5A4 – unified with brand-cta (teal) */
-  --brand-accent-foreground: rgb(0 60 113); /* #003c71 – IC navy for 6.4:1 contrast */
+  --brand-accent-foreground: rgb(
+    0 60 113
+  ); /* #003c71 – IC navy for 6.4:1 contrast */
 
   /* IC CTA (teal from IC design system, dark navy foreground for 6.4:1 contrast) */
   --brand-cta: rgb(53 213 164); /* #35D5A4 */
@@ -173,7 +176,9 @@
   --popover-foreground: rgb(255 255 255);
 
   --primary: rgb(53 213 164); /* #35D5A4 – teal, consistent with brand-cta */
-  --primary-foreground: rgb(0 60 113); /* #003c71 – IC navy for 6.4:1 contrast */
+  --primary-foreground: rgb(
+    0 60 113
+  ); /* #003c71 – IC navy for 6.4:1 contrast */
 
   --secondary: rgb(19 44 79 / 0.8);
   --secondary-foreground: rgb(226 232 240);
@@ -214,7 +219,9 @@
   --brand-foreground: rgb(255 255 255);
 
   --brand-accent: rgb(53 213 164); /* #35D5A4 – unified with brand-cta (teal) */
-  --brand-accent-foreground: rgb(0 60 113); /* #003c71 – IC navy for 6.4:1 contrast */
+  --brand-accent-foreground: rgb(
+    0 60 113
+  ); /* #003c71 – IC navy for 6.4:1 contrast */
 
   /* IC CTA (teal, dark navy foreground for 6.4:1 contrast) */
   --brand-cta: rgb(53 213 164); /* #35D5A4 */
@@ -261,7 +268,7 @@
 
 .mapboxgl-ctrl-group button.active,
 .mapboxgl-ctrl-group button:active {
-  background-color: rgba(0, 0, 0, 0.10) !important;
+  background-color: rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Dark mode: flip icon colors + darken panel */
@@ -277,7 +284,7 @@
 
 /* Hover/active (dark) */
 .dark .mapboxgl-ctrl-group button:hover {
-  background-color: rgba(255, 255, 255, 0.10) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
 }
 
 .dark .mapboxgl-ctrl-group button.active,
@@ -296,8 +303,7 @@
   border-radius: calc(var(--radius) + 2px);
 
   /* token-consistent shadow: uses foreground color with alpha */
-  box-shadow:
-    0 10px 30px rgb(from var(--foreground) r g b / 0.18);
+  box-shadow: 0 10px 30px rgb(from var(--foreground) r g b / 0.18);
 
   backdrop-filter: blur(10px);
   overflow: hidden;
@@ -305,7 +311,8 @@
 
 /* buttons (draw uses background-image icons) */
 :where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group) button,
-:where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group) .mapbox-gl-draw_ctrl-draw-btn {
+:where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group)
+  .mapbox-gl-draw_ctrl-draw-btn {
   background-color: transparent !important;
   border: 0 !important;
 
@@ -324,6 +331,17 @@
 }
 
 /* icons: invert in dark mode so they become white */
-.dark :where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group) .mapbox-gl-draw_ctrl-draw-btn {
+.dark
+  :where(.mapboxgl-ctrl-group, .maplibregl-ctrl-group)
+  .mapbox-gl-draw_ctrl-draw-btn {
   filter: invert(1) !important;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

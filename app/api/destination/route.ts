@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { db } from "@/db/index";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
+import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
 import {
   jsonError,
   isNonEmptyString,
@@ -14,10 +14,8 @@ import {
 const ROUTE = "/api/destination";
 
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -88,10 +86,8 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -182,10 +178,8 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -206,6 +200,7 @@ export async function DELETE(req: Request) {
       return jsonError("Destination not found", 404);
     }
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({}, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

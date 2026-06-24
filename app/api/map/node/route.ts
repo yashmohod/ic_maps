@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { db, pool } from "@/db/index";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
+import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
 import { jsonError, isValidLatLng, parseId } from "@/lib/utils";
 
 function getDetail(err: unknown): string {
@@ -14,10 +14,8 @@ function getDetail(err: unknown): string {
 const ROUTE = "/api/map/node";
 
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -44,6 +42,7 @@ export async function POST(req: Request) {
       return jsonError("Insert failed", 500, "Insert did not return an id");
     }
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({ id: inserted.id }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
@@ -52,10 +51,8 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -93,6 +90,7 @@ export async function PUT(req: Request) {
     AND (e.node_a_id = ${nid} OR e.node_b_id = ${nid});
 `);
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
@@ -101,10 +99,8 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -127,6 +123,7 @@ export async function DELETE(req: Request) {
       return jsonError("Node not found", 404);
     }
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

@@ -14,6 +14,12 @@ CREATE TABLE "account" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "bug_report" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"text" text NOT NULL,
+	"photo_path" text
+);
+--> statement-breakpoint
 CREATE TABLE "destination" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"lat" double precision DEFAULT 0 NOT NULL,
@@ -30,6 +36,21 @@ CREATE TABLE "destination_node" (
 	"destination_id" integer NOT NULL,
 	"node_outside_id" integer NOT NULL,
 	CONSTRAINT "destination_node_destination_id_node_outside_id_pk" PRIMARY KEY("destination_id","node_outside_id")
+);
+--> statement-breakpoint
+CREATE TABLE "destination_chain" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"user_id" text NOT NULL,
+	"name" varchar(256) NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "destination_chain_user_name_unique" UNIQUE("user_id","name")
+);
+--> statement-breakpoint
+CREATE TABLE "destination_chain_stop" (
+	"chain_id" integer NOT NULL,
+	"destination_id" integer NOT NULL,
+	"sort_order" integer NOT NULL,
+	CONSTRAINT "destination_chain_stop_chain_id_sort_order_pk" PRIMARY KEY("chain_id","sort_order")
 );
 --> statement-breakpoint
 CREATE TABLE "edge_inside" (
@@ -105,7 +126,14 @@ CREATE TABLE "route" (
 CREATE TABLE "route_destination" (
 	"order" integer NOT NULL,
 	"destination_id" integer NOT NULL,
-	"route_id" integer NOT NULL
+	"route_id" integer NOT NULL,
+	CONSTRAINT "route_destination_route_id_destination_id_pk" PRIMARY KEY("route_id","destination_id")
+);
+--> statement-breakpoint
+CREATE TABLE "route_parking_lot" (
+	"route_id" integer NOT NULL,
+	"destination_id" integer NOT NULL,
+	CONSTRAINT "route_parking_lot_route_id_destination_id_pk" PRIMARY KEY("route_id","destination_id")
 );
 --> statement-breakpoint
 CREATE TABLE "session" (
@@ -133,6 +161,12 @@ CREATE TABLE "user" (
 	CONSTRAINT "user_email_unique" UNIQUE("email")
 );
 --> statement-breakpoint
+CREATE TABLE "user_favorite_destination" (
+	"user_id" text NOT NULL,
+	"destination_id" integer NOT NULL,
+	CONSTRAINT "user_favorite_destination_user_id_destination_id_pk" PRIMARY KEY("user_id","destination_id")
+);
+--> statement-breakpoint
 CREATE TABLE "verification" (
 	"id" text PRIMARY KEY NOT NULL,
 	"identifier" text NOT NULL,
@@ -145,6 +179,9 @@ CREATE TABLE "verification" (
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "destination_node" ADD CONSTRAINT "destination_node_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "destination_node" ADD CONSTRAINT "destination_node_node_outside_id_node_outside_id_fk" FOREIGN KEY ("node_outside_id") REFERENCES "public"."node_outside"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "destination_chain" ADD CONSTRAINT "destination_chain_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "destination_chain_stop" ADD CONSTRAINT "destination_chain_stop_chain_id_destination_chain_id_fk" FOREIGN KEY ("chain_id") REFERENCES "public"."destination_chain"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "destination_chain_stop" ADD CONSTRAINT "destination_chain_stop_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "edge_inside" ADD CONSTRAINT "edge_inside_node_a_id_node_inside_id_fk" FOREIGN KEY ("node_a_id") REFERENCES "public"."node_inside"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "edge_inside" ADD CONSTRAINT "edge_inside_node_b_id_node_inside_id_fk" FOREIGN KEY ("node_b_id") REFERENCES "public"."node_inside"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "edge_inside" ADD CONSTRAINT "edge_inside_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -156,7 +193,11 @@ ALTER TABLE "node_inside" ADD CONSTRAINT "node_inside_parent_fk" FOREIGN KEY ("p
 ALTER TABLE "route" ADD CONSTRAINT "route_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "route_destination" ADD CONSTRAINT "route_destination_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "route_destination" ADD CONSTRAINT "route_destination_route_id_route_id_fk" FOREIGN KEY ("route_id") REFERENCES "public"."route"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "route_parking_lot" ADD CONSTRAINT "route_parking_lot_route_id_route_id_fk" FOREIGN KEY ("route_id") REFERENCES "public"."route"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "route_parking_lot" ADD CONSTRAINT "route_parking_lot_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_favorite_destination" ADD CONSTRAINT "user_favorite_destination_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_favorite_destination" ADD CONSTRAINT "user_favorite_destination_destination_id_destination_id_fk" FOREIGN KEY ("destination_id") REFERENCES "public"."destination"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "destination_node_destination_id_idx" ON "destination_node" USING btree ("destination_id");--> statement-breakpoint
 CREATE INDEX "destination_node_node_outside_id_idx" ON "destination_node" USING btree ("node_outside_id");--> statement-breakpoint

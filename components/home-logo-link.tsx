@@ -4,6 +4,8 @@ import Link from "next/link";
 
 import { HomeLogo } from "@/components/home-logo";
 
+import { mapHeaderChipClass } from "@/lib/panel-classes";
+
 type Props = {
   className?: string;
   imageClassName?: string;
@@ -19,10 +21,7 @@ export function HomeLogoLink({
     <Link
       href="/"
       aria-label={label}
-      className={[
-        "inline-flex items-center justify-center rounded-2xl border border-border bg-panel text-panel-foreground shadow-lg backdrop-blur transition hover:scale-[1.02] active:scale-95",
-        className,
-      ].join(" ")}
+      className={[mapHeaderChipClass, className].filter(Boolean).join(" ")}
     >
       <HomeLogo className={imageClassName} />
     </Link>

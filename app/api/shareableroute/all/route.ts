@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { eq, asc, inArray } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+
 import { db } from "@/db";
 import { route, route_destination, destination } from "@/db/schema";
+import { requireIthacaEduSession } from "@/lib/auth-guards";
 import { jsonError } from "@/lib/utils";
 
 const ROUTE = "/api/shareableroute/all";
@@ -11,7 +11,8 @@ const ROUTE = "/api/shareableroute/all";
 export async function GET() {
   try {
     console.log(`[API ${ROUTE} GET] called`);
-    const session = await auth.api.getSession({ headers: await headers() });
+    const { session, error } = await requireIthacaEduSession();
+    if (error) return error;
     if (!session?.user?.id) return jsonError("Unauthorized", 401);
 
     const routeRows = await db
@@ -33,11 +34,17 @@ export async function GET() {
         is_parking_lot: destination.is_parking_lot,
       })
       .from(route_destination)
-      .innerJoin(destination, eq(destination.id, route_destination.destination_id))
+      .innerJoin(
+        destination,
+        eq(destination.id, route_destination.destination_id),
+      )
       .where(inArray(route_destination.route_id, routeIds))
       .orderBy(asc(route_destination.route_id), asc(route_destination.order));
 
-    const destByRoute = new Map<number, Array<{ id: number; name: string; isParkingLot: boolean; order: number }>>();
+    const destByRoute = new Map<
+      number,
+      Array<{ id: number; name: string; isParkingLot: boolean; order: number }>
+    >();
     for (const d of destRows) {
       const list = destByRoute.get(d.route_id) ?? [];
       list.push({

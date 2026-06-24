@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { asc, like, or } from "drizzle-orm";
-import { headers } from "next/headers";
 import { z } from "zod";
 
 import { db } from "@/db";
 import { schema } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
 
 const ROUTE = "/api/users";
 
@@ -14,14 +13,8 @@ const usersGetSchema = z.object({
 });
 
 export async function GET(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const userWithRole = session.user as { isAdmin?: boolean; role?: string };
-  if (!userWithRole.isAdmin && userWithRole.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   const { searchParams } = new URL(req.url);
   const parsed = usersGetSchema.safeParse({

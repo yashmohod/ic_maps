@@ -1,6 +1,6 @@
 "use client";
 
-import { IconMoon, IconSun } from "@tabler/icons-react";
+import { Moon, Sun } from "lucide-react";
 
 import { useAppTheme } from "@/hooks/use-app-theme";
 
@@ -23,7 +23,7 @@ export function ThemeToggleButton({ className = "" }: Props) {
         className,
       ].join(" ")}
     >
-      {isDark ? <IconSun size={18} /> : <IconMoon size={18} />}
+      {isDark ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
 }

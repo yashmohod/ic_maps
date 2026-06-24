@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { db } from "@/db";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
+import { setInsideNodeDead } from "@/lib/dead-features";
+import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
 import { isFiniteNumber, jsonError, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/destination/floorplan/nodes";
@@ -17,10 +18,10 @@ export async function GET(req: Request) {
 
     const result = await db.execute(sql`
       SELECT id, node_outside_id AS "nodeOutsideId", parent_node_inside_id AS "parentNodeInsideId",
-             x, y,
+             x, y, name,
              is_entry AS "isEntry", is_exit AS "isExit",
              is_elevator AS "isElevator", is_stairs AS "isStairs",
-             is_ramp AS "isRamp", is_group AS "isGroup",
+             is_ramp AS "isRamp", is_group AS "isGroup", is_dead AS "isDead",
              image_url AS "imageUrl", incline, width, height
       FROM node_inside
       WHERE destination_id = ${did}
@@ -30,15 +31,18 @@ export async function GET(req: Request) {
     const nodes = result.rows.map((row) => ({
       id: row.id,
       nodeOutsideId: row.nodeOutsideId,
-      parentNodeInsideId: row.parentNodeInsideId != null ? Number(row.parentNodeInsideId) : null,
+      parentNodeInsideId:
+        row.parentNodeInsideId != null ? Number(row.parentNodeInsideId) : null,
       x: Number(row.x),
       y: Number(row.y),
+      name: row.name != null ? String(row.name) : null,
       isEntry: Boolean(row.isEntry),
       isExit: Boolean(row.isExit),
       isElevator: Boolean(row.isElevator),
       isStairs: Boolean(row.isStairs),
       isRamp: Boolean(row.isRamp),
       isGroup: Boolean(row.isGroup),
+      isDead: Boolean(row.isDead),
       imageUrl: row.imageUrl ?? null,
       incline: row.incline != null ? Number(row.incline) : null,
       width: row.width != null ? Number(row.width) : null,
@@ -54,10 +58,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -79,6 +81,7 @@ export async function POST(req: Request) {
       incline,
       width,
       height,
+      name,
     } = body as Record<string, unknown>;
 
     console.log(`[API ${ROUTE} POST] called`, {
@@ -102,16 +105,21 @@ export async function POST(req: Request) {
     }
 
     const nid = nodeOutsideId != null ? parseId(nodeOutsideId) : null;
-    const parentId = parentNodeInsideId != null ? parseId(parentNodeInsideId) : null;
+    const parentId =
+      parentNodeInsideId != null ? parseId(parentNodeInsideId) : null;
     const widthVal =
-      width != null && isFiniteNumber(width) && (width as number) > 0 ? (width as number) : null;
+      width != null && isFiniteNumber(width) && (width as number) > 0
+        ? (width as number)
+        : null;
     const heightVal =
-      height != null && isFiniteNumber(height) && (height as number) > 0 ? (height as number) : null;
+      height != null && isFiniteNumber(height) && (height as number) > 0
+        ? (height as number)
+        : null;
     const result = await db.execute(sql`
       INSERT INTO node_inside (
         destination_id, node_outside_id, parent_node_inside_id, x, y,
         is_entry, is_exit, is_elevator, is_stairs, is_ramp, is_group,
-        image_url, incline, width, height
+        image_url, incline, width, height, name
       )
       VALUES (
         ${did},
@@ -128,9 +136,10 @@ export async function POST(req: Request) {
         ${imageUrl != null ? String(imageUrl) : null},
         ${incline != null && isFiniteNumber(incline) ? (incline as number) : null},
         ${widthVal},
-        ${heightVal}
+        ${heightVal},
+        ${name != null && String(name).trim().length > 0 ? String(name).trim() : null}
       )
-      RETURNING id, node_outside_id AS "nodeOutsideId", parent_node_inside_id AS "parentNodeInsideId", x, y,
+      RETURNING id, node_outside_id AS "nodeOutsideId", parent_node_inside_id AS "parentNodeInsideId", x, y, name,
                 is_entry AS "isEntry", is_exit AS "isExit",
                 is_elevator AS "isElevator", is_stairs AS "isStairs",
                 is_ramp AS "isRamp", is_group AS "isGroup",
@@ -140,13 +149,18 @@ export async function POST(req: Request) {
     const row = result.rows[0];
     if (!row?.id) return jsonError("Insert failed", 500);
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json(
       {
         id: row.id,
         nodeOutsideId: row.nodeOutsideId,
-        parentNodeInsideId: row.parentNodeInsideId != null ? Number(row.parentNodeInsideId) : null,
+        parentNodeInsideId:
+          row.parentNodeInsideId != null
+            ? Number(row.parentNodeInsideId)
+            : null,
         x: Number(row.x),
         y: Number(row.y),
+        name: row.name != null ? String(row.name) : null,
         isEntry: Boolean(row.isEntry),
         isExit: Boolean(row.isExit),
         isElevator: Boolean(row.isElevator),
@@ -158,7 +172,7 @@ export async function POST(req: Request) {
         width: row.width != null ? Number(row.width) : null,
         height: row.height != null ? Number(row.height) : null,
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
@@ -168,17 +182,31 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
-    const { id, x, y, parentNodeInsideId, isEntry, isExit, isElevator, isStairs, isRamp, isGroup, imageUrl, incline, width, height } =
-      body as Record<string, unknown>;
+    const {
+      id,
+      x,
+      y,
+      parentNodeInsideId,
+      isEntry,
+      isExit,
+      isElevator,
+      isStairs,
+      isRamp,
+      isGroup,
+      imageUrl,
+      incline,
+      width,
+      height,
+      name,
+      isDead,
+    } = body as Record<string, unknown>;
 
     console.log(`[API ${ROUTE} PUT] called`, {
       id,
@@ -191,31 +219,41 @@ export async function PUT(req: Request) {
       isStairs,
       isRamp,
       isGroup,
+      isDead,
     });
 
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
+
+    if (typeof isDead === "boolean") {
+      await setInsideNodeDead(nid, isDead);
+    }
 
     const setParts: ReturnType<typeof sql>[] = [];
 
     if (x !== undefined && isFiniteNumber(x)) setParts.push(sql`x = ${x}`);
     if (y !== undefined && isFiniteNumber(y)) setParts.push(sql`y = ${y}`);
     if (parentNodeInsideId !== undefined) {
-      const pid = parentNodeInsideId === null ? null : parseId(parentNodeInsideId);
+      const pid =
+        parentNodeInsideId === null ? null : parseId(parentNodeInsideId);
       setParts.push(sql`parent_node_inside_id = ${pid}`);
     }
     if (typeof isEntry === "boolean") setParts.push(sql`is_entry = ${isEntry}`);
     if (typeof isExit === "boolean") setParts.push(sql`is_exit = ${isExit}`);
-    if (typeof isElevator === "boolean") setParts.push(sql`is_elevator = ${isElevator}`);
-    if (typeof isStairs === "boolean") setParts.push(sql`is_stairs = ${isStairs}`);
+    if (typeof isElevator === "boolean")
+      setParts.push(sql`is_elevator = ${isElevator}`);
+    if (typeof isStairs === "boolean")
+      setParts.push(sql`is_stairs = ${isStairs}`);
     if (typeof isRamp === "boolean") setParts.push(sql`is_ramp = ${isRamp}`);
     if (typeof isGroup === "boolean") setParts.push(sql`is_group = ${isGroup}`);
     if (imageUrl !== undefined) {
-      setParts.push(sql`image_url = ${imageUrl === null ? null : String(imageUrl)}`);
+      setParts.push(
+        sql`image_url = ${imageUrl === null ? null : String(imageUrl)}`,
+      );
     }
     if (incline !== undefined) {
       setParts.push(
-        sql`incline = ${incline === null || !isFiniteNumber(incline) ? null : (incline as number)}`
+        sql`incline = ${incline === null || !isFiniteNumber(incline) ? null : (incline as number)}`,
       );
     }
     if (width !== undefined) {
@@ -232,14 +270,28 @@ export async function PUT(req: Request) {
           : (height as number);
       setParts.push(sql`height = ${heightVal}`);
     }
+    if (name !== undefined) {
+      const nameVal =
+        name === null || String(name).trim().length === 0
+          ? null
+          : String(name).trim();
+      setParts.push(sql`name = ${nameVal}`);
+    }
 
-    if (setParts.length === 0) return NextResponse.json({}, { status: 200 });
+    if (setParts.length === 0) {
+      if (typeof isDead === "boolean") {
+        await refreshNavGraphAfterMutation();
+        return NextResponse.json({}, { status: 200 });
+      }
+      return NextResponse.json({}, { status: 200 });
+    }
 
     const result = await db.execute(
-      sql`UPDATE node_inside SET ${sql.join(setParts, sql`, `)} WHERE id = ${nid} RETURNING id`
+      sql`UPDATE node_inside SET ${sql.join(setParts, sql`, `)} WHERE id = ${nid} RETURNING id`,
     );
     if (result.rows.length === 0) return jsonError("Node not found", 404);
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
@@ -249,10 +301,8 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -263,11 +313,16 @@ export async function DELETE(req: Request) {
     const nid = parseId(id);
     if (!nid) return jsonError("Invalid id", 400);
 
-    await db.execute(sql`DELETE FROM edge_inside WHERE node_a_id = ${nid} OR node_b_id = ${nid}`);
-    const result = await db.execute(sql`DELETE FROM node_inside WHERE id = ${nid} RETURNING id`);
+    await db.execute(
+      sql`DELETE FROM edge_inside WHERE node_a_id = ${nid} OR node_b_id = ${nid}`,
+    );
+    const result = await db.execute(
+      sql`DELETE FROM node_inside WHERE id = ${nid} RETURNING id`,
+    );
 
     if (result.rows.length === 0) return jsonError("Node not found", 404);
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

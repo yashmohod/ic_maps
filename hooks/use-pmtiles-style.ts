@@ -161,12 +161,8 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
         if (!res.ok) throw new Error(`style fetch failed: ${res.status}`);
         const style: any = await res.json();
 
-        const spriteValue =
-          typeof style.sprite === "string" ? style.sprite : "./sprite";
-        const glyphsValue =
-          typeof style.glyphs === "string" ? style.glyphs : glyphsFallback;
-        style.sprite = absolutizeTemplateUrl(spriteValue, styleUrl);
-        style.glyphs = absolutizeTemplateUrl(glyphsValue, styleUrl);
+        style.glyphs = glyphsFallback;
+        delete style.sprite;
 
         if (style.sources && typeof style.sources === "object") {
           for (const k of Object.keys(style.sources)) {
@@ -200,14 +196,16 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
 
         if (style.sources[srcKey]?.tiles) delete style.sources[srcKey].tiles;
 
-        if (tilesetLayerNames.size > 0 && Array.isArray(style.layers)) {
+        if (Array.isArray(style.layers)) {
           style.layers = style.layers.filter((ly: any) => {
             if (!ly || typeof ly !== "object") return false;
+            if (ly.type === "symbol") return false;
             if (!ly.source) return true;
             if (ly.source !== srcKey) return true;
 
             const sl = ly["source-layer"];
             if (!sl) return true;
+            if (tilesetLayerNames.size === 0) return true;
 
             return tilesetLayerNames.has(String(sl));
           });

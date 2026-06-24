@@ -2,42 +2,9 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { NextResponse } from "next/server";
 
+export { calcDistance, heuristic } from "./geo";
+
 const includeDetail = process.env.NODE_ENV !== "production";
-
-export function calcDistance(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-) {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-
-  const R = 6371000; // Earth radius (m)
-  const φ1 = toRad(lat1);
-  const φ2 = toRad(lat2);
-  const Δφ = toRad(lat2 - lat1);
-  const Δλ = toRad(lng2 - lng1);
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
-const METERS_PER_DEGREE_LAT = 111_000;
-
-export function heuristic(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const deg = Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lng1 - lng2, 2));
-  return deg * METERS_PER_DEGREE_LAT;
-}
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

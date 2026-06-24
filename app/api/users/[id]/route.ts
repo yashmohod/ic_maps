@@ -1,22 +1,42 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { deleteLocalUser, getLocalUser, upsertLocalUser } from "@/lib/local-users";
-import { auth } from "@/lib/auth";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { schema } from "@/db/schema";
+import {
+  requireAdmin,
+  requireSelfOrAdmin,
+  requireSession,
+} from "@/lib/auth-guards";
 
 const ROUTE = "/api/users/[id]";
+
+const userSelect = {
+  id: schema.user.id,
+  name: schema.user.name,
+  email: schema.user.email,
+  isAdmin: schema.user.isAdmin,
+};
+
 export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id } = await context.params;
+  const { error } = await requireSelfOrAdmin(id);
+  if (error) return error;
   console.log(`[API ${ROUTE} GET] called`, { id });
   try {
-    return NextResponse.json({ user: getLocalUser(id) });
+    const [user] = await db
+      .select(userSelect)
+      .from(schema.user)
+      .where(eq(schema.user.id, id))
+      .limit(1);
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ user });
   } catch (error) {
     console.error(`[API ${ROUTE} GET] error`, error);
     return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
@@ -27,10 +47,8 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { session, error } = await requireSession();
+  if (error) return error;
 
   const { id } = await context.params;
   try {
@@ -39,9 +57,15 @@ export async function PATCH(
     const updates: { isAdmin?: boolean; name?: string } = {};
 
     if (typeof body.isAdmin === "boolean") {
+      const { error: adminError } = await requireAdmin();
+      if (adminError) return adminError;
       updates.isAdmin = body.isAdmin;
     }
     if (typeof body.name === "string") {
+      if (session!.user.id !== id) {
+        const { error: adminError } = await requireAdmin();
+        if (adminError) return adminError;
+      }
       const trimmed = body.name.trim();
       if (!trimmed) {
         return NextResponse.json(
@@ -59,7 +83,16 @@ export async function PATCH(
       );
     }
 
-    const user = upsertLocalUser(id, updates);
+    const [user] = await db
+      .update(schema.user)
+      .set(updates)
+      .where(eq(schema.user.id, id))
+      .returning(userSelect);
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     return NextResponse.json({ user });
   } catch (error) {
     console.error(`[API ${ROUTE} PATCH] error`, error);
@@ -71,18 +104,21 @@ export async function DELETE(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   const { id } = await context.params;
   console.log(`[API ${ROUTE} DELETE] called`, { id });
   try {
-    const deleted = deleteLocalUser(id);
+    const [deleted] = await db
+      .delete(schema.user)
+      .where(eq(schema.user.id, id))
+      .returning({ id: schema.user.id });
+
     if (!deleted) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error(`[API ${ROUTE} DELETE] error`, error);

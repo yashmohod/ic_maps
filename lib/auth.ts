@@ -2,18 +2,48 @@ import "server-only";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { createAuthMiddleware, APIError } from "better-auth/api";
 
 import { db } from "../db";
 import { schema } from "../db/schema";
 import { sendDevEmail } from "../lib/email";
+import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 
 const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+
+const microsoftClientId = process.env.MICROSOFT_CLIENT_ID;
+const microsoftClientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+
+const microsoftProvider =
+  microsoftClientId && microsoftClientSecret
+    ? {
+        microsoft: {
+          clientId: microsoftClientId,
+          clientSecret: microsoftClientSecret,
+          tenantId: process.env.MICROSOFT_TENANT_ID ?? "organizations",
+        },
+      }
+    : undefined;
 
 export const auth = betterAuth({
   // ✅ makes verification/reset links consistent
   baseURL: APP_URL,
   // ✅ required for origin validation (localhost, LAN IP, etc.)
   trustedOrigins: [APP_URL],
+
+  ...(microsoftProvider ? { socialProviders: microsoftProvider } : {}),
+
+  user: {
+    additionalFields: {
+      isAdmin: {
+        type: "boolean",
+        required: false,
+        defaultValue: false,
+        input: false,
+        returned: true,
+      },
+    },
+  },
 
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -53,6 +83,26 @@ export const auth = betterAuth({
         `,
       });
     },
+  },
+
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      const blockedPaths = new Set([
+        "/sign-up/email",
+        "/sign-in/email",
+        "/request-password-reset",
+      ]);
+
+      if (!blockedPaths.has(ctx.path)) return;
+
+      const email =
+        typeof ctx.body?.email === "string" ? ctx.body.email : undefined;
+      if (email && isIthacaEduEmail(email)) {
+        throw new APIError("BAD_REQUEST", {
+          message: IC_SSO_REQUIRED_MESSAGE,
+        });
+      }
+    }),
   },
 
   plugins: [nextCookies()],

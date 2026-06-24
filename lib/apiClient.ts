@@ -32,8 +32,6 @@ const apiClient = {
 
 export default apiClient;
 
-
-
 // // src/lib/apiClient.ts
 // type ApiError = { status: number; data: any };
 

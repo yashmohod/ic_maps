@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { eq, asc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { db } from "@/db";
-import { route, route_destination, destination } from "@/db/schema";
-import { jsonError, parseId, isNonEmptyString } from "@/lib/utils";
+import {
+  route,
+  route_destination,
+  route_parking_lot,
+  destination,
+} from "@/db/schema";
+import { eq, asc, and, inArray } from "drizzle-orm";
 
-async function getSession() {
-  return auth.api.getSession({ headers: await headers() });
-}
+import { isDevModeEnabled } from "@/lib/dev-mode";
+import { requireIthacaEduSession } from "@/lib/auth-guards";
+import { jsonError, parseId, isNonEmptyString } from "@/lib/utils";
 
 const ROUTE = "/api/shareableroute";
 
@@ -38,7 +40,10 @@ export async function GET(req: Request) {
         is_parking_lot: destination.is_parking_lot,
       })
       .from(route_destination)
-      .innerJoin(destination, eq(destination.id, route_destination.destination_id))
+      .innerJoin(
+        destination,
+        eq(destination.id, route_destination.destination_id),
+      )
       .where(eq(route_destination.route_id, routeId))
       .orderBy(asc(route_destination.order));
 
@@ -49,12 +54,34 @@ export async function GET(req: Request) {
       order: d.order,
     }));
 
+    const parkingRows = await db
+      .select({
+        id: destination.id,
+        name: destination.name,
+        lat: destination.lat,
+        lng: destination.lng,
+      })
+      .from(route_parking_lot)
+      .innerJoin(
+        destination,
+        eq(destination.id, route_parking_lot.destination_id),
+      )
+      .where(eq(route_parking_lot.route_id, routeId));
+
+    const parkingLots = parkingRows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      lat: p.lat,
+      lng: p.lng,
+    }));
+
     return NextResponse.json(
       {
         id: r.id,
         name: r.name,
         description: r.description ?? undefined,
         destinations,
+        parkingLots,
       },
       { status: 200 },
     );
@@ -68,27 +95,40 @@ export async function GET(req: Request) {
 /** POST: create route (authenticated, user_id from session) */
 export async function POST(req: Request) {
   try {
-    const session = await getSession();
+    const { session, error } = await requireIthacaEduSession();
+    if (error) return error;
     if (!session?.user?.id) return jsonError("Unauthorized", 401);
 
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
-    const { name, description, destinationIds } = body as {
+    const { name, description, destinationIds, parkingLotIds } = body as {
       name: unknown;
       description?: unknown;
       destinationIds?: unknown;
+      parkingLotIds?: unknown;
     };
 
-    console.log(`[API ${ROUTE} POST] called`, { name, description, destinationIds });
+    console.log(`[API ${ROUTE} POST] called`, {
+      name,
+      description,
+      destinationIds,
+      parkingLotIds,
+    });
 
     if (!isNonEmptyString(name, 256))
       return jsonError("name must be a non-empty string (max 256 chars)", 400);
 
     const ids: number[] = Array.isArray(destinationIds)
-      ? destinationIds.map((x: unknown) => parseId(x)).filter((n): n is number => n != null)
+      ? destinationIds
+          .map((x: unknown) => parseId(x))
+          .filter((n): n is number => n != null)
       : [];
-    if (ids.length === 0) return jsonError("destinationIds must be a non-empty array of destination ids", 400);
+    if (ids.length === 0)
+      return jsonError(
+        "destinationIds must be a non-empty array of destination ids",
+        400,
+      );
 
     const [inserted] = await db
       .insert(route)
@@ -112,6 +152,35 @@ export async function POST(req: Request) {
       })),
     );
 
+    const lotIds: number[] = Array.isArray(parkingLotIds)
+      ? parkingLotIds
+          .map((x: unknown) => parseId(x))
+          .filter((n): n is number => n != null)
+      : [];
+    if (lotIds.length > 0) {
+      const lots = await db
+        .select({ id: destination.id })
+        .from(destination)
+        .where(
+          and(
+            inArray(destination.id, lotIds),
+            eq(destination.is_parking_lot, true),
+          ),
+        );
+      if (lots.length !== lotIds.length) {
+        return jsonError(
+          "All parkingLotIds must reference parking lot destinations",
+          400,
+        );
+      }
+      await db.insert(route_parking_lot).values(
+        lotIds.map((destination_id) => ({
+          route_id: inserted.id,
+          destination_id,
+        })),
+      );
+    }
+
     return NextResponse.json(
       { id: inserted.id, message: "Route created" },
       { status: 201 },
@@ -126,20 +195,29 @@ export async function POST(req: Request) {
 /** PUT: update route (authenticated, must own route) */
 export async function PUT(req: Request) {
   try {
-    const session = await getSession();
+    const { session, error } = await requireIthacaEduSession();
+    if (error) return error;
     if (!session?.user?.id) return jsonError("Unauthorized", 401);
 
     const body = await req.json().catch(() => null);
     if (!body) return jsonError("Invalid JSON body", 400);
 
-    const { routeId, name, description, destinationIds } = body as {
-      routeId: unknown;
-      name?: unknown;
-      description?: unknown;
-      destinationIds?: unknown;
-    };
+    const { routeId, name, description, destinationIds, parkingLotIds } =
+      body as {
+        routeId: unknown;
+        name?: unknown;
+        description?: unknown;
+        destinationIds?: unknown;
+        parkingLotIds?: unknown;
+      };
 
-    console.log(`[API ${ROUTE} PUT] called`, { routeId, name, description, destinationIds });
+    console.log(`[API ${ROUTE} PUT] called`, {
+      routeId,
+      name,
+      description,
+      destinationIds,
+      parkingLotIds,
+    });
 
     const rId = parseId(routeId);
     if (!rId) return jsonError("Invalid or missing routeId", 400);
@@ -151,13 +229,16 @@ export async function PUT(req: Request) {
       .limit(1);
 
     if (!existing) return jsonError("Route not found", 404);
-    if (existing.user_id !== session.user.id)
+    if (!isDevModeEnabled() && existing.user_id !== session.user.id)
       return jsonError("Forbidden", 403);
 
     const updates: { name?: string; description?: string | null } = {};
     if (name !== undefined) {
       if (!isNonEmptyString(name, 256))
-        return jsonError("name must be a non-empty string (max 256 chars)", 400);
+        return jsonError(
+          "name must be a non-empty string (max 256 chars)",
+          400,
+        );
       updates.name = (name as string).trim();
     }
     if (description !== undefined) {
@@ -175,13 +256,47 @@ export async function PUT(req: Request) {
       const ids = destinationIds
         .map((x: unknown) => parseId(x))
         .filter((n): n is number => n != null);
-      await db.delete(route_destination).where(eq(route_destination.route_id, rId));
+      await db
+        .delete(route_destination)
+        .where(eq(route_destination.route_id, rId));
       if (ids.length > 0) {
         await db.insert(route_destination).values(
           ids.map((destination_id, index) => ({
             route_id: rId,
             destination_id,
             order: index,
+          })),
+        );
+      }
+    }
+
+    if (Array.isArray(parkingLotIds)) {
+      const lotIds = parkingLotIds
+        .map((x: unknown) => parseId(x))
+        .filter((n): n is number => n != null);
+      await db
+        .delete(route_parking_lot)
+        .where(eq(route_parking_lot.route_id, rId));
+      if (lotIds.length > 0) {
+        const lots = await db
+          .select({ id: destination.id })
+          .from(destination)
+          .where(
+            and(
+              inArray(destination.id, lotIds),
+              eq(destination.is_parking_lot, true),
+            ),
+          );
+        if (lots.length !== lotIds.length) {
+          return jsonError(
+            "All parkingLotIds must reference parking lot destinations",
+            400,
+          );
+        }
+        await db.insert(route_parking_lot).values(
+          lotIds.map((destination_id) => ({
+            route_id: rId,
+            destination_id,
           })),
         );
       }
@@ -198,7 +313,8 @@ export async function PUT(req: Request) {
 /** DELETE: delete route (authenticated, must own route) */
 export async function DELETE(req: Request) {
   try {
-    const session = await getSession();
+    const { session, error } = await requireIthacaEduSession();
+    if (error) return error;
     if (!session?.user?.id) return jsonError("Unauthorized", 401);
 
     const body = await req.json().catch(() => null);
@@ -216,7 +332,7 @@ export async function DELETE(req: Request) {
       .limit(1);
 
     if (!existing) return jsonError("Route not found", 404);
-    if (existing.user_id !== session.user.id)
+    if (!isDevModeEnabled() && existing.user_id !== session.user.id)
       return jsonError("Forbidden", 403);
 
     await db.delete(route).where(eq(route.id, rId));

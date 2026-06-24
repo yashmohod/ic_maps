@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { db } from "@/db/index";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
+import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
 import { calcDistance } from "@/lib/utils";
 import { jsonError, parseId } from "@/lib/utils";
 
@@ -20,10 +20,8 @@ const edgeDeleteSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -77,6 +75,7 @@ export async function POST(req: Request) {
     }
     const ff = direction ? a : b;
     const tt = direction ? b : a;
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({ id: inserted.id, a:ff, b:tt }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
@@ -86,10 +85,8 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { error } = await requireAdmin();
+  if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
@@ -115,6 +112,7 @@ export async function DELETE(req: Request) {
       return jsonError("Edge not found", 404);
     }
 
+    await refreshNavGraphAfterMutation();
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

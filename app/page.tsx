@@ -13,28 +13,42 @@ import { toast } from "sonner";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
-import { DEFAULT_CENTER, DEFAULT_ZOOM, CAMPUS_BOUNDS } from "@/lib/map-constants";
-import { HomeLogoLink } from "@/components/home-logo-link";
-import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import {
-  IconNavigation,
-  IconNavigationX,
-  IconArrowGuide,
-  IconArrowBadgeUpFilled,
-  IconArrowBadgeDownFilled,
-  IconArrowsMaximize,
-  IconArrowsMinimize,
-  IconLogin2,
-} from "@tabler/icons-react";
+  DEFAULT_CENTER,
+  DEFAULT_ZOOM,
+  CAMPUS_BOUNDS,
+} from "@/lib/map-constants";
+import { EditorToolsMenu } from "@/components/EditorToolsMenu";
 import ProfileOptions from "../components/profileOptions";
 import NavModeMap from "../components/NavMode";
-import { Button } from "@/components/ui/button";
+import { MapBottomSheet } from "@/components/MapBottomSheet";
+import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
+import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
+import { DestinationStopsEditor } from "@/components/DestinationStopsEditor";
+import { DestinationSearchCombobox } from "@/components/DestinationSearchCombobox";
+import { TripStopMarkers } from "@/components/TripStopMarkers";
+import { RoutePathLayer } from "@/components/RoutePathLayer";
 import Link from "next/link";
-import { authClient, type Session } from "@/lib/auth-client";
-import { CheckIcon, XIcon } from "lucide-react";
+import { type Session } from "@/lib/auth-client";
+import { useEffectiveSession } from "@/hooks/use-effective-session";
+import { useIsIcUser } from "@/hooks/use-is-ic-user";
+import {
+  Car,
+  CheckIcon,
+  Footprints,
+  ListOrdered,
+  LogIn,
+  Maximize2,
+  Minimize2,
+  Navigation,
+  NavigationOff,
+  Route,
+  Star,
+  XIcon,
+} from "lucide-react";
 import maplibregl from "maplibre-gl";
 import apiClient from "@/lib/apiClient";
-import { Slider } from "@/components/ui/slider"
+import { Slider } from "@/components/ui/slider";
 import { NavConditions } from "@/lib/navigation";
 import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
 import { makeCircleGeoJSON, bearingTo } from "@/lib/geo";
@@ -42,8 +56,17 @@ import {
   surfacePanelClass,
   surfaceSubtleClass,
   borderMutedClass,
-  selectBaseClass,
-  selectFocusClass,
+  touchTargetClass,
+  safeAreaTopClass,
+  mapModeRowOffsetClass,
+  mapFavoritesRowOffsetClass,
+  mapPageClass,
+  mapHeaderChipClass,
+  mapModeChipClass,
+  mapFloatingActionClass,
+  mapSheetPeekMinVisibleCompactPx,
+  mapSheetPeekMinVisiblePx,
+  mapSheetToolbarOverlapPx,
 } from "@/lib/panel-classes";
 import type {
   LngLat,
@@ -52,11 +75,33 @@ import type {
   EdgeIndexEntry,
   GeoJSONFeatureCollection,
   MapDestination,
+  NavigateToResponse,
+  RouteLegMetrics,
 } from "@/lib/types/map";
+import {
+  formatRouteDistance,
+  formatRouteEtaSummary,
+  formatRouteDuration,
+} from "@/lib/distance-display";
+import type { NavStep } from "@/lib/navigation-types";
+import { useDistanceUnits } from "@/hooks/use-distance-units";
+import { useNavigationProgress } from "@/hooks/use-navigation-progress";
 
 export type Destination = MapDestination;
 
+type FavoriteRow = {
+  id: number;
+  name: string;
+  lat: number;
+  lng: number;
+};
 
+type ChainRow = {
+  id: number;
+  name: string;
+  destinationIds: number[];
+  destinations: Array<{ id: number; name: string }>;
+};
 
 /** ---------------- Map stages ---------------- */
 
@@ -89,17 +134,22 @@ const STAGE_DETAILS: Record<
     label: "Route overview",
     headline: "Preview the full path",
     description: "See the complete route before committing to tracking.",
-    badgeColor: "bg-brand/10 text-brand dark:bg-brand-cta/15 dark:text-brand-cta",
+    badgeColor:
+      "bg-brand/10 text-brand dark:bg-brand-cta/15 dark:text-brand-cta",
   },
   [MAP_STAGES.TRACKING]: {
     label: "Live navigation",
     headline: "Tracking in real time",
-    description: "Follow turn-by-turn guidance until you arrive.",
+    description: "Follow step-by-step directions until you arrive.",
     badgeColor: "bg-brand-cta/15 text-brand-cta-foreground dark:text-brand-cta",
   },
 };
 
 const MAX_INCLINE = 45;
+/** Home sheet is shorter (60vh) and has a toolbar row above the panel. */
+/** Collapsed peek target; MapBottomSheet clamps further on mobile for min visible chrome. */
+const HOME_SHEET_PEEK = 0.85;
+const HOME_SHEET_SNAP_POINTS = [0, HOME_SHEET_PEEK];
 
 export default function NavigationMap(): JSX.Element {
   const defViewState = {
@@ -114,7 +164,8 @@ export default function NavigationMap(): JSX.Element {
     path: Set<number>;
     firstNodeId: number;
     lastNodeId: number;
-  }
+    startNode?: { id: number; lat: number; lng: number };
+  };
 
   const [viewState, setViewState] = useState<{
     longitude: number;
@@ -128,6 +179,8 @@ export default function NavigationMap(): JSX.Element {
 
   const [selectedDest, setSelectedDest] = useState<number>(0);
   const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [destinationsFirstLoadPending, setDestinationsFirstLoadPending] =
+    useState(true);
   const [userPos, setUserPos] = useState<UserPos | null>(null);
   const [destPos, setDestPos] = useState<LngLat | null>(null);
 
@@ -137,20 +190,19 @@ export default function NavigationMap(): JSX.Element {
 
   const [markers, setMarkers] = useState<MarkerNode[]>([]);
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
-  const PATH_RESET: Path = { path: new Set(), lastNodeId: -1, firstNodeId: -1 }
+  const PATH_RESET: Path = { path: new Set(), lastNodeId: -1, firstNodeId: -1 };
   const [path, setPath] = useState<Path>(PATH_RESET);
   const [lastGeoMsg, setLastGeoMsg] = useState<string>("");
   const [useCompass, setUseCompass] = useState<boolean>(false);
 
-  const [curNavConditions, setCurNavConditions] = useState<NavConditions>(
-    {
-      is_pedestrian: true,
-      is_vehicular: false,
-      is_avoid_stairs: false,
-      is_incline_limit: false,
-      max_incline: 0,
-      is_through_building: false,
-    });
+  const [curNavConditions, setCurNavConditions] = useState<NavConditions>({
+    is_pedestrian: true,
+    is_vehicular: false,
+    is_avoid_stairs: false,
+    is_incline_limit: false,
+    max_incline: 0,
+    is_through_building: true,
+  });
 
   const [mapStage, setMapStage] = useState<MapStage>(MAP_STAGES.IDLE);
 
@@ -161,61 +213,137 @@ export default function NavigationMap(): JSX.Element {
   const pendingRouteStartRef = useRef(false);
   const watchIdRef = useRef<number | null>(null);
   const deviceHeadingRef = useRef<number | null>(null);
-  const compassHandlerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null);
+  const compassHandlerRef = useRef<
+    ((e: DeviceOrientationEvent) => void) | null
+  >(null);
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
+  const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
+  const [routeEta, setRouteEta] = useState<{
+    distanceMeters: number;
+    durationSeconds: number;
+    legs: RouteLegMetrics[];
+  } | null>(null);
+  const [routeSteps, setRouteSteps] = useState<NavStep[]>([]);
+  const graphPrefetchRef = useRef<Promise<void> | null>(null);
+  const { units: distanceUnits } = useDistanceUnits();
+
+  const navProgress = useNavigationProgress(
+    routeSteps,
+    userPos,
+    routeCoords,
+    tracking,
+  );
 
   const [buildingNodes, setBuildingNodes] = useState<Set<number>>(new Set());
+  const [buildingMarkers, setBuildingMarkers] = useState<
+    Array<{ id: number; lat: number; lng: number }>
+  >([]);
 
+  const [favorites, setFavorites] = useState<FavoriteRow[]>([]);
+  const [chains, setChains] = useState<ChainRow[]>([]);
+  const [destinationStops, setDestinationStops] = useState<number[]>([]);
+  const [chainNameInput, setChainNameInput] = useState("");
+  const [showFavoriteTripSave, setShowFavoriteTripSave] = useState(false);
+  const [stopsEditorOpen, setStopsEditorOpen] = useState(false);
+
+  const favoriteIdSet = useMemo(
+    () => new Set(favorites.map((f) => f.id)),
+    [favorites],
+  );
+
+  const tripStopMarkers = useMemo(() => {
+    if (routeCoords.length < 2 && !navigating) return [];
+    const ids =
+      destinationStops.filter((id) => id > 0).length > 0
+        ? destinationStops.filter((id) => id > 0)
+        : selectedDest > 0
+          ? [selectedDest]
+          : [];
+    return ids
+      .map((id, index) => {
+        const dest = destinations.find((d) => Number(d.id) === id);
+        if (!dest) return null;
+        return {
+          id,
+          name: dest.name,
+          lat: dest.lat,
+          lng: dest.lng,
+          order: index + 1,
+        };
+      })
+      .filter(
+        (
+          stop,
+        ): stop is {
+          id: number;
+          name: string;
+          lat: number;
+          lng: number;
+          order: number;
+        } => stop != null,
+      );
+  }, [
+    routeCoords.length,
+    navigating,
+    destinationStops,
+    selectedDest,
+    destinations,
+  ]);
 
   const selectedBuilding = useMemo(() => {
     return destinations.find((b) => `${b.id}` === `${selectedDest}`) ?? null;
   }, [destinations, selectedDest]);
 
-  async function getAllFeature() {
-    try {
-      const req = await apiClient.get("/api/map/all")
+  async function prefetchGraph() {
+    if (edgeIndex.length > 0) return;
+    if (graphPrefetchRef.current) return graphPrefetchRef.current;
 
-      if (req.status !== 200) {
-        toast.error("Failed to fetch map features!");
-        return;
+    graphPrefetchRef.current = (async () => {
+      try {
+        const req = await apiClient.get("/api/map/all");
+        if (req.status !== 200) return;
+        const data = await req.json();
+        setMarkers(data.nodes as MarkerNode[]);
+        setEdgeIndex(data.edges as EdgeIndexEntry[]);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        graphPrefetchRef.current = null;
       }
+    })();
 
-      const data = await req.json()
-
-      setMarkers(
-        data.nodes as MarkerNode[]
-      );
-
-      setEdgeIndex(
-        data.edges as EdgeIndexEntry[]
-      );
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to fetch map features!");
-    }
+    return graphPrefetchRef.current;
   }
-
-  useEffect(() => {
-    getAllFeature();
-
-  }, [])
 
   const { isDark, mapStyle } = useMapStyle();
 
-  const { data: session, error } = authClient.useSession();
+  const { realSession, error, isSignedIn, devMode } = useEffectiveSession();
+  const { isIcUser } = useIsIcUser();
+  const signedInUserId = realSession?.user?.id;
 
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isIcUser, setIsIcUser] = useState(false);
-  function isICUser(email: string) {
-    let frag = email.split("@");
-    setIsIcUser(frag[frag.length - 1] === "ithaca.edu")
-  }
 
   useEffect(() => {
-    if (!session || error) return;
-    setIsAdmin(Boolean((session.user as { isAdmin?: boolean }).isAdmin));
-    isICUser(session.user.email);
-  }, [session, error]);
+    if (devMode) {
+      setIsAdmin(true);
+      return;
+    }
+    if (!signedInUserId || error) {
+      setIsAdmin(false);
+      return;
+    }
+    setIsAdmin(Boolean((realSession?.user as { isAdmin?: boolean }).isAdmin));
+  }, [devMode, signedInUserId, error, realSession?.user]);
+
+  useEffect(() => {
+    if (!isSignedIn || error) {
+      setFavorites([]);
+      setChains([]);
+      return;
+    }
+    void loadFavorites();
+    void loadChains();
+  }, [isSignedIn, signedInUserId, error]);
 
   useEffect(() => {
     if (!pendingRouteStartRef.current) return;
@@ -229,8 +357,9 @@ export default function NavigationMap(): JSX.Element {
 
   /** ---------------- PMTiles + Style ---------------- */
 
-  const { baseStyle, vectorSourceId } = usePmtilesStyle({ stylePath: mapStyle });
-
+  const { baseStyle, vectorSourceId } = usePmtilesStyle({
+    stylePath: mapStyle,
+  });
 
   /** -------- Accuracy ring -------- */
 
@@ -311,14 +440,11 @@ export default function NavigationMap(): JSX.Element {
     const map = mapRef.current?.getMap?.();
     if (!map) return;
 
-    map.fitBounds(
-      CAMPUS_BOUNDS,
-      {
-        padding: { top: 48, bottom: 80, left: 48, right: 48 },
-        duration: 900,
-        essential: true,
-      },
-    );
+    map.fitBounds(CAMPUS_BOUNDS, {
+      padding: { top: 48, bottom: 80, left: 48, right: 48 },
+      duration: 900,
+      essential: true,
+    });
     setMapStage(MAP_STAGES.IDLE);
   }
 
@@ -331,8 +457,7 @@ export default function NavigationMap(): JSX.Element {
           name: "geolocation" as PermissionName,
         });
       }
-    } catch {
-    }
+    } catch {}
   }
 
   async function enableCompass() {
@@ -372,8 +497,16 @@ export default function NavigationMap(): JSX.Element {
 
   function disableCompass() {
     if (compassHandlerRef.current) {
-      window.removeEventListener("deviceorientationabsolute", compassHandlerRef.current, true);
-      window.removeEventListener("deviceorientation", compassHandlerRef.current, true);
+      window.removeEventListener(
+        "deviceorientationabsolute",
+        compassHandlerRef.current,
+        true,
+      );
+      window.removeEventListener(
+        "deviceorientation",
+        compassHandlerRef.current,
+        true,
+      );
       compassHandlerRef.current = null;
     }
     setUseCompass(false);
@@ -390,13 +523,13 @@ export default function NavigationMap(): JSX.Element {
     if (!("geolocation" in navigator)) {
       const msg = "Geolocation not supported";
       setLastGeoMsg(msg);
-      alert(msg);
+      toast.error(msg);
       return;
     }
     if (!window.isSecureContext) {
       const msg = "Location requires HTTPS (or localhost)";
       setLastGeoMsg(msg);
-      alert(msg);
+      toast.error(msg);
       return;
     }
 
@@ -435,24 +568,35 @@ export default function NavigationMap(): JSX.Element {
     }
 
     try {
-      const curDestination: Destination | undefined = destinations.find((cur) => cur.id === id)
-      if (!curDestination) return toast.error("Could not find the current destination.");
+      const curDestination: Destination | undefined = destinations.find(
+        (cur) => cur.id === id,
+      );
+      if (!curDestination)
+        return toast.error("Could not find the current destination.");
       let curDestinationPoly: GeoJSONFeatureCollection | null = null;
       try {
         if (curDestination.polygon) {
-          curDestinationPoly = JSON.parse(curDestination.polygon) as GeoJSONFeatureCollection;
+          curDestinationPoly = JSON.parse(
+            curDestination.polygon,
+          ) as GeoJSONFeatureCollection;
         }
       } catch {
         toast.error("Building has no boundary data.");
       }
       setCurBuildingPoly(curDestinationPoly);
 
-      const req: any = await apiClient.get(`/api/destination/outsideNode?id=${encodeURIComponent(id)}`);
+      const req: any = await apiClient.get(
+        `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
+      );
       const resp = await req.json();
 
-
       const bnid = resp?.nodes ?? [];
+      const details: Array<{ id: number; lat: number; lng: number }> =
+        Array.isArray(resp?.nodeDetails) ? resp.nodeDetails : [];
       setBuildingNodes(new Set(bnid));
+      setBuildingMarkers(details);
+
+      void prefetchGraph();
 
       setDestPos({
         lat: curDestination.lat - 0.0002,
@@ -470,9 +614,10 @@ export default function NavigationMap(): JSX.Element {
 
       setPath(PATH_RESET);
       routeCoordsRef.current = [];
+      setRouteCoords([]);
+      setRouteEta(null);
 
       setMapStage(MAP_STAGES.BUILDING);
-
     } catch (err) {
       console.error("Building lookup failed", err);
       toast.error("Unable to locate that building right now.");
@@ -482,11 +627,16 @@ export default function NavigationMap(): JSX.Element {
   function handleClearDestination() {
     if (tracking) stopTracking();
     setSelectedDest(-1);
+    setDestinationStops([]);
+    setStopsEditorOpen(false);
     setDestPos(null);
     setBuildingNodes(new Set());
+    setBuildingMarkers([]);
     setPath(PATH_RESET);
     setNavigating(false);
     routeCoordsRef.current = [];
+    setRouteCoords([]);
+    setRouteEta(null);
     setMapStage(MAP_STAGES.IDLE);
     showCampusOverview();
   }
@@ -503,7 +653,129 @@ export default function NavigationMap(): JSX.Element {
     }
     setSheetPosition(0);
     setSelectedDest(id);
+    if (!stopsEditorOpen) {
+      setDestinationStops([id]);
+    }
     await showBuilding(id);
+  }
+
+  async function handleStopPick(id: number) {
+    if (tracking) stopTracking();
+    setSelectedDest(id);
+    setSheetPosition(0);
+    await showBuilding(id);
+  }
+
+  function openStopsEditor() {
+    if (selectedDest > 0 && destinationStops.length === 0) {
+      setDestinationStops([selectedDest]);
+    }
+    setStopsEditorOpen(true);
+    setSheetPosition(effectiveSheetPeek);
+  }
+
+  async function loadFavorites() {
+    try {
+      const req = await apiClient.get("/api/favorites");
+      if (req.status !== 200) return;
+      const data = (await req.json()) as { favorites?: FavoriteRow[] };
+      setFavorites(data.favorites ?? []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadChains() {
+    try {
+      const req = await apiClient.get("/api/destination-chains");
+      if (req.status !== 200) return;
+      const data = (await req.json()) as { chains?: ChainRow[] };
+      setChains(data.chains ?? []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function toggleFavorite(destId: number) {
+    if (!isSignedIn) {
+      toast.error("Sign in to save favorites");
+      return;
+    }
+    const isFav = favoriteIdSet.has(destId);
+    try {
+      if (isFav) {
+        const req = await apiClient.del(
+          `/api/favorites?destinationId=${encodeURIComponent(destId)}`,
+        );
+        if (req.status !== 200) throw new Error("remove failed");
+        setFavorites((prev) => prev.filter((f) => f.id !== destId));
+        toast.success("Building removed from favorites");
+      } else {
+        const req = await apiClient.post("/api/favorites", {
+          destinationId: destId,
+        });
+        if (req.status !== 201) throw new Error("add failed");
+        const dest = destinations.find((d) => Number(d.id) === destId);
+        if (dest) {
+          setFavorites((prev) => [
+            ...prev,
+            {
+              id: destId,
+              name: dest.name,
+              lat: dest.lat,
+              lng: dest.lng,
+            },
+          ]);
+        } else {
+          await loadFavorites();
+        }
+        toast.success("Building added to favorites");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not update favorite");
+    }
+  }
+
+  async function applyChain(chain: ChainRow) {
+    if (!chain.destinationIds.length) return;
+    setDestinationStops(chain.destinationIds);
+    const lastId = chain.destinationIds[chain.destinationIds.length - 1]!;
+    setSelectedDest(lastId);
+    await showBuilding(lastId);
+    setStopsEditorOpen(true);
+    setSheetPosition(0);
+    toast.success(`Loaded “${chain.name}”`);
+  }
+
+  async function saveNamedChain() {
+    if (!isSignedIn) {
+      toast.error("Sign in to save favorite trips");
+      return;
+    }
+    const name = chainNameInput.trim();
+    if (!name) {
+      toast.error("Enter a trip name");
+      return;
+    }
+    if (destinationStops.length < 2) {
+      toast.error("Add at least two stops before saving a favorite trip");
+      return;
+    }
+    try {
+      const req = await apiClient.post("/api/destination-chains", {
+        name,
+        destinationIds: destinationStops,
+      });
+      if (req.status !== 201) throw new Error("save failed");
+      setChainNameInput("");
+      setShowFavoriteTripSave(false);
+      await loadChains();
+      toast.success("Trip saved to favorites");
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not save favorite trip");
+    }
   }
 
   /** -------- Route utilities (typed) -------- */
@@ -524,29 +796,20 @@ export default function NavigationMap(): JSX.Element {
     return { nodesById, edgesByKey };
   }
 
-
-
-
   const buildingNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
-    if (!markers.length || !buildingNodes.size) return null;
+    if (!buildingMarkers.length) return null;
     return {
       type: "FeatureCollection",
-      features: markers
-        .filter((m) => buildingNodes.has(m.id))
-        .map((m) => {
-
-          return {
-            type: "Feature",
-            properties: {
-              id: String(m.id),
-              onPath: m.id == path.lastNodeId,
-            },
-            geometry: { type: "Point", coordinates: [m.lng, m.lat] },
-          }
-        }),
+      features: buildingMarkers.map((m) => ({
+        type: "Feature",
+        properties: {
+          id: String(m.id),
+          onPath: m.id === path.lastNodeId,
+        },
+        geometry: { type: "Point", coordinates: [m.lng, m.lat] },
+      })),
     };
-  }, [markers, buildingNodes, path]);
-
+  }, [buildingMarkers, path.lastNodeId]);
 
   /** -------- Bearing / camera -------- */
 
@@ -583,7 +846,14 @@ export default function NavigationMap(): JSX.Element {
   /** -------- Route actions -------- */
 
   async function getRoute(): Promise<Path> {
-    if (!selectedDest || selectedDest <= 0) {
+    const routeDestIds =
+      destinationStops.filter((id) => id > 0).length > 0
+        ? destinationStops.filter((id) => id > 0)
+        : selectedDest > 0
+          ? [selectedDest]
+          : [];
+
+    if (routeDestIds.length === 0) {
       toast.error("Please select a destination before starting route.");
       return PATH_RESET;
     }
@@ -592,32 +862,68 @@ export default function NavigationMap(): JSX.Element {
       return PATH_RESET;
     }
 
-    const req = await apiClient.post("/api/map/navigateTo", {
-      destId: selectedDest,
-      lat: userPos.lat,
-      lng: userPos.lng,
-      navConditions: curNavConditions,
-    });
-    const resp = await req.json().catch(() => ({}));
+    const payload =
+      routeDestIds.length > 1
+        ? {
+            viaDestIds: routeDestIds,
+            lat: userPos.lat,
+            lng: userPos.lng,
+            navConditions: curNavConditions,
+          }
+        : {
+            destId: routeDestIds[0],
+            lat: userPos.lat,
+            lng: userPos.lng,
+            navConditions: curNavConditions,
+          };
+
+    const req = await apiClient.post("/api/map/navigateTo", payload);
+    const resp = (await req.json().catch(() => ({}))) as NavigateToResponse & {
+      error?: string;
+    };
     if (req.status !== 200) {
-      toast.error((resp as { error?: string })?.error ?? "Failed to build route.");
+      toast.error(resp?.error ?? "Failed to build route.");
       throw new Error("Navigate request failed");
     }
     if (!Array.isArray(resp?.path) || resp.path.length === 0) {
       toast.error("No route found for that selection.");
       return PATH_RESET;
     }
-    const orderedPath = resp.path as number[];
-    const pnids: Set<number> = new Set(resp.path as number[]);
-    const firstNodeId = edgeIndex.find((cur) => cur.id == orderedPath[0])?.from;
-    const lastNodeId = edgeIndex.find((cur) => cur.id == orderedPath[orderedPath.length - 1])?.to;
+    const orderedPath = resp.path;
+    const pnids: Set<number> = new Set(orderedPath);
+    const firstNodeId = resp.firstNodeId ?? orderedPath[0];
+    const lastNodeId = resp.lastNodeId ?? orderedPath[orderedPath.length - 1];
     if (!lastNodeId || !firstNodeId || pnids.size === 0) {
       toast.error("No route found for that selection.");
       return PATH_RESET;
     }
-    return { path: pnids, firstNodeId, lastNodeId } as Path;
+    const coords = resp.geometry?.coordinates ?? [];
+    routeCoordsRef.current = coords;
+    setRouteCoords(coords);
+    if (
+      typeof resp.distanceMeters === "number" &&
+      typeof resp.durationSeconds === "number"
+    ) {
+      setRouteEta({
+        distanceMeters: resp.distanceMeters,
+        durationSeconds: resp.durationSeconds,
+        legs: Array.isArray(resp.legs) ? resp.legs : [],
+      });
+    } else {
+      setRouteEta(null);
+    }
+    setRouteSteps(Array.isArray(resp.steps) ? resp.steps : []);
+    navProgress.resetProgress();
+    if (coords.length >= 2) {
+      fitToUserAndDest(coords, { duration: 900 });
+    }
+    return {
+      path: pnids,
+      firstNodeId,
+      lastNodeId,
+      startNode: resp.startNode,
+    };
   }
-
 
   async function showRoute() {
     try {
@@ -626,7 +932,7 @@ export default function NavigationMap(): JSX.Element {
       setNavigating(true);
       setTracking(false);
       setMapStage(MAP_STAGES.ROUTE);
-      setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
+      setSheetPosition(effectiveSheetPeek);
       setZoomed(true);
     } catch (err) {
       console.error("Route lookup failed", err);
@@ -648,10 +954,21 @@ export default function NavigationMap(): JSX.Element {
   }
 
   async function startTracking() {
-    if (!selectedDest || selectedDest <= 0) return toast.error("Please select a destination first.");
-    if (!userPos) return toast.error("Tap Locate Me first so I know where you are.");
+    if (!selectedDest || selectedDest <= 0)
+      return toast.error("Please select a destination first.");
+    if (!userPos)
+      return toast.error("Tap Locate Me first so I know where you are.");
 
-    const firstNode = markers.find((cur) => cur.id == path.firstNodeId);
+    const firstNode =
+      path.startNode ??
+      markers.find((cur) => cur.id === path.firstNodeId) ??
+      buildingMarkers.find((cur) => cur.id === path.firstNodeId) ??
+      (routeCoordsRef.current[1]
+        ? {
+            lng: routeCoordsRef.current[1][0],
+            lat: routeCoordsRef.current[1][1],
+          }
+        : null);
 
     if (!firstNode) return toast.error("Navigation could not start.");
 
@@ -685,8 +1002,10 @@ export default function NavigationMap(): JSX.Element {
         );
 
         let brg: number;
-        if (typeof heading === "number" && !Number.isNaN(heading)) brg = heading;
-        else if (deviceHeadingRef.current != null) brg = deviceHeadingRef.current;
+        if (typeof heading === "number" && !Number.isNaN(heading))
+          brg = heading;
+        else if (deviceHeadingRef.current != null)
+          brg = deviceHeadingRef.current;
         else if (routeCoordsRef.current.length >= 2) {
           const [nx, ny] = routeCoordsRef.current[1];
           brg = bearingTo(longitude, latitude, nx, ny);
@@ -721,6 +1040,9 @@ export default function NavigationMap(): JSX.Element {
     setPath(PATH_RESET);
     setNavigating(false);
     setTracking(false);
+    setRouteEta(null);
+    setRouteSteps([]);
+    navProgress.resetProgress();
     setMapStage(MAP_STAGES.IDLE);
     disableCompass();
   }
@@ -736,10 +1058,10 @@ export default function NavigationMap(): JSX.Element {
     } catch (err) {
       console.error(err);
       toast.error("Failed to load buildings!");
+    } finally {
+      setDestinationsFirstLoadPending(false);
     }
   }
-
-
 
   useEffect(() => {
     getBuildings();
@@ -820,123 +1142,16 @@ export default function NavigationMap(): JSX.Element {
     };
   }, []);
 
-  /** -------- Bottom sheet (typed) -------- */
-
-  const [sheetPosition, setSheetPosition] = useState<number>(0.75);
-  const [isDraggingSheet, setIsDraggingSheet] = useState<boolean>(false);
-
-  const sheetDragActiveRef = useRef<boolean>(false);
-  const sheetStartYRef = useRef<number>(0);
-  const sheetStartPosRef = useRef<number>(0);
-  const sheetDidDragRef = useRef<boolean>(false);
-
-  const sheetSnapPoints = useMemo<number[]>(
-    () => [0.05, 0.1, 0.4, 0.6, 0.75],
-    [],
-  );
-
-  function clamp(value: number, min: number, max: number) {
-    return Math.min(max, Math.max(min, value));
-  }
-
-  function handleSheetKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSheetPosition((current) => {
-        const idx = sheetSnapPoints.findIndex((sp) => Math.abs(sp - current) < 0.02);
-        return idx > 0 ? sheetSnapPoints[idx - 1] : sheetSnapPoints[0];
-      });
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSheetPosition((current) => {
-        const idx = sheetSnapPoints.findIndex((sp) => Math.abs(sp - current) < 0.02);
-        return idx < sheetSnapPoints.length - 1 ? sheetSnapPoints[idx + 1] : sheetSnapPoints[sheetSnapPoints.length - 1];
-      });
-    }
-  }
-
-  function toggleSheetToFarthestSnap() {
-    setSheetPosition((current) => {
-      const first = sheetSnapPoints[0];
-      const last = sheetSnapPoints[sheetSnapPoints.length - 1];
-      const distToFirst = Math.abs(current - first);
-      const distToLast = Math.abs(current - last);
-      return distToFirst > distToLast ? first : last;
-    });
-  }
-
-  function handleSheetDragStart(e: React.PointerEvent | React.TouchEvent) {
-    const anyE: any = e;
-    const clientY =
-      anyE.touches && anyE.touches[0] ? anyE.touches[0].clientY : anyE.clientY;
-
-    sheetDragActiveRef.current = true;
-    sheetDidDragRef.current = false;
-    setIsDraggingSheet(true);
-    sheetStartYRef.current = clientY;
-    sheetStartPosRef.current = sheetPosition;
-  }
+  const [isZoomed, setZoomed] = useState<boolean>(false);
+  const [sheetPosition, setSheetPosition] = useState(HOME_SHEET_PEEK);
+  const [effectiveSheetPeek, setEffectiveSheetPeek] = useState(HOME_SHEET_PEEK);
+  const sheetCollapsed = sheetPosition >= effectiveSheetPeek * 0.92;
 
   useEffect(() => {
-    function handleMove(e: PointerEvent | TouchEvent) {
-      if (!sheetDragActiveRef.current) return;
-
-      const anyE: any = e;
-      const clientY =
-        anyE.touches && anyE.touches[0]
-          ? anyE.touches[0].clientY
-          : anyE.clientY;
-
-      const deltaY = clientY - sheetStartYRef.current;
-      if (Math.abs(deltaY) > 6) sheetDidDragRef.current = true;
-
-      const nextPos = clamp(
-        sheetStartPosRef.current + deltaY / window.innerHeight,
-        0,
-        1,
-      );
-      setSheetPosition(nextPos);
-    }
-
-    function handleEnd() {
-      if (!sheetDragActiveRef.current) return;
-      sheetDragActiveRef.current = false;
-      setIsDraggingSheet(false);
-
-      setSheetPosition((current) => {
-        let closest = sheetSnapPoints[0];
-        let minDist = Math.abs(current - closest);
-        for (const sp of sheetSnapPoints) {
-          const d = Math.abs(current - sp);
-          if (d < minDist) {
-            minDist = d;
-            closest = sp;
-          }
-        }
-        return closest;
-      });
-    }
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleEnd);
-    window.addEventListener("pointercancel", handleEnd);
-
-    window.addEventListener("touchmove", handleMove as any, { passive: false });
-    window.addEventListener("touchend", handleEnd);
-    window.addEventListener("touchcancel", handleEnd);
-
-    return () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      window.removeEventListener("pointercancel", handleEnd);
-
-      window.removeEventListener("touchmove", handleMove as any);
-      window.removeEventListener("touchend", handleEnd);
-      window.removeEventListener("touchcancel", handleEnd);
-    };
-  }, [sheetSnapPoints]);
-
-  const [isZoomed, setZoomed] = useState<boolean>(false);
+    setSheetPosition((pos) =>
+      pos >= effectiveSheetPeek * 0.92 ? effectiveSheetPeek : pos,
+    );
+  }, [effectiveSheetPeek]);
 
   async function handelZoom() {
     if (isZoomed) {
@@ -947,7 +1162,7 @@ export default function NavigationMap(): JSX.Element {
 
     if (navigating) {
       if (tracking) {
-        setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
+        setSheetPosition(effectiveSheetPeek);
         setZoomed(true);
         await startTracking().catch(() => {});
         return;
@@ -997,165 +1212,313 @@ export default function NavigationMap(): JSX.Element {
         setNavigating(false);
         setPath(PATH_RESET);
         routeCoordsRef.current = [];
+        setRouteCoords([]);
+        setRouteEta(null);
         setMapStage(MAP_STAGES.BUILDING);
       } else {
-        setSheetPosition(sheetSnapPoints[sheetSnapPoints.length - 1]);
+        setSheetPosition(effectiveSheetPeek);
         startTracking();
       }
     }
   }
-
 
   /** ---------------- Render ---------------- */
 
   const canRenderMap = !!baseStyle;
 
   return (
-    <main id="main-content" className="relative h-screen w-full bg-background text-foreground">
+    <main
+      id="main-content"
+      className={`relative w-full bg-background text-foreground ${mapPageClass}`}
+    >
       <h1 className="sr-only">IC Maps &ndash; Campus Navigation</h1>
 
       {/* Top brand + search bar */}
-      <div className="absolute inset-x-2 top-3 z-30 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
-        <div className="flex w-full items-stretch gap-2 justify-items-center">
-          <HomeLogoLink
-            className={`flex flex-[1] rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur transition transform hover:scale-[1.03] active:scale-95`}
+      <div
+        className={`absolute inset-x-3 top-0 z-30 ${safeAreaTopClass} md:left-1/2 md:w-[720px] md:-translate-x-1/2`}
+      >
+        <div className="flex w-full items-stretch gap-2">
+          <EditorToolsMenu
+            isAdmin={isAdmin}
+            isIcUser={isIcUser}
+            devMode={devMode}
           />
 
-          <div
-            className={`flex flex-[10] items-center justify-center-safe rounded-[22px] border ${borderMutedClass} ${surfacePanelClass} px-1 py-1 shadow-xl backdrop-blur`}
-          >
-            <div className="w-full">
-              <label htmlFor="search-dest" className="sr-only">Select a campus building</label>
-              <select
-                id="search-dest"
-                aria-label="Select a campus building"
-                className={`w-full rounded-2xl border px-3 py-3 text-sm font-medium transition focus:outline-none focus:ring-2 ${selectFocusClass} ${selectBaseClass}`}
-                value={selectedDest}
-                onChange={(e) => handleDestinationChange(Number(e.target.value))}
-              >
-                <option value="">Search campus buildings…</option>
-                {destinations.map((d) => (
-                  <option key={String(d.id)} value={Number(d.id)}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+          <DestinationSearchCombobox
+            destinations={destinations}
+            value={selectedDest > 0 ? selectedDest : 0}
+            onChange={(id) => void handleDestinationChange(id)}
+            onAddStop={openStopsEditor}
+            stopCount={destinationStops.length}
+            loading={destinationsFirstLoadPending && destinations.length === 0}
+          />
 
-          {session ? (
-            <div
-              className={`flex flex-[1] h-full  w-full items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
-              transition transform hover:scale-[1.03] active:scale-95`}
-            >
-              <ProfileOptions session={session} />
+          {isSignedIn ? (
+            <div className={`${mapHeaderChipClass} shrink-0 px-1`}>
+              <ProfileOptions session={realSession!} />
             </div>
           ) : (
-            <Link href="/account/login" aria-label="Log in to your account">
-              <div
-                className={`flex flex-[1] h-full  w-full items-center justify-center rounded-[25px] border ${borderMutedClass} ${surfacePanelClass} px-2 py-1 shadow-xl backdrop-blur
-              transition transform hover:scale-[1.03] active:scale-95`}
-              >
-                <IconLogin2 size={35} aria-hidden="true" />
-              </div>
+            <Link
+              href="/account/login"
+              aria-label="Log in to your account"
+              className={`${mapHeaderChipClass} shrink-0 px-2`}
+            >
+              <LogIn className="size-8 shrink-0" aria-hidden="true" />
             </Link>
           )}
         </div>
       </div>
 
-      {/* Nav mode pills */}
-      {!tracking ?
-        <div className="absolute inset-x-3 top-21 z-30 space-y-3 md:left-1/2 md:w-[720px] md:-translate-x-1/2">
-          <div className="px-3">
-            <div className="flex justify-center">
-              <span
-                className={`mx-2 w-15 rounded-3xl border ${borderMutedClass} ${surfacePanelClass} text-center text-[13px] font-bold uppercase tracking-wide text-panel-muted-foreground shadow-xl backdrop-blur`}
-              >
-                Modes
-              </span>
-            </div>
-
-            <div role="radiogroup" aria-label="Navigation mode" className="mt-1 justify-center -mx-1 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-              <button
-                role="radio"
-                aria-checked={curNavConditions.is_pedestrian}
-                onClick={() => {
-                  setCurNavConditions((prev) => {
-                    let temp = { ...prev }
-                    if (!temp.is_pedestrian) {
-                      temp.is_pedestrian = true;
-                      temp.is_vehicular = false;
-                    }
-                    return temp;
-                  })
-                }}
-                className={[
-                  "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
-                  curNavConditions.is_pedestrian
-                    ? "bg-brand-cta text-brand-cta-foreground"
-                    : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-                ].join(" ")}
-              >
-                Pedestrian
-              </button>
-              <button
-                role="radio"
-                aria-checked={curNavConditions.is_vehicular}
-                onClick={() => {
-                  setCurNavConditions((prev) => {
-                    let temp = { ...prev }
-                    if (!temp.is_vehicular) {
-                      temp.is_pedestrian = false;
-                      temp.is_vehicular = true;
-                    }
-                    return temp;
-                  })
-                }}
-                className={[
-                  "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
-                  curNavConditions.is_vehicular
-                    ? "bg-brand-cta text-brand-cta-foreground"
-                    : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-                ].join(" ")}
-              >
-                Vehicular
-              </button>
-              {/* {[{id:0,name:"Pe"}].map((mode) => {
-                const active = `${mode.id}` === `${curNavMode}`;
-                return (
+      {isSignedIn && (favorites.length > 0 || chains.length > 0) ? (
+        <div
+          className={`absolute inset-x-3 z-30 ${mapFavoritesRowOffsetClass} space-y-2 md:left-1/2 md:w-[720px] md:-translate-x-1/2`}
+        >
+          {favorites.length > 0 ? (
+            <div>
+              <p className="mb-1 px-1 text-center text-[11px] font-semibold uppercase tracking-wide text-panel-muted-foreground">
+                Favorite buildings
+              </p>
+              <div className="flex justify-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {favorites.map((fav) => (
                   <button
-                    key={String(mode.id)}
-                    onClick={() => {
-                      setCurNavMode(mode.id)
-                    }}
+                    key={fav.id}
+                    type="button"
+                    onClick={() => void handleDestinationChange(fav.id)}
                     className={[
-                      "shrink-0 rounded-[15px] px-4 py-1.5 text-xs font-semibold uppercase transition shadow-sm",
-                      active
-                        ? "bg-brand-cta text-brand-cta-foreground"
-                        : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+                      "shrink-0 min-h-11 rounded-2xl border px-4 py-2 text-sm font-medium transition",
+                      selectedDest === fav.id
+                        ? "border-brand-cta bg-brand-cta text-brand-cta-foreground"
+                        : `${borderMutedClass} ${surfacePanelClass} hover:bg-panel`,
                     ].join(" ")}
                   >
-                    {mode.name}
+                    {fav.name}
                   </button>
-                );
-              })} */}
+                ))}
+              </div>
             </div>
+          ) : null}
+          {chains.length > 0 ? (
+            <div>
+              <p className="mb-1 px-1 text-center text-[11px] font-semibold uppercase tracking-wide text-panel-muted-foreground">
+                Favorite trips
+              </p>
+              <div className="flex justify-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {chains.map((chain) => (
+                  <button
+                    key={chain.id}
+                    type="button"
+                    onClick={() => void applyChain(chain)}
+                    className={[
+                      "shrink-0 min-h-11 rounded-2xl border px-4 py-2 text-sm font-medium transition inline-flex items-center gap-1.5",
+                      `${borderMutedClass} ${surfacePanelClass} hover:bg-panel`,
+                    ].join(" ")}
+                  >
+                    <Star
+                      size={16}
+                      className="text-brand-cta"
+                      aria-hidden="true"
+                    />
+                    {chain.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!tracking ? (
+        <div
+          className={`absolute inset-x-3 z-30 ${mapModeRowOffsetClass} space-y-2 md:left-1/2 md:w-[720px] md:-translate-x-1/2`}
+        >
+          <div
+            role="radiogroup"
+            aria-label="Navigation mode"
+            className="flex justify-center gap-2 overflow-x-auto pb-1 no-scrollbar mt-5 "
+          >
+            <button
+              role="radio"
+              aria-checked={curNavConditions.is_pedestrian}
+              onClick={() => {
+                setCurNavConditions((prev) => {
+                  const temp = { ...prev };
+                  if (!temp.is_pedestrian) {
+                    temp.is_pedestrian = true;
+                    temp.is_vehicular = false;
+                  }
+                  return temp;
+                });
+              }}
+              className={[
+                mapModeChipClass,
+                "inline-flex shrink-0 items-center gap-1.5",
+                curNavConditions.is_pedestrian
+                  ? "bg-brand-cta text-brand-cta-foreground"
+                  : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+              ].join(" ")}
+            >
+              <Footprints size={16} aria-hidden="true" />
+              Pedestrian
+            </button>
+            <button
+              role="radio"
+              aria-checked={curNavConditions.is_vehicular}
+              onClick={() => {
+                setCurNavConditions((prev) => {
+                  const temp = { ...prev };
+                  if (!temp.is_vehicular) {
+                    temp.is_pedestrian = false;
+                    temp.is_vehicular = true;
+                  }
+                  return temp;
+                });
+              }}
+              className={[
+                mapModeChipClass,
+                "inline-flex shrink-0 items-center gap-1.5",
+                curNavConditions.is_vehicular
+                  ? "bg-brand-cta text-brand-cta-foreground"
+                  : `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
+              ].join(" ")}
+            >
+              <Car size={16} aria-hidden="true" />
+              Vehicular
+            </button>
           </div>
-        </div> : null}
+        </div>
+      ) : null}
 
+      <MapBottomSheet
+        hidden={!selectedDest}
+        height="calc(100dvh - max(4.75rem, env(safe-area-inset-top) + 3.5rem))"
+        position={sheetPosition}
+        onPositionChange={setSheetPosition}
+        snapPoints={HOME_SHEET_SNAP_POINTS}
+        compactHeader={navigating && sheetCollapsed}
+        peekMinVisiblePx={
+          navigating && sheetCollapsed
+            ? mapSheetPeekMinVisibleCompactPx
+            : mapSheetPeekMinVisiblePx
+        }
+        toolbarOverlapPx={mapSheetToolbarOverlapPx}
+        onEffectivePeekChange={setEffectiveSheetPeek}
+        title={
+          selectedBuilding && !(navigating && sheetCollapsed) ? (
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-panel-muted-foreground">
+              {stageDetails.label}
+            </p>
+          ) : null
+        }
+        subtitle={
+          selectedBuilding ? (
+            navigating && sheetCollapsed && routeEta ? (
+              <p className="w-full text-center text-base font-semibold text-brand-cta">
+                {formatRouteDistance(routeEta.distanceMeters)}
+              </p>
+            ) : (
+              <>
+                <p className="w-full truncate text-center text-lg font-semibold">
+                  {selectedBuilding.name}
+                </p>
+                <p className="mt-1 w-full text-center text-sm text-panel-muted-foreground">
+                  {stageDetails.headline}
+                </p>
+                {navigating && routeEta ? (
+                  <p className="mt-1 w-full text-center text-sm font-semibold text-brand-cta">
+                    {formatRouteEtaSummary(
+                      routeEta.durationSeconds,
+                      routeEta.distanceMeters,
+                    )}
+                  </p>
+                ) : null}
+              </>
+            )
+          ) : null
+        }
+        toolbar={
+          <div className="pointer-events-none grid w-full grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-end gap-x-2">
+            <button
+              type="button"
+              className={`pointer-events-auto shrink-0 ${mapFloatingActionClass}`}
+              onClick={handelZoom}
+              aria-label={
+                isZoomed
+                  ? "Zoom out to campus overview"
+                  : "Zoom in to destination"
+              }
+            >
+              {isZoomed ? (
+                <Maximize2 className="text-current" size={32} />
+              ) : (
+                <Minimize2 className="text-current" size={32} />
+              )}
+            </button>
 
-      {curNavConditions.is_pedestrian ?
-        <>
-          <div className="absolute right-10 top-80 z-30 flex flex-col   bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
-            <div className="p-2">
+            {navigating && routeSteps.length > 0 ? (
+              <div className="pointer-events-auto flex min-w-0 justify-center">
+                <NavigationNextTurnBanner
+                  steps={routeSteps}
+                  currentStepIndex={navProgress.currentStepIndex}
+                  distanceToNextMeters={navProgress.distanceToNextMeters}
+                  units={distanceUnits}
+                  tracking={tracking}
+                  onAdvance={navProgress.advanceStep}
+                  className="w-full max-w-[min(15rem,calc(100vw-7rem))]"
+                />
+              </div>
+            ) : (
+              <div aria-hidden />
+            )}
+
+            <button
+              type="button"
+              className={`pointer-events-auto shrink-0 ${mapFloatingActionClass}`}
+              onClick={handelTheButton}
+              aria-label={
+                !tracking && !navigating
+                  ? "Show route"
+                  : navigating && tracking
+                    ? "Stop tracking"
+                    : "Start live navigation"
+              }
+            >
+              {!tracking && !navigating ? (
+                <Route className="text-current" size={32} />
+              ) : null}
+
+              {navigating ? (
+                tracking ? (
+                  <NavigationOff className="text-current" size={32} />
+                ) : (
+                  <Navigation className="text-current" size={32} />
+                )
+              ) : null}
+            </button>
+          </div>
+        }
+      >
+        {curNavConditions.is_pedestrian && !tracking ? (
+          <details
+            className={`mx-auto mt-3 mb-4 w-full max-w-md rounded-2xl border ${borderMutedClass} ${surfaceSubtleClass}`}
+          >
+            <summary
+              className={`cursor-pointer px-4 py-3 text-center text-sm font-semibold ${touchTargetClass}`}
+            >
+              Route options
+            </summary>
+            <div className="space-y-2 border-t border-border px-3 pb-3 pt-2">
               <Toggle
-                className={curNavConditions.is_through_building ? "bg-brand-cta text-brand-cta-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
-                aria-label={"Through Building"}
+                className={
+                  curNavConditions.is_through_building
+                    ? "bg-brand-cta text-brand-cta-foreground w-full min-h-11 justify-start"
+                    : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel w-full min-h-11 justify-start"
+                }
+                aria-label="Through Building"
                 size="sm"
                 variant="outline"
                 pressed={curNavConditions.is_through_building}
                 onPressedChange={(pressed) =>
-                  setCurNavConditions(prev => ({
+                  setCurNavConditions((prev) => ({
                     ...prev,
                     is_through_building: pressed,
                   }))
@@ -1168,16 +1531,18 @@ export default function NavigationMap(): JSX.Element {
                 )}
                 Through Building
               </Toggle>
-            </div>
-            <div className="p-2">
               <Toggle
-                className={curNavConditions.is_avoid_stairs ? "bg-brand-cta text-brand-cta-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
-                aria-label={"Stairs"}
+                className={
+                  curNavConditions.is_avoid_stairs
+                    ? "bg-brand-cta text-brand-cta-foreground w-full min-h-11 justify-start"
+                    : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel w-full min-h-11 justify-start"
+                }
+                aria-label="Avoid Stairs"
                 size="sm"
                 variant="outline"
                 pressed={curNavConditions.is_avoid_stairs}
                 onPressedChange={(pressed) =>
-                  setCurNavConditions(prev => ({
+                  setCurNavConditions((prev) => ({
                     ...prev,
                     is_avoid_stairs: pressed,
                   }))
@@ -1190,16 +1555,18 @@ export default function NavigationMap(): JSX.Element {
                 )}
                 Avoid Stairs
               </Toggle>
-            </div>
-            <div className="p-2 ">
               <Toggle
-                className={curNavConditions.is_incline_limit ? "bg-brand-cta text-brand-cta-foreground" : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel"}
-                aria-label={"Limit Incline"}
+                className={
+                  curNavConditions.is_incline_limit
+                    ? "bg-brand-cta text-brand-cta-foreground w-full min-h-11 justify-start"
+                    : "border border-border bg-panel-muted text-panel-muted-foreground hover:bg-panel w-full min-h-11 justify-start"
+                }
+                aria-label="Limit Incline"
                 size="sm"
                 variant="outline"
                 pressed={curNavConditions.is_incline_limit}
                 onPressedChange={(pressed) =>
-                  setCurNavConditions(prev => ({
+                  setCurNavConditions((prev) => ({
                     ...prev,
                     is_incline_limit: pressed,
                   }))
@@ -1212,212 +1579,194 @@ export default function NavigationMap(): JSX.Element {
                 )}
                 Limit Incline
               </Toggle>
-            </div>
-          </div>
-          {curNavConditions.is_incline_limit ?
-            <div className="absolute right-10 w-10 top-120 z-30 flex flex-col space-y-3  bg-background text-foreground rounded-[10px] border shadow-xl backdrop-blur ">
-              <div className="mx-auto grid w-full max-w-xs gap-3">
-                <div className="flex items-center justify-center">
-                  <span className="text-muted-foreground text-sm">
-                    {curNavConditions.max_incline}°
-                  </span>
+              {curNavConditions.is_incline_limit ? (
+                <div className="rounded-xl border border-border bg-panel px-3 py-3">
+                  <div className="mb-2 text-center text-sm text-muted-foreground">
+                    Max incline: {curNavConditions.max_incline}°
+                  </div>
+                  <Slider
+                    id="max-incline-slider"
+                    value={[curNavConditions.max_incline]}
+                    onValueChange={(val) => {
+                      setCurNavConditions((prev) => ({
+                        ...prev,
+                        max_incline: val[0],
+                      }));
+                    }}
+                    min={0}
+                    max={MAX_INCLINE}
+                    step={1}
+                  />
                 </div>
-                <Slider
-                  id="slider-demo-temperature"
-                  value={[curNavConditions.max_incline]}
-                  onValueChange={(val) => {
-                    setCurNavConditions((prev) => {
-                      return { ...prev, max_incline: val[0] }
-                    })
-                  }}
-                  orientation="vertical"
-                  min={0}
-                  max={MAX_INCLINE}
-                  step={1}
-                />
-              </div>
+              ) : null}
             </div>
-            : null}
-        </>
-        : null}
-      {/* admin pages (moved fully to left) */}
-      <nav aria-label="Admin tools" className="absolute left-3 top-40 z-30 flex flex-col space-y-3">
-        {isAdmin ?
-          <>
-            <Link
-              href="/route-editor"
-              className={[
-                "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm text-center",
-                `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-              ].join(" ")}
-            >
-              Route Editor
-            </Link>
+          </details>
+        ) : null}
 
-            <Link
-              href="/destination-editor"
-              className={[
-                "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm text-center",
-                `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-              ].join(" ")}
-            >
-              Building Editor
-            </Link>
-          </>
-          : null}
-        {isIcUser ?
-          <Link
-            href="/customRoute"
-            className={[
-              "shrink-0 w-30 rounded-[15px] px-4 py-1.5 font-bold transition shadow-sm text-center",
-              `border ${borderMutedClass} bg-panel-muted text-panel-muted-foreground hover:bg-panel`,
-            ].join(" ")}
-          >
-            Shareable Routes
-          </Link>
-          : null}
-      </nav>
-
-      {/* Bottom sheet wrapper */}
-      <div
-        className={[
-          "fixed inset-x-0 bottom-0 z-30 h-[60vh] pointer-events-none md:left-1/2 md:w-[720px] md:-translate-x-1/2",
-          !isDraggingSheet && "transition-transform duration-250 ease-out",
-          !selectedDest && "hidden",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        style={{ transform: `translateY(${sheetPosition * 100}%)` }}
-      >
-        <div className="flex flex-row w-full justify-between">
-          <button
-            className={[
-              "mr-3 mb-2 justify-self-start rounded-[15px] w-15 h-15 grid place-items-center pointer-events-auto",
-              "bg-brand-cta text-brand-cta-foreground",
-            ].join(" ")}
-            onClick={handelZoom}
-            aria-label={isZoomed ? "Zoom out to campus overview" : "Zoom in to destination"}
-          >
-            {isZoomed ? (
-              <IconArrowsMaximize className="text-current" size={32} />
-            ) : (
-              <IconArrowsMinimize className="text-current" size={32} />
-            )}
-          </button>
-
-          <button
-            className={[
-              "mr-3 mb-2 justify-self-end rounded-[15px] w-15 h-15 grid place-items-center pointer-events-auto",
-              "bg-brand-cta text-brand-cta-foreground",
-            ].join(" ")}
-            onClick={handelTheButton}
-            aria-label={
-              !tracking && !navigating
-                ? "Show route"
-                : navigating && tracking
-                  ? "Stop tracking"
-                  : "Start live navigation"
-            }
-          >
-            {!tracking && !navigating ? (
-              <IconArrowGuide className="text-current" size={32} />
-            ) : null}
-
-            {navigating ? (
-              tracking ? (
-                <IconNavigationX className="text-current" size={32} />
-              ) : (
-                <IconNavigation className="text-current" size={32} />
-              )
-            ) : null}
-          </button>
-        </div>
-
-        {/* Actual sheet */}
-        <div
-          className={[
-            "flex h-full flex-col rounded-t-3xl border shadow-2xl backdrop-blur pointer-events-auto",
-            surfacePanelClass,
-            borderMutedClass,
-          ].join(" ")}
-        >
-          {/* Grab row */}
+        {selectedBuilding && (
           <div
-            className="w-full"
-            style={{ touchAction: "none" }}
-            onPointerDown={handleSheetDragStart}
-            onTouchStart={handleSheetDragStart}
+            className={`mx-auto w-full max-w-md rounded-2xl border ${borderMutedClass} ${surfaceSubtleClass} p-4 text-center`}
           >
-            <button
-              className={[
-                "ml-0.5 mt-0.5 w-14 h-14 rounded-3xl shadow-md grid place-items-center select-none touch-none",
-                "bg-brand-cta text-brand-cta-foreground",
-              ].join(" ")}
-              style={{ touchAction: "none" }}
-              aria-label={sheetPosition > 0.5 ? "Expand details panel" : "Collapse details panel"}
-              onPointerDown={(e) => handleSheetDragStart(e)}
-              onTouchStart={handleSheetDragStart}
-              onKeyDown={handleSheetKeyDown}
-              onClick={() => {
-                if (sheetDidDragRef.current) return;
-                toggleSheetToFarthestSnap();
-              }}
-            >
-              {sheetPosition > 0.5 ? (
-                <IconArrowBadgeUpFilled className="text-current" size={42} />
-              ) : (
-                <IconArrowBadgeDownFilled className="text-current" size={42} />
-              )}
-            </button>
-          </div>
-
-          <div className="h-[calc(100%-48px)] overflow-y-auto px-4 pb-4">
-            {selectedBuilding && (
-              <div
-                className={`mt-4 rounded-3xl border ${borderMutedClass} ${surfaceSubtleClass} p-4`}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {isSignedIn &&
+              selectedDest > 0 &&
+              destinationStops.length <= 1 ? (
+                <button
+                  type="button"
+                  onClick={() => void toggleFavorite(selectedDest)}
+                  aria-label={
+                    favoriteIdSet.has(selectedDest)
+                      ? "Remove building from favorites"
+                      : "Favorite this building"
+                  }
+                  className={[
+                    "inline-flex min-h-11 items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-semibold transition",
+                    favoriteIdSet.has(selectedDest)
+                      ? "border-brand-cta bg-brand-cta/10 text-brand-cta"
+                      : `${borderMutedClass} text-panel-muted-foreground hover:bg-panel`,
+                    touchTargetClass,
+                  ].join(" ")}
+                >
+                  <Star
+                    size={18}
+                    className={
+                      favoriteIdSet.has(selectedDest)
+                        ? "fill-current text-brand-cta"
+                        : ""
+                    }
+                    aria-hidden="true"
+                  />
+                  {favoriteIdSet.has(selectedDest)
+                    ? "Favorited"
+                    : "Favorite building"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleClearDestination}
+                aria-label="Clear destination"
+                className={`rounded-2xl border border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground transition hover:bg-foreground/5 ${touchTargetClass}`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
-                      {stageDetails.label}
-                    </p>
-                    <p className="text-lg font-semibold">
-                      {selectedBuilding.name}
-                    </p>
-                    <p className="mt-1 text-sm text-panel-muted-foreground">
-                      {stageDetails.headline}
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleClearDestination}
-                    aria-label="Clear destination"
-                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground transition hover:bg-foreground/5"
-                  >
-                    Clear
-                  </button>
-                </div>
+                Clear
+              </button>
+            </div>
 
-                <p className="mt-2 text-sm text-panel-muted-foreground">
-                  {
-                    stageDetails.description ||
-                    "Additional building details will appear here soon."}
+            <p className="mx-auto mt-3 max-w-sm text-sm text-panel-muted-foreground">
+              {stageDetails.description ||
+                "Additional building details will appear here soon."}
+            </p>
+
+            {navigating && routeSteps.length > 0 ? (
+              <NavigationStepsPanel
+                steps={routeSteps}
+                currentStepIndex={navProgress.currentStepIndex}
+                distanceToNextMeters={navProgress.distanceToNextMeters}
+                units={distanceUnits}
+                tracking={tracking}
+                onAdvance={navProgress.advanceStep}
+                hideLiveBanner
+                className="mt-3"
+              />
+            ) : null}
+
+            {navigating && routeEta && routeEta.legs.length > 1 ? (
+              <div
+                className={[
+                  "mx-auto mt-3 w-full max-w-md rounded-2xl border px-4 py-3 text-center",
+                  borderMutedClass,
+                  surfaceSubtleClass,
+                ].join(" ")}
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
+                  Trip estimate
                 </p>
+                <ul className="mt-2 space-y-2">
+                  {routeEta.legs.map((leg, index) => {
+                    const name =
+                      destinations.find((d) => d.id === leg.destinationId)
+                        ?.name ?? `Stop ${index + 1}`;
+                    return (
+                      <li
+                        key={`${leg.destinationId}-${index}`}
+                        className="flex items-center justify-between gap-3 text-sm"
+                      >
+                        <span className="truncate">{name}</span>
+                        <span className="shrink-0 font-medium text-brand-cta">
+                          ~{formatRouteDuration(leg.durationSeconds)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
 
-                {destPos && (
-                  <div className="mt-2 text-xs text-panel-muted-foreground">
-                    {destPos.lat.toFixed(5)}, {destPos.lng.toFixed(5)}
-                  </div>
-                )}
+            {destinationStops.length > 1 ? (
+              <button
+                type="button"
+                onClick={openStopsEditor}
+                className={[
+                  "mx-auto mt-4 flex w-full max-w-md min-h-11 items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition hover:bg-panel",
+                  borderMutedClass,
+                  surfaceSubtleClass,
+                  touchTargetClass,
+                ].join(" ")}
+              >
+                <span>{destinationStops.length} stops in this trip</span>
+                <ListOrdered
+                  size={18}
+                  className="text-brand-cta"
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
+
+            {destPos && (
+              <div className="mt-2 text-xs text-panel-muted-foreground/80">
+                {destPos.lat.toFixed(5)}, {destPos.lng.toFixed(5)}
               </div>
             )}
           </div>
-        </div>
-      </div>
+        )}
+      </MapBottomSheet>
+
+      <DestinationStopsEditor
+        open={stopsEditorOpen}
+        onOpenChange={setStopsEditorOpen}
+        destinations={destinations}
+        favorites={favorites}
+        stops={destinationStops}
+        onStopsChange={(next) => {
+          setDestinationStops(next);
+          if (next.length > 0) {
+            const lastId = next[next.length - 1]!;
+            setSelectedDest(lastId);
+          }
+        }}
+        onPickDestination={(id) => void handleStopPick(id)}
+        onDone={() => {
+          if (destinationStops.length > 1) {
+            toast.success(`${destinationStops.length} stops ready for routing`);
+          }
+          setSheetPosition(0);
+        }}
+        canFavoriteTrip={isSignedIn}
+        tripNameInput={chainNameInput}
+        onTripNameChange={setChainNameInput}
+        showFavoriteTripPanel={showFavoriteTripSave}
+        onToggleFavoriteTrip={() => setShowFavoriteTripSave((v) => !v)}
+        onSaveFavoriteTrip={() => void saveNamedChain()}
+        legEtas={navigating ? routeEta?.legs : undefined}
+      />
 
       {/* Map wrapper */}
       <div className="h-full w-full">
         {!canRenderMap ? (
-          <div className="h-full w-full grid place-items-center text-sm text-muted-foreground" role="status" aria-label="Loading map">
+          <div
+            className="h-full w-full grid place-items-center text-sm text-muted-foreground"
+            role="status"
+            aria-label="Loading map"
+          >
             Loading basemap…
           </div>
         ) : (
@@ -1443,7 +1792,6 @@ export default function NavigationMap(): JSX.Element {
               source={vectorSourceId}
               source-layer="building"
               minzoom={15}
-              beforeId="place-city"
               paint={{
                 "fill-extrusion-color": isDark ? "#2b3647" : "#dfdbd7",
                 "fill-extrusion-height": [
@@ -1498,14 +1846,25 @@ export default function NavigationMap(): JSX.Element {
               markers={markers}
               edgeIndex={edgeIndex}
               setEdgeIndex={setEdgeIndex}
+              showBaseGraph={edgeIndex.length > 0 && navigating}
             />
+
+            {routeCoords.length >= 2 && (
+              <RoutePathLayer coordinates={routeCoords} />
+            )}
+
+            <TripStopMarkers stops={tripStopMarkers} />
 
             {accuracyGeoJSON && (
               <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
 
             {selectedDest && curBuildingPoly && (
-              <Source id="boundary" type="geojson" data={curBuildingPoly as any}>
+              <Source
+                id="boundary"
+                type="geojson"
+                data={curBuildingPoly as any}
+              >
                 <Layer
                   id="boundary-fill"
                   type="fill"
@@ -1526,7 +1885,11 @@ export default function NavigationMap(): JSX.Element {
             )}
 
             {userPos && (
-              <Marker longitude={userPos.lng} latitude={userPos.lat} anchor="center">
+              <Marker
+                longitude={userPos.lng}
+                latitude={userPos.lat}
+                anchor="center"
+              >
                 <div
                   title={`You are here (${userPos.lat.toFixed(6)}, ${userPos.lng.toFixed(6)})`}
                   className="h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-600 shadow-lg ring-4 ring-blue-500/30 transition"
@@ -1539,4 +1902,3 @@ export default function NavigationMap(): JSX.Element {
     </main>
   );
 }
-
