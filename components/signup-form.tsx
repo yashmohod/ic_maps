@@ -27,6 +27,7 @@ import { authClient } from "@/lib/auth-client";
 import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 import { signInWithMicrosoft } from "@/lib/microsoft-sign-in";
 import Image from "next/image";
+import { withBasePath } from "@/lib/base-path";
 import { Spinner } from "@/components/ui/spinner";
 import { useState } from "react";
 
@@ -141,14 +142,14 @@ export function SignupForm({
             >
               {microsoftLoading ? <Spinner /> : null}
               <Image
-                src="/assets/ic_logo_up.png"
+                src={withBasePath("/assets/ic_logo_up.png")}
                 alt="Ithaca College logo"
                 width={10}
                 height={10}
                 className="max-h-6 w-auto dark:hidden"
               />
               <Image
-                src="/assets/ic_logo_up_dark.png"
+                src={withBasePath("/assets/ic_logo_up_dark.png")}
                 alt="Ithaca College logo"
                 width={10}
                 height={10}

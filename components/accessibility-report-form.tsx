@@ -7,6 +7,7 @@ import { z } from "zod";
 import { ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 
+import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -90,10 +91,7 @@ export function AccessibilityReportForm({
       formData.append("text", values.text);
       if (photoFile) formData.append("photo", photoFile);
 
-      const resp = await fetch("/api/report/accessibility", {
-        method: "POST",
-        body: formData,
-      });
+      const resp = await apiClient.postForm("/api/report/accessibility", formData);
 
       const data = (await resp.json().catch(() => null)) as {
         error?: string;

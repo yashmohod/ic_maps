@@ -339,11 +339,7 @@ export function RouteReportForm({
 
     setLoading(true);
     try {
-      const resp = await fetch("/api/report/route", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const resp = await apiClient.post("/api/report/route", payload);
 
       const data = (await resp.json().catch(() => null)) as {
         error?: string;

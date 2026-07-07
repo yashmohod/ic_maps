@@ -1,29 +1,37 @@
+import { withBasePath } from "./base-path";
+
 const apiClient = {
-  get: (url: string) => fetch(url),
+  get: (url: string) => fetch(withBasePath(url)),
 
   post: (url: string, body: any) =>
-    fetch(url, {
+    fetch(withBasePath(url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
 
+  postForm: (url: string, body: FormData) =>
+    fetch(withBasePath(url), {
+      method: "POST",
+      body,
+    }),
+
   put: (url: string, body: any) =>
-    fetch(url, {
+    fetch(withBasePath(url), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
 
   patch: (url: string, body: any) =>
-    fetch(url, {
+    fetch(withBasePath(url), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
 
   del: (url: string, body?: any) =>
-    fetch(url, {
+    fetch(withBasePath(url), {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,

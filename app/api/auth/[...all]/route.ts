@@ -1,27 +1,32 @@
-import { auth } from "@/lib/auth"; // path to your auth file
+import { auth } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
+import { withAppBasePath } from "@/lib/auth-config";
 
-const ROUTE = "/api/auth/[...all]";
 const handler = toNextJsHandler(auth);
 
-export async function POST(req: Request, ...args: unknown[]) {
-  const url = new URL(req.url);
-  console.log(`[API ${ROUTE} POST] called`, { pathname: url.pathname });
-  try {
-    return await (handler.POST as (r: Request, ...a: unknown[]) => ReturnType<typeof handler.POST>)(req, ...args);
-  } catch (err) {
-    console.error(`[API ${ROUTE} POST] error`, err);
-    throw err;
-  }
+async function run(
+  request: Request,
+  method: keyof typeof handler,
+): Promise<Response> {
+  return handler[method](withAppBasePath(request));
 }
 
-export async function GET(req: Request, ...args: unknown[]) {
-  const url = new URL(req.url);
-  console.log(`[API ${ROUTE} GET] called`, { pathname: url.pathname });
-  try {
-    return await (handler.GET as (r: Request, ...a: unknown[]) => ReturnType<typeof handler.GET>)(req, ...args);
-  } catch (err) {
-    console.error(`[API ${ROUTE} GET] error`, err);
-    throw err;
-  }
+export async function GET(request: Request) {
+  return run(request, "GET");
+}
+
+export async function POST(request: Request) {
+  return run(request, "POST");
+}
+
+export async function PATCH(request: Request) {
+  return run(request, "PATCH");
+}
+
+export async function PUT(request: Request) {
+  return run(request, "PUT");
+}
+
+export async function DELETE(request: Request) {
+  return run(request, "DELETE");
 }

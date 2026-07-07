@@ -8,8 +8,7 @@ import { db } from "../db";
 import { schema } from "../db/schema";
 import { sendDevEmail } from "../lib/email";
 import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
-
-const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+import { APP_BASE_PATH, getPublicAuthUrl } from "@/lib/auth-config";
 
 const microsoftClientId = process.env.MICROSOFT_CLIENT_ID;
 const microsoftClientSecret = process.env.MICROSOFT_CLIENT_SECRET;
@@ -26,10 +25,16 @@ const microsoftProvider =
     : undefined;
 
 export const auth = betterAuth({
-  // ✅ makes verification/reset links consistent
-  baseURL: APP_URL,
-  // ✅ required for origin validation (localhost, LAN IP, etc.)
-  trustedOrigins: [APP_URL],
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: getPublicAuthUrl(),
+  trustedOrigins: [
+    process.env.NEXT_PUBLIC_APP_URL
+      ? new URL(process.env.NEXT_PUBLIC_APP_URL).origin
+      : "https://anzen.ithaca.edu",
+  ],
+  advanced: {
+    trustedProxyHeaders: process.env.NODE_ENV === "production",
+  },
 
   ...(microsoftProvider ? { socialProviders: microsoftProvider } : {}),
 
@@ -106,4 +111,7 @@ export const auth = betterAuth({
   },
 
   plugins: [nextCookies()],
+  onAPIError: {
+    errorURL: `${APP_BASE_PATH}/account/login`,
+  },
 });

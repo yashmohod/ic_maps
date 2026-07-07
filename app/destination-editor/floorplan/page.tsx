@@ -70,6 +70,7 @@ import { HomeLogoLink } from "@/components/home-logo-link";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
+import { withBasePath } from "@/lib/base-path";
 import {
   fetchEntranceMarkers,
   syncFloorplanEntrances,
@@ -185,7 +186,9 @@ const groupNodeStyle = (
   height,
   border: "2px solid #999",
   backgroundColor: "#0f172a0d",
-  backgroundImage: imageUrl ? `url(${imageUrl})` : undefined,
+  backgroundImage: imageUrl
+    ? `url(${withBasePath(imageUrl)})`
+    : undefined,
   backgroundSize: "contain",
   backgroundPosition: "center",
   backgroundRepeat: "no-repeat",
@@ -1441,7 +1444,7 @@ function FloorPlanInner() {
                   style: {
                     ...groupNodeStyle(floorplanUrl),
                     ...(n.style ?? {}),
-                    backgroundImage: `url(${floorplanUrl})`,
+                    backgroundImage: `url(${withBasePath(floorplanUrl)})`,
                     backgroundSize: "contain",
                     backgroundPosition: "center",
                     backgroundRepeat: "no-repeat",

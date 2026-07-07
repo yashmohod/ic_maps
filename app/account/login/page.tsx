@@ -6,10 +6,11 @@ import Link from "next/link";
 import { HomeLogo } from "@/components/home-logo";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Spinner } from "@/components/ui/spinner";
+import { toRouterPath } from "@/lib/base-path";
 
 function LoginPageContent() {
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/";
+  const callbackUrl = toRouterPath(searchParams.get("callbackUrl") ?? "/");
 
   return (
     <main id="main-content" className="bg-background text-foreground flex min-h-svh flex-col w-full items-center justify-center gap-6 p-6 md:p-10">

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import { PMTiles, Protocol } from "pmtiles";
+import { withBasePath } from "@/lib/base-path";
 
 type UsePmtilesStyleOptions = {
   pmtilesPath?: string;
@@ -70,8 +71,8 @@ function absolutizeTemplateUrl(value: string, base: string) {
 }
 
 export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
-  const pmtilesPath = options.pmtilesPath ?? "/tiles/ithaca.pmtiles";
-  const stylePath = options.stylePath ?? "/styles/osm-bright/style-local.json";
+  const pmtilesPath = options.pmtilesPath ?? withBasePath("/tiles/ithaca.pmtiles");
+  const stylePath = options.stylePath ?? withBasePath("/styles/osm-bright/style-local.json");
   const glyphsFallback =
     options.glyphsFallback ??
     "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf";

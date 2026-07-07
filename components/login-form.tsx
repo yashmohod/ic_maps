@@ -22,6 +22,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import Image from "next/image";
+import { withBasePath } from "@/lib/base-path";
 import { Input } from "@/components/ui/input";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -33,6 +34,7 @@ import React, { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 import { signInWithMicrosoft } from "@/lib/microsoft-sign-in";
+import { toRouterPath } from "@/lib/base-path";
 const formSchema = z
   .object({
     email: z.string().email(),
@@ -94,7 +96,7 @@ export function LoginForm({
     }
 
     toast.success("Logged in successfully");
-    router.replace(callbackUrl);
+    router.replace(toRouterPath(callbackUrl));
     router.refresh(); // optional
     setLoading(false);
   }
@@ -132,14 +134,14 @@ export function LoginForm({
                     onClick={() => void handleMicrosoftSignIn()}
                   >
                     <Image
-                      src="/assets/ic_logo_up.png"
+                      src={withBasePath("/assets/ic_logo_up.png")}
                       alt="Ithaca College logo"
                       width={10}
                       height={10}
                       className="max-h-6 w-auto dark:hidden"
                     />
                     <Image
-                      src="/assets/ic_logo_up_dark.png"
+                      src={withBasePath("/assets/ic_logo_up_dark.png")}
                       alt="Ithaca College logo"
                       width={10}
                       height={10}

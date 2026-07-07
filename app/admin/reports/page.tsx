@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/card";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import apiClient from "@/lib/apiClient";
+import { withBasePath } from "@/lib/base-path";
 import {
   buildReportDateQueryString,
   DEFAULT_REPORT_DATE_FILTER,
@@ -427,7 +428,7 @@ export default function AdminReportsPage() {
                       <Td>
                         {report.photoPath ? (
                           <Link
-                            href={report.photoPath}
+                            href={withBasePath(report.photoPath)}
                             target="_blank"
                             className="text-brand-cta font-medium hover:underline"
                           >
@@ -479,7 +480,7 @@ export default function AdminReportsPage() {
                       <Td>
                         {report.photoPath ? (
                           <Link
-                            href={report.photoPath}
+                            href={withBasePath(report.photoPath)}
                             target="_blank"
                             className="text-brand-cta font-medium hover:underline"
                           >

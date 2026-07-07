@@ -2,15 +2,12 @@
 
 import { createAuthClient } from "better-auth/react";
 
-const baseURL =
-  typeof window !== "undefined"
-    ? window.location.origin
-    : (process.env.NEXT_PUBLIC_APP_URL ??
-      process.env.BETTER_AUTH_URL ??
-      "http://localhost:3000");
+const basePath = `${process.env.NEXT_PUBLIC_BASE_PATH ?? "/ic_maps"}/api/auth`;
 
 export const authClient = createAuthClient({
-  baseURL,
+  baseURL:
+    typeof window !== "undefined" ? window.location.origin : undefined,
+  basePath,
 });
 
 /** Session shape used by the app (compatible with better-auth session). */

@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import type { Edge, Node } from "@xyflow/react";
 
+import { withBasePath } from "@/lib/base-path";
+
 export type FloorplanNodeKind =
   | "generic"
   | "door"
@@ -95,7 +97,9 @@ export function groupNodeStyle(
     height,
     border: "2px solid #999",
     backgroundColor: "#0f172a0d",
-    backgroundImage: imageUrl ? `url(${imageUrl})` : undefined,
+    backgroundImage: imageUrl
+      ? `url(${withBasePath(imageUrl)})`
+      : undefined,
     backgroundSize: "contain",
     backgroundPosition: "center",
     backgroundRepeat: "no-repeat",

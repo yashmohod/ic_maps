@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
+import { stripBasePath } from "@/lib/base-path";
 import { setInsideNodeDead } from "@/lib/dead-features";
 import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
 import { isFiniteNumber, jsonError, parseId } from "@/lib/utils";
@@ -133,7 +134,7 @@ export async function POST(req: Request) {
         ${Boolean(isStairs)},
         ${Boolean(isRamp)},
         ${Boolean(isGroup)},
-        ${imageUrl != null ? String(imageUrl) : null},
+        ${imageUrl != null ? stripBasePath(String(imageUrl)) : null},
         ${incline != null && isFiniteNumber(incline) ? (incline as number) : null},
         ${widthVal},
         ${heightVal},
@@ -247,9 +248,11 @@ export async function PUT(req: Request) {
     if (typeof isRamp === "boolean") setParts.push(sql`is_ramp = ${isRamp}`);
     if (typeof isGroup === "boolean") setParts.push(sql`is_group = ${isGroup}`);
     if (imageUrl !== undefined) {
-      setParts.push(
-        sql`image_url = ${imageUrl === null ? null : String(imageUrl)}`,
-      );
+      const storedImageUrl =
+        imageUrl === null
+          ? null
+          : stripBasePath(String(imageUrl));
+      setParts.push(sql`image_url = ${storedImageUrl}`);
     }
     if (incline !== undefined) {
       setParts.push(
