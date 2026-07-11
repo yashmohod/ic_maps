@@ -15,6 +15,7 @@ import {
   foreignKey,
   time,
 } from "drizzle-orm/pg-core";
+import { deserialize } from "v8";
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
 
@@ -498,6 +499,79 @@ export const routeReport = pgTable("route_report", {
   user_id: text("user_id").references(() => user.id, { onDelete: "set null" }),
 });
 
+export const myMaps = pgTable("my_maps", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  is_public_view: boolean("is_public_view").notNull().default(false),
+  owner_id: text("owner_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  create_at: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+export const myMapsCollaborator = pgTable(
+  "my_maps_collaborator",
+  {
+    my_maps_id: integer("my_maps_id")
+      .references(() => myMaps.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+    collarorator_id: text("collaborator_id").references(() => user.id, {
+      onDelete: "cascade",
+    }),
+    role: text("role").notNull().default("viewer"),
+  },
+  (t) => [primaryKey({ columns: [t.my_maps_id, t.collarorator_id] })],
+);
+
+export const myMapsNode = pgTable("my_maps_node", {
+  id: serial("id").primaryKey(),
+  my_maps_id: integer("my_maps_id")
+    .references(() => myMaps.id, {
+      onDelete: "cascade",
+    })
+    .notNull(),
+  name: text("name").default(""),
+  lat: doublePrecision("lat").notNull().default(0),
+  lng: doublePrecision("lng").notNull().default(0),
+});
+
+export const myMapsPolygon = pgTable("my_map_polygon", {
+  id: serial("id").primaryKey(),
+  my_maps_id: integer("my_maps_id")
+    .references(() => myMaps.id, {
+      onDelete: "cascade",
+    })
+    .notNull(),
+  name: text("name").default(""),
+  polygon: text("polygon").default(""),
+});
+
+export const myMapsEdge = pgTable(
+  "my_map_edge",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").default(""),
+    node_a_id: integer("node_a_id") // min
+      .notNull()
+      .references(() => myMapsNode.id, { onDelete: "cascade" }),
+    node_b_id: integer("node_b_id") // max
+      .notNull()
+      .references(() => myMapsNode.id, { onDelete: "cascade" }),
+
+    // direction
+    bi_directional: boolean("bi_directional").notNull().default(true),
+    direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
+    distance: doublePrecision("distance").notNull(), // meters
+    incline: doublePrecision("incline").notNull().default(0), // meters
+  },
+  (t) => [
+    unique("edge_outside_pair_unique").on(t.node_a_id, t.node_b_id),
+    index("idx_edge_outside_a").on(t.node_a_id),
+    index("idx_edge_outside_b").on(t.node_b_id),
+  ],
+);
+
 export const schema = {
   user,
   session,
@@ -518,6 +592,10 @@ export const schema = {
   bugReport,
   accessibilityReport,
   routeReport,
+  myMaps,
+  myMapsEdge,
+  myMapsNode,
+  myMapsPolygon,
 };
 export type User = InferSelectModel<typeof user>;
 export type NodeOutside = InferSelectModel<typeof nodeOutside>;
@@ -540,3 +618,7 @@ export type DestinationChainStop = InferSelectModel<
 export type BugReport = InferSelectModel<typeof bugReport>;
 export type AccessibilityReport = InferSelectModel<typeof accessibilityReport>;
 export type RouteReport = InferSelectModel<typeof routeReport>;
+export type MyMaps = InferSelectModel<typeof myMaps>;
+export type MyMapsEdge = InferSelectModel<typeof myMapsEdge>;
+export type MyMapsNode = InferSelectModel<typeof myMapsNode>;
+export type MyMapsPolygon = InferSelectModel<typeof myMapsPolygon>;
