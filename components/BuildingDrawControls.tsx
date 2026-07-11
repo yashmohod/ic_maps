@@ -1,4 +1,3 @@
-// src/components/DrawControl.tsx
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";

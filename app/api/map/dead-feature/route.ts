@@ -7,8 +7,8 @@ import {
   setInsideNodeDead,
   setOutsideNodeDead,
 } from "@/lib/dead-features";
-import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
-import { jsonError, parseBoolean, parseId } from "@/lib/utils";
+import { reloadGraph } from "@/lib/navigation";
+import { parseBoolean, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/map/dead-feature";
 
@@ -27,11 +27,7 @@ export async function GET() {
     return NextResponse.json(lists);
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return jsonError(
-      "Failed to fetch dead features",
-      500,
-      err instanceof Error ? err.message : String(err),
-    );
+    return NextResponse.json({ error: "Failed to fetch dead features", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -41,12 +37,12 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const id = parseId(body.id);
     const value = parseBoolean(body.value);
-    if (!id) return jsonError("Invalid id", 400);
-    if (value == null) return jsonError("Invalid value (must be boolean)", 400);
+    if (!id) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    if (value == null) return NextResponse.json({ error: "Invalid value (must be boolean)" }, { status: 400 });
 
     const parsed = deadFeatureBodySchema.safeParse({
       scope: body.scope,
@@ -69,15 +65,11 @@ export async function POST(req: Request) {
       await setInsideNodeDead(nodeId, isDead);
     }
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     const lists = await listDeadFeatures();
     return NextResponse.json(lists);
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError(
-      "Failed to update dead feature",
-      500,
-      err instanceof Error ? err.message : String(err),
-    );
+    return NextResponse.json({ error: "Failed to update dead feature", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }

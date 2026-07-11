@@ -220,12 +220,6 @@ export function LoginForm({
                           <div aria-live="polite">
                             <FormMessage />
                           </div>
-                          <a
-                            href="/account/forgot-password"
-                            className="ml-auto text-sm underline-offset-4 hover:underline"
-                          >
-                            Forgot your password?
-                          </a>
                         </FormItem>
                       )}
                     />

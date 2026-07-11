@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { db } from "@/db/index";
+import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
-import { jsonError, parseBoolean, parseId } from "@/lib/utils";
+import { reloadGraph } from "@/lib/navigation";
+import { parseBoolean, parseId } from "@/lib/utils";
 
 const navModeColumnMap = {
   isPedestrian: "is_pedestrian",
@@ -23,19 +23,19 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const id = parseId(body.id);
-    if (!id) return jsonError("Invalid id", 400);
+    if (!id) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const value = parseBoolean(body.value);
-    if (value == null) return jsonError("Invalid value (must be boolean)", 400);
+    if (value == null) return NextResponse.json({ error: "Invalid value (must be boolean)" }, { status: 400 });
 
     const navModeRaw = String(body.navMode ?? "").trim() as keyof typeof navModeColumnMap;
 
     console.log(`[API ${ROUTE} POST] called`, { id, value, navMode: body.navMode });
     const column = navModeColumnMap[navModeRaw];
-    if (!column) return jsonError("Unsupported navMode", 400);
+    if (!column) return NextResponse.json({ error: "Unsupported navMode" }, { status: 400 });
 
     const result = await db.execute(sql`
       UPDATE node_outside
@@ -45,13 +45,13 @@ export async function POST(req: Request) {
     `);
 
     if (result.rows.length === 0) {
-      return jsonError("Feature not found", 404);
+      return NextResponse.json({ error: "Feature not found" }, { status: 404 });
     }
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({ id, navMode: navModeRaw, value }, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Update failed", 500, err?.message ?? String(err));
+    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(err?.message ?? String(err)) } : {}) }, { status: 500 });
   }
 }

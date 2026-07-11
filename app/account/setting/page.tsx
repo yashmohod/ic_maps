@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 import { Shield, UserRound, Star, Route } from "lucide-react";
 
 import { HomeLogoLink } from "@/components/home-logo-link";
@@ -17,7 +18,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import apiClient from "@/lib/apiClient";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { Spinner } from "@/components/ui/spinner";
@@ -72,7 +72,7 @@ export default function Setting() {
   const loadUsers = async () => {
     setUsersLoading(true);
     try {
-      const resp = await fetch("/api/users");
+      const resp = await fetch(withBasePath("/api/users"));
       if (!resp.ok) throw new Error("Failed to load users");
       const data = (await resp.json()) as {
         users: Array<{
@@ -94,7 +94,7 @@ export default function Setting() {
   async function setUserAdmin(userId: string, nextIsAdmin: boolean) {
     setAdminUpdatePending((prev) => new Set(prev).add(userId));
     try {
-      const resp = await fetch(`/api/users/${userId}`, {
+      const resp = await fetch(withBasePath(`/api/users/${userId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isAdmin: nextIsAdmin }),
@@ -139,8 +139,8 @@ export default function Setting() {
     setSavedLoading(true);
     try {
       const [favResp, chainResp] = await Promise.all([
-        apiClient.get("/api/favorites"),
-        apiClient.get("/api/destination-chains"),
+        fetch(withBasePath("/api/favorites")),
+        fetch(withBasePath("/api/destination-chains")),
       ]);
       if (favResp.ok) {
         const data = (await favResp.json()) as {
@@ -503,9 +503,7 @@ export default function Setting() {
                               className="min-h-11"
                               onClick={async () => {
                                 try {
-                                  const resp = await apiClient.del(
-                                    `/api/favorites?destinationId=${encodeURIComponent(fav.id)}`,
-                                  );
+                                  const resp = await fetch(withBasePath(`/api/favorites?destinationId=${encodeURIComponent(fav.id)}`), { method: "DELETE" });
                                   if (!resp.ok)
                                     throw new Error("delete failed");
                                   setFavorites((prev) =>
@@ -554,9 +552,7 @@ export default function Setting() {
                                 className="min-h-11"
                                 onClick={async () => {
                                   try {
-                                    const resp = await apiClient.del(
-                                      `/api/destination-chains?id=${encodeURIComponent(chain.id)}`,
-                                    );
+                                    const resp = await fetch(withBasePath(`/api/destination-chains?id=${encodeURIComponent(chain.id)}`), { method: "DELETE" });
                                     if (!resp.ok)
                                       throw new Error("delete failed");
                                     setChains((prev) =>
@@ -619,7 +615,7 @@ export default function Setting() {
                       if (!userId) return;
                       setProfileSaving(true);
                       try {
-                        const resp = await fetch(`/api/users/${userId}`, {
+                        const resp = await fetch(withBasePath(`/api/users/${userId}`), {
                           method: "PATCH",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ name: displayName }),
@@ -672,7 +668,7 @@ export default function Setting() {
                 if (!deleteTarget) return;
                 setDeletePending(true);
                 try {
-                  const resp = await fetch(`/api/users/${deleteTarget.id}`, {
+                  const resp = await fetch(withBasePath(`/api/users/${deleteTarget.id}`), {
                     method: "DELETE",
                   });
                   if (!resp.ok) {

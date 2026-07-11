@@ -65,7 +65,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
-import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
+import ComboboxSelect, { type ComboboxItem } from "@/components/ComboboxSelect";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
@@ -77,13 +77,31 @@ import {
 } from "@/lib/floorplan-entrances";
 import { panelClass } from "@/lib/panel-classes";
 import type { OutsideNodeDetail } from "@/lib/types/map";
+import {
+  apiNodeToKind,
+  BASE_GROUP_HEIGHT,
+  BASE_GROUP_WIDTH,
+  BASE_RAMP_HEIGHT,
+  BASE_RAMP_WIDTH,
+  BASE_SMALL_NODE_SIZE,
+  EDGE_STROKE_DEFAULT,
+  FLOORPLAN_EDGE_Z_INDEX as EDGE_Z_INDEX,
+  getEdgeStyle,
+  groupNodeStyle,
+  NODE_KIND_META,
+  smallNodeStyle,
+  sortNodesParentBeforeChild,
+  type FloorplanApiEdge as ApiEdge,
+  type FloorplanApiNode as ApiNode,
+  type FloorplanNodeKind as NodeKind,
+} from "@/lib/floorplan-flow";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import { Spinner } from "@/components/ui/spinner";
 
 // -----------------------------------------------------------------------------
 // Types: React Flow uses string ids; API uses numeric ids. NodeData carries kind and optional link to "outside" (door).
+// Shared shapes (ApiNode, ApiEdge, NodeKind) and layout helpers come from @/lib/floorplan-flow.
 // -----------------------------------------------------------------------------
-type NodeKind = "generic" | "door" | "stairs" | "elevator" | "ramp";
 type NodeData = {
   label: string;
   name?: string;
@@ -97,64 +115,6 @@ type NodeData = {
 type AppNode = Node<NodeData>; // includes group nodes (floors) and normal nodes (smallIcon, ramp)
 type AppEdge = Edge;
 type DestinationOption = { id: number; name: string };
-
-/** API node_inside row (camelCase) – matches backend schema for one node */
-type ApiNode = {
-  id: number;
-  nodeOutsideId: number | null;
-  parentNodeInsideId: number | null;
-  x: number;
-  y: number;
-  isEntry: boolean;
-  isExit: boolean;
-  isElevator: boolean;
-  isStairs: boolean;
-  isRamp: boolean;
-  isGroup: boolean;
-  imageUrl: string | null;
-  incline: number | null;
-  width: number | null;
-  height: number | null;
-  name: string | null;
-  isDead: boolean;
-};
-/** API edge_inside row (camelCase) */
-type ApiEdge = {
-  id: number;
-  nodeAId: number;
-  nodeBId: number;
-  direction: boolean;
-  biDirectional: boolean;
-  sourceHandle: string | null;
-  targetHandle: string | null;
-};
-
-// -----------------------------------------------------------------------------
-// Layout constants: default sizes for floor groups, small nodes, ramps; edge styling.
-// -----------------------------------------------------------------------------
-const BASE_GROUP_WIDTH = 420;
-const BASE_GROUP_HEIGHT = 280;
-const BASE_SMALL_NODE_SIZE = 24;
-const BASE_RAMP_WIDTH = 88;
-const BASE_RAMP_HEIGHT = 40;
-const EDGE_Z_INDEX = 10;
-/** Edge stroke: default (same floor) and cross-floor (between floors) for visibility. */
-const EDGE_STROKE_DEFAULT = "#475569";
-const EDGE_STROKE_CROSS_FLOOR = "#2563eb";
-
-/** Edge color/thickness: cross-floor edges (different parent) are blue and thicker for visibility. */
-function getEdgeStyle(
-  parentOf: (nodeId: string) => string | number | null | undefined,
-  sourceId: string,
-  targetId: string,
-): { stroke: string; strokeWidth: number } {
-  const a = parentOf(sourceId) ?? null;
-  const b = parentOf(targetId) ?? null;
-  const crossFloor = a !== b;
-  return crossFloor
-    ? { stroke: EDGE_STROKE_CROSS_FLOOR, strokeWidth: 3 }
-    : { stroke: EDGE_STROKE_DEFAULT, strokeWidth: 2 };
-}
 
 /** Four connection points: top, right, bottom, left. Each has both source and target handle so edges can attach from any side. */
 const HANDLE_POSITIONS = [
@@ -176,37 +136,7 @@ function FourHandles() {
   );
 }
 
-/** Base style for floor (group) nodes: size, border, optional background image (uploaded floorplan). */
-const groupNodeStyle = (
-  imageUrl?: string,
-  width = BASE_GROUP_WIDTH,
-  height = BASE_GROUP_HEIGHT,
-) => ({
-  width,
-  height,
-  border: "2px solid #999",
-  backgroundColor: "#0f172a0d",
-  backgroundImage: imageUrl
-    ? `url(${withBasePath(imageUrl)})`
-    : undefined,
-  backgroundSize: "contain",
-  backgroundPosition: "center",
-  backgroundRepeat: "no-repeat",
-});
-
 const ICON_SIZE = 12;
-
-/** Display label, color, and short letter for each node kind (used in legend and small nodes). */
-const NODE_KIND_META: Record<
-  NodeKind,
-  { label: string; color: string; text: string }
-> = {
-  generic: { label: "Generic Node", color: "#60a5fa", text: "N" },
-  door: { label: "Door", color: "#34d399", text: "D" },
-  stairs: { label: "Stairs", color: "#35D5A4", text: "S" },
-  elevator: { label: "Elevator", color: "#f472b6", text: "E" },
-  ramp: { label: "Ramp", color: "#8b5cf6", text: "R" },
-};
 
 /** Renders the small icon (circle, door, layers, etc.) for a given node kind. */
 function NodeKindIcon({ kind }: { kind: NodeKind }) {
@@ -226,24 +156,6 @@ function NodeKindIcon({ kind }: { kind: NodeKind }) {
     default:
       return <CircleDot {...common} />;
   }
-}
-
-/** Inline styles for the circular small nodes (generic, door, stairs, elevator) – color from NODE_KIND_META. */
-function smallNodeStyle(kind: NodeKind): CSSProperties {
-  return {
-    width: 24,
-    height: 24,
-    borderRadius: "9999px",
-    border: "2px solid #0f172a",
-    backgroundColor: NODE_KIND_META[kind].color,
-    color: "#0f172a",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 10,
-    fontWeight: 700,
-    lineHeight: 1,
-  };
 }
 
 const SELECTED_STYLE: CSSProperties = {
@@ -523,23 +435,6 @@ function insertNodeWithParent<T extends { id: string; parentId?: string }>(
   return [...nodes.slice(0, idx + 1), newNode, ...nodes.slice(idx + 1)];
 }
 
-/** Sort nodes so every parent appears before its children (required for React Flow parent–child movement). */
-function sortNodesParentBeforeChild<
-  T extends { id: string; parentId?: string },
->(nodes: T[]): T[] {
-  const roots = nodes.filter((n) => !n.parentId);
-  const result: T[] = [];
-  const add = (n: T) => {
-    result.push(n);
-    nodes.filter((c) => c.parentId === n.id).forEach(add);
-  };
-  roots.forEach(add);
-  nodes.forEach((n) => {
-    if (!result.includes(n)) result.push(n);
-  });
-  return result;
-}
-
 /** Move the node with movedId to right after the node with parentId so React Flow keeps parent-before-child order. */
 function moveNodeAfterParent<T extends { id: string }>(
   nodes: T[],
@@ -622,15 +517,6 @@ function NodeNameToolbar({
       />
     </NodeToolbar>
   );
-}
-
-/** Map API node flags (isStairs, isElevator, isRamp, nodeOutsideId) to our NodeKind for display and node type. */
-function apiNodeToKind(row: ApiNode): NodeKind {
-  if (row.isStairs) return "stairs";
-  if (row.isElevator) return "elevator";
-  if (row.isRamp) return "ramp";
-  if (row.nodeOutsideId != null) return "door";
-  return "generic";
 }
 
 // -----------------------------------------------------------------------------
@@ -778,11 +664,14 @@ function FloorPlanInner() {
       const numId = Number(id);
       if (!Number.isInteger(numId) || numId <= 0) return;
       const body: Record<string, unknown> = { id: numId, ...payload };
-      const res = await fetch("/api/destination/floorplan/nodes", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch(
+        withBasePath("/api/destination/floorplan/nodes"),
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
       if (!res.ok) return;
       const hasPosition = "x" in payload || "y" in payload;
       const hasParent = "parentNodeInsideId" in payload;
@@ -854,7 +743,7 @@ function FloorPlanInner() {
     async function loadDestinations() {
       try {
         setIsLoadingDestinations(true);
-        const res = await fetch("/api/destination");
+        const res = await fetch(withBasePath("/api/destination"));
         const payload = await res.json().catch(() => null);
         if (!res.ok || !payload?.destinations || cancelled) return;
 
@@ -905,10 +794,14 @@ function FloorPlanInner() {
       try {
         const [nodesRes, edgesRes] = await Promise.all([
           fetch(
-            `/api/destination/floorplan/nodes?destinationId=${selectedDestinationId}`,
+            withBasePath(
+              `/api/destination/floorplan/nodes?destinationId=${selectedDestinationId}`,
+            ),
           ),
           fetch(
-            `/api/destination/floorplan/edges?destinationId=${selectedDestinationId}`,
+            withBasePath(
+              `/api/destination/floorplan/edges?destinationId=${selectedDestinationId}`,
+            ),
           ),
         ]);
         const nodesPayload = await nodesRes.json().catch(() => null);
@@ -1060,18 +953,21 @@ function FloorPlanInner() {
       const from = connection.source;
       const to = connection.target;
       if (!from || !to) return;
-      const res = await fetch("/api/destination/floorplan/edges", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          destinationId: selectedDestinationId,
-          from: Number(from),
-          to: Number(to),
-          biDirectional: true,
-          sourceHandle: connection.sourceHandle ?? undefined,
-          targetHandle: connection.targetHandle ?? undefined,
-        }),
-      });
+      const res = await fetch(
+        withBasePath("/api/destination/floorplan/edges"),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destinationId: selectedDestinationId,
+            from: Number(from),
+            to: Number(to),
+            biDirectional: true,
+            sourceHandle: connection.sourceHandle ?? undefined,
+            targetHandle: connection.targetHandle ?? undefined,
+          }),
+        },
+      );
       const payload = await res.json().catch(() => null);
       if (!res.ok || !payload?.id) return;
       const sourceHandle = connection.sourceHandle ?? undefined;
@@ -1106,11 +1002,14 @@ function FloorPlanInner() {
   const onEdgeDoubleClick = useCallback(
     async (_evt: unknown, edge: AppEdge) => {
       if (selectedDestinationId == null) return;
-      const res = await fetch("/api/destination/floorplan/edges", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: edge.id }),
-      });
+      const res = await fetch(
+        withBasePath("/api/destination/floorplan/edges"),
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: edge.id }),
+        },
+      );
       if (!res.ok) return;
       setEdges((eds) => eds.filter((e) => e.id !== edge.id));
     },
@@ -1316,7 +1215,7 @@ function FloorPlanInner() {
       height: BASE_SMALL_NODE_SIZE,
     };
     if (parentId) body.parentNodeInsideId = Number(parentId);
-    const res = await fetch("/api/destination/floorplan/nodes", {
+    const res = await fetch(withBasePath("/api/destination/floorplan/nodes"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1345,7 +1244,7 @@ function FloorPlanInner() {
   const onAddGroup = useCallback(async () => {
     if (selectedDestinationId == null) return;
     const position = getCenterFlowPosition();
-    const res = await fetch("/api/destination/floorplan/nodes", {
+    const res = await fetch(withBasePath("/api/destination/floorplan/nodes"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1414,7 +1313,7 @@ function FloorPlanInner() {
         form.append("file", file);
         form.append("destinationId", String(selectedDestinationId));
 
-        const res = await fetch("/api/destination/floorplan", {
+        const res = await fetch(withBasePath("/api/destination/floorplan"), {
           method: "POST",
           body: form,
         });
@@ -1429,7 +1328,7 @@ function FloorPlanInner() {
         if (selectedGroupId) {
           const nid = Number(selectedGroupId);
           if (Number.isInteger(nid) && nid > 0) {
-            await fetch("/api/destination/floorplan/nodes", {
+            await fetch(withBasePath("/api/destination/floorplan/nodes"), {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id: nid, imageUrl: floorplanUrl }),
@@ -1475,7 +1374,7 @@ function FloorPlanInner() {
       height: BASE_SMALL_NODE_SIZE,
     };
     if (parentId) body.parentNodeInsideId = Number(parentId);
-    const res = await fetch("/api/destination/floorplan/nodes", {
+    const res = await fetch(withBasePath("/api/destination/floorplan/nodes"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1513,7 +1412,7 @@ function FloorPlanInner() {
       height: BASE_SMALL_NODE_SIZE,
     };
     if (parentId) body.parentNodeInsideId = Number(parentId);
-    const res = await fetch("/api/destination/floorplan/nodes", {
+    const res = await fetch(withBasePath("/api/destination/floorplan/nodes"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1552,7 +1451,7 @@ function FloorPlanInner() {
       height: BASE_RAMP_HEIGHT,
     };
     if (parentId) body.parentNodeInsideId = Number(parentId);
-    const res = await fetch("/api/destination/floorplan/nodes", {
+    const res = await fetch(withBasePath("/api/destination/floorplan/nodes"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1619,7 +1518,7 @@ function FloorPlanInner() {
       for (const id of nodeIdsToRemove) {
         const nid = Number(id);
         if (Number.isInteger(nid) && nid > 0) {
-          await fetch("/api/destination/floorplan/nodes", {
+          await fetch(withBasePath("/api/destination/floorplan/nodes"), {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: nid }),
@@ -1629,7 +1528,7 @@ function FloorPlanInner() {
       for (const id of edgeIdsToRemove) {
         const eid = Number(id);
         if (Number.isInteger(eid) && eid > 0) {
-          await fetch("/api/destination/floorplan/edges", {
+          await fetch(withBasePath("/api/destination/floorplan/edges"), {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: eid }),
@@ -1702,7 +1601,7 @@ function FloorPlanInner() {
       for (const id of idsToRemove) {
         const nid = Number(id);
         if (Number.isInteger(nid) && nid > 0) {
-          await fetch("/api/destination/floorplan/nodes", {
+          await fetch(withBasePath("/api/destination/floorplan/nodes"), {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: nid }),

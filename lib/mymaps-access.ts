@@ -58,23 +58,14 @@ export async function getMapAccess(
       )
       .limit(1);
 
-    if (collab?.role === "editor") {
+    if (collab) {
+      const isEditor = collab.role === "editor";
+      // Unknown roles fall back to viewer so a typo doesn't lock the user out.
       return {
         map,
         isOwner: false,
-        role: "editor",
-        canEdit: true,
-        canManageSharing: false,
-        canRead: true,
-      };
-    }
-
-    if (collab?.role === "viewer") {
-      return {
-        map,
-        isOwner: false,
-        role: "viewer",
-        canEdit: false,
+        role: isEditor ? "editor" : "viewer",
+        canEdit: isEditor,
         canManageSharing: false,
         canRead: true,
       };

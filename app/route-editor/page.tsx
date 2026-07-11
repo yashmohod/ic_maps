@@ -1,6 +1,6 @@
-// src/components/MapEditor.tsx
 "use client";
 import React, { useMemo, useRef, useState, useEffect, type JSX } from "react";
+import { withBasePath } from "@/lib/base-path";
 import { toast } from "sonner";
 import {
   Map as ReactMap,
@@ -27,7 +27,7 @@ import type {
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import ComboboxSelect, { type ComboboxItem } from "@/components/DropDown";
+import ComboboxSelect, { type ComboboxItem } from "@/components/ComboboxSelect";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,6 @@ import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
-import apiClient from "@/lib/apiClient";
 import { panelClass } from "@/lib/panel-classes";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import { Spinner } from "@/components/ui/spinner";
@@ -235,10 +234,14 @@ export default function RouteEditor(): JSX.Element {
     if (!findMarker(from) || !findMarker(to)) return;
 
     try {
-      const req = await apiClient.post("/api/map/edge", {
-        from,
-        to,
-        biDirectionalEdges,
+      const req = await fetch(withBasePath("/api/map/edge"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from,
+          to,
+          biDirectionalEdges,
+        }),
       });
       const resp = await req.json();
       if (req.status === 201) {
@@ -263,7 +266,11 @@ export default function RouteEditor(): JSX.Element {
 
   async function deleteNode(id: number) {
     try {
-      const req = await apiClient.del("/api/map/node", { id });
+      const req = await fetch(withBasePath("/api/map/node"), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
       if (req.status !== 200)
         return toast.error("Feature could not be deleted.");
 
@@ -286,7 +293,11 @@ export default function RouteEditor(): JSX.Element {
 
   async function deleteEdgeByKey(id: number) {
     try {
-      const req = await apiClient.del("/api/map/edge", { id });
+      const req = await fetch(withBasePath("/api/map/edge"), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
       if (req.status !== 200)
         return toast.error("Feature could not be deleted.");
 
@@ -299,9 +310,13 @@ export default function RouteEditor(): JSX.Element {
 
   async function setEdgeIncline(edgeId: number, incline: number) {
     try {
-      const req = await apiClient.post("/api/map/incline", {
-        id: edgeId,
-        incline,
+      const req = await fetch(withBasePath("/api/map/incline"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: edgeId,
+          incline,
+        }),
       });
       if (req.status !== 200) {
         toast.error("Could not update incline.");
@@ -328,10 +343,14 @@ export default function RouteEditor(): JSX.Element {
 
     let nextValue = !cur[nm.param];
     try {
-      const req = await apiClient.post("/api/map/setFeatureStatus", {
-        id,
-        value: nextValue,
-        navMode: nm.param,
+      const req = await fetch(withBasePath("/api/map/setFeatureStatus"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          value: nextValue,
+          navMode: nm.param,
+        }),
       });
       const resp = await req.json();
 
@@ -354,10 +373,14 @@ export default function RouteEditor(): JSX.Element {
 
     const nextValue = !cur.isDead;
     try {
-      const req = await apiClient.post("/api/map/dead-feature", {
-        scope: "outside",
-        id,
-        value: nextValue,
+      const req = await fetch(withBasePath("/api/map/dead-feature"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: "outside",
+          id,
+          value: nextValue,
+        }),
       });
       if (req.status !== 200) {
         toast.error("Could not update dead feature status.");
@@ -388,8 +411,10 @@ export default function RouteEditor(): JSX.Element {
     }
     setCurrentDestination(curDest);
     try {
-      const req: any = await apiClient.get(
-        `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
+      const req: any = await fetch(
+        withBasePath(
+          `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
+        ),
       );
       const resp = await req.json();
       const ids: number[] = (resp?.nodes || []).map((id: unknown) =>
@@ -409,9 +434,13 @@ export default function RouteEditor(): JSX.Element {
 
     try {
       if (isSelected) {
-        const req = await apiClient.del("/api/destination/outsideNode", {
-          destId: currentDestination.id,
-          nodeId,
+        const req = await fetch(withBasePath("/api/destination/outsideNode"), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destId: currentDestination.id,
+            nodeId,
+          }),
         });
         if (req.status !== 200) return toast.error("Failed to detach node.");
 
@@ -421,9 +450,13 @@ export default function RouteEditor(): JSX.Element {
           return next;
         });
       } else {
-        const req = await apiClient.post("/api/destination/outsideNode", {
-          destId: currentDestination.id,
-          nodeId,
+        const req = await fetch(withBasePath("/api/destination/outsideNode"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destId: currentDestination.id,
+            nodeId,
+          }),
         });
 
         if (req.status !== 200) return toast.error("Failed to attach node.");
@@ -447,9 +480,13 @@ export default function RouteEditor(): JSX.Element {
       const ids = Array.from(curDestinationNodes);
       const results = await Promise.allSettled(
         ids.map((nid) =>
-          apiClient.del("/api/destination/outsideNode", {
-            destId: currentDestination.id,
-            nodeId: nid,
+          fetch(withBasePath("/api/destination/outsideNode"), {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              destId: currentDestination.id,
+              nodeId: nid,
+            }),
           }),
         ),
       );
@@ -471,7 +508,11 @@ export default function RouteEditor(): JSX.Element {
     if ((e.originalEvent as MouseEvent | undefined)?.altKey) {
       const { lng, lat } = e.lngLat;
       try {
-        const req = await apiClient.post("/api/map/node", { lng, lat });
+        const req = await fetch(withBasePath("/api/map/node"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lng, lat }),
+        });
         const resp = await req.json();
         if (req.status === 201)
           setMarkers((prev) => [
@@ -530,7 +571,11 @@ export default function RouteEditor(): JSX.Element {
   async function handleMarkerDragEnd(e: any, id: number) {
     const { lng, lat } = e.lngLat as LngLat;
     try {
-      const req = await apiClient.put("/api/map/node", { id, lng, lat });
+      const req = await fetch(withBasePath("/api/map/node"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, lng, lat }),
+      });
       if (req.status === 200) {
         setMarkers((prev) =>
           prev.map((m) => (m.id === id ? { ...m, lng, lat } : m)),
@@ -581,7 +626,7 @@ export default function RouteEditor(): JSX.Element {
 
   async function getAllFeature() {
     try {
-      const req = await apiClient.get("/api/map/all");
+      const req = await fetch(withBasePath("/api/map/all"));
       if (req.status !== 200) {
         toast.error("Failed to fetch map features!");
         return;
@@ -597,7 +642,7 @@ export default function RouteEditor(): JSX.Element {
 
   async function getBuildingsList() {
     try {
-      const req = await apiClient.get("/api/destination");
+      const req = await fetch(withBasePath("/api/destination"));
       if (req.status !== 200) {
         toast.error("Buildings did not load!");
         return;

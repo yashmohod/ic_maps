@@ -10,7 +10,7 @@ import { eq, asc, and, inArray } from "drizzle-orm";
 
 import { isDevModeEnabled } from "@/lib/dev-mode";
 import { requireIthacaEduSession } from "@/lib/auth-guards";
-import { jsonError, parseId, isNonEmptyString } from "@/lib/utils";
+import { parseId, isNonEmptyString } from "@/lib/utils";
 
 const ROUTE = "/api/shareableroute";
 
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     const idParam = searchParams.get("id") ?? searchParams.get("routeId");
     const routeId = parseId(idParam);
     console.log(`[API ${ROUTE} GET] called`, { idParam, routeId });
-    if (!routeId) return jsonError("Missing or invalid id", 400);
+    if (!routeId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
     const routeRow = await db
       .select()
@@ -30,7 +30,7 @@ export async function GET(req: Request) {
       .limit(1);
 
     const r = routeRow[0];
-    if (!r) return jsonError("Route not found", 404);
+    if (!r) return NextResponse.json({ error: "Route not found" }, { status: 404 });
 
     const destRows = await db
       .select({
@@ -88,7 +88,7 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch route", 500, message);
+    return NextResponse.json({ error: "Could not fetch route", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -97,10 +97,10 @@ export async function POST(req: Request) {
   try {
     const { session, error } = await requireIthacaEduSession();
     if (error) return error;
-    if (!session?.user?.id) return jsonError("Unauthorized", 401);
+    if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { name, description, destinationIds, parkingLotIds } = body as {
       name: unknown;
@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     });
 
     if (!isNonEmptyString(name, 256))
-      return jsonError("name must be a non-empty string (max 256 chars)", 400);
+      return NextResponse.json({ error: "name must be a non-empty string (max 256 chars)" }, { status: 400 });
 
     const ids: number[] = Array.isArray(destinationIds)
       ? destinationIds
@@ -125,10 +125,7 @@ export async function POST(req: Request) {
           .filter((n): n is number => n != null)
       : [];
     if (ids.length === 0)
-      return jsonError(
-        "destinationIds must be a non-empty array of destination ids",
-        400,
-      );
+      return NextResponse.json({ error: "destinationIds must be a non-empty array of destination ids" }, { status: 400 });
 
     const [inserted] = await db
       .insert(route)
@@ -142,7 +139,7 @@ export async function POST(req: Request) {
       })
       .returning({ id: route.id });
 
-    if (!inserted?.id) return jsonError("Insert failed", 500);
+    if (!inserted?.id) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
 
     await db.insert(route_destination).values(
       ids.map((destination_id, index) => ({
@@ -168,10 +165,7 @@ export async function POST(req: Request) {
           ),
         );
       if (lots.length !== lotIds.length) {
-        return jsonError(
-          "All parkingLotIds must reference parking lot destinations",
-          400,
-        );
+        return NextResponse.json({ error: "All parkingLotIds must reference parking lot destinations" }, { status: 400 });
       }
       await db.insert(route_parking_lot).values(
         lotIds.map((destination_id) => ({
@@ -188,7 +182,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not create route", 500, message);
+    return NextResponse.json({ error: "Could not create route", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -197,10 +191,10 @@ export async function PUT(req: Request) {
   try {
     const { session, error } = await requireIthacaEduSession();
     if (error) return error;
-    if (!session?.user?.id) return jsonError("Unauthorized", 401);
+    if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { routeId, name, description, destinationIds, parkingLotIds } =
       body as {
@@ -220,7 +214,7 @@ export async function PUT(req: Request) {
     });
 
     const rId = parseId(routeId);
-    if (!rId) return jsonError("Invalid or missing routeId", 400);
+    if (!rId) return NextResponse.json({ error: "Invalid or missing routeId" }, { status: 400 });
 
     const [existing] = await db
       .select()
@@ -228,17 +222,14 @@ export async function PUT(req: Request) {
       .where(eq(route.id, rId))
       .limit(1);
 
-    if (!existing) return jsonError("Route not found", 404);
+    if (!existing) return NextResponse.json({ error: "Route not found" }, { status: 404 });
     if (!isDevModeEnabled() && existing.user_id !== session.user.id)
-      return jsonError("Forbidden", 403);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const updates: { name?: string; description?: string | null } = {};
     if (name !== undefined) {
       if (!isNonEmptyString(name, 256))
-        return jsonError(
-          "name must be a non-empty string (max 256 chars)",
-          400,
-        );
+        return NextResponse.json({ error: "name must be a non-empty string (max 256 chars)" }, { status: 400 });
       updates.name = (name as string).trim();
     }
     if (description !== undefined) {
@@ -288,10 +279,7 @@ export async function PUT(req: Request) {
             ),
           );
         if (lots.length !== lotIds.length) {
-          return jsonError(
-            "All parkingLotIds must reference parking lot destinations",
-            400,
-          );
+          return NextResponse.json({ error: "All parkingLotIds must reference parking lot destinations" }, { status: 400 });
         }
         await db.insert(route_parking_lot).values(
           lotIds.map((destination_id) => ({
@@ -306,7 +294,7 @@ export async function PUT(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not update route", 500, message);
+    return NextResponse.json({ error: "Could not update route", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -315,15 +303,15 @@ export async function DELETE(req: Request) {
   try {
     const { session, error } = await requireIthacaEduSession();
     if (error) return error;
-    if (!session?.user?.id) return jsonError("Unauthorized", 401);
+    if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { routeId } = body as { routeId: unknown };
     console.log(`[API ${ROUTE} DELETE] called`, { routeId });
     const rId = parseId(routeId);
-    if (!rId) return jsonError("Invalid or missing routeId", 400);
+    if (!rId) return NextResponse.json({ error: "Invalid or missing routeId" }, { status: 400 });
 
     const [existing] = await db
       .select()
@@ -331,15 +319,15 @@ export async function DELETE(req: Request) {
       .where(eq(route.id, rId))
       .limit(1);
 
-    if (!existing) return jsonError("Route not found", 404);
+    if (!existing) return NextResponse.json({ error: "Route not found" }, { status: 404 });
     if (!isDevModeEnabled() && existing.user_id !== session.user.id)
-      return jsonError("Forbidden", 403);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     await db.delete(route).where(eq(route.id, rId));
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not delete route", 500, message);
+    return NextResponse.json({ error: "Could not delete route", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }

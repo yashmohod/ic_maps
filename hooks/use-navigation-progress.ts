@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UserPos } from "@/lib/types/map";
 import type { NavStep } from "@/lib/navigation-types";
-import { calcDistance } from "@/lib/utils";
+import { calcDistance } from "@/lib/geo";
 
 const ADVANCE_OUTDOOR_METERS = 15;
-const ADVANCE_INDOOR_GPS_METERS = 25;
 
 function distanceAlongPolylineToPoint(
   coords: [number, number][],
@@ -124,15 +123,4 @@ export function useNavigationProgress(
     setStepIndex,
     resetProgress,
   };
-}
-
-export function isNearOutdoorNode(
-  userPos: UserPos,
-  node: { lat: number; lng: number },
-  thresholdMeters = ADVANCE_INDOOR_GPS_METERS,
-): boolean {
-  return (
-    calcDistance(userPos.lat, userPos.lng, node.lat, node.lng) <=
-    thresholdMeters
-  );
 }

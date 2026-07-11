@@ -3,15 +3,13 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ToasterClient } from "@/components/toaster-client";
+import { Toaster } from "@/components/ui/sonner";
 import { DevModeProvider } from "@/components/dev-mode-provider";
 import { isDevModeEnabled } from "@/lib/dev-mode";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
-
-
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -34,10 +32,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-
-
-
-
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -57,7 +51,7 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <SidebarProvider defaultOpen={false}>
-              <ToasterClient />
+              <Toaster />
 
               {children}
             </SidebarProvider>

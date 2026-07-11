@@ -4,9 +4,13 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { myMapsPoint } from "@/db/schema";
-import { requireSession } from "@/lib/auth-guards";
-import { getMapAccess } from "@/lib/mymaps-access";
-import { isValidLatLng, jsonError, parseId } from "@/lib/utils";
+import { getSession, requireSession } from "@/lib/auth-guards";
+import {
+  getErrorDetail,
+  requireMapEditable,
+  requireMapReadable,
+} from "@/lib/mymaps-http";
+import { isValidLatLng, parseId } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
 const ROUTE = "/api/mymaps/maps/[id]/points";
@@ -24,20 +28,16 @@ const putSchema = z.object({
   name: z.string().max(256).optional(),
 });
 
-function getDetail(err: unknown): string {
-  if (err instanceof Error && "cause" in err && err.cause instanceof Error)
-    return err.cause.message;
-  return err instanceof Error ? err.message : String(err);
-}
-
 export async function GET(_req: Request, { params }: Params) {
-  const { session, error } = await requireSession();
-  if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access || !access.canRead) return jsonError("Map not found", 404);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const session = await getSession();
+    const userId = session?.user?.id ?? null;
+    const gate = await requireMapReadable(mapId, userId);
+    if ("error" in gate) return gate.error;
+
     const points = await db
       .select()
       .from(myMapsPoint)
@@ -45,7 +45,7 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ points }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return jsonError("Could not fetch points", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not fetch points", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -54,13 +54,13 @@ export async function POST(req: Request, { params }: Params) {
   if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -69,7 +69,7 @@ export async function POST(req: Request, { params }: Params) {
       );
     }
     const { lat, lng, name } = parsed.data;
-    if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
+    if (!isValidLatLng(lat, lng)) return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
 
     const [inserted] = await db
       .insert(myMapsPoint)
@@ -79,7 +79,7 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ point: inserted }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Insert failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -88,13 +88,13 @@ export async function PUT(req: Request, { params }: Params) {
   if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -111,12 +111,12 @@ export async function PUT(req: Request, { params }: Params) {
         and(eq(myMapsPoint.id, pointId), eq(myMapsPoint.my_maps_id, mapId)),
       )
       .limit(1);
-    if (!existing) return jsonError("Point not found", 404);
+    if (!existing) return NextResponse.json({ error: "Point not found" }, { status: 404 });
 
     const nextLat = lat ?? existing.lat;
     const nextLng = lng ?? existing.lng;
     if (!isValidLatLng(nextLat, nextLng))
-      return jsonError("Invalid lat/lng", 400);
+      return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
 
     const updates: { lat: number; lng: number; name?: string } = {
       lat: nextLat,
@@ -133,7 +133,7 @@ export async function PUT(req: Request, { params }: Params) {
     return NextResponse.json({ point: updated }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Update failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -142,10 +142,10 @@ export async function DELETE(req: Request, { params }: Params) {
   if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const { searchParams } = new URL(req.url);
     let pointId = parseId(searchParams.get("pointId"));
@@ -153,7 +153,7 @@ export async function DELETE(req: Request, { params }: Params) {
       const body = await req.json().catch(() => null);
       pointId = parseId((body as { pointId?: unknown } | null)?.pointId);
     }
-    if (!pointId) return jsonError("Missing or invalid pointId", 400);
+    if (!pointId) return NextResponse.json({ error: "Missing or invalid pointId" }, { status: 400 });
 
     const result = await db
       .delete(myMapsPoint)
@@ -161,10 +161,10 @@ export async function DELETE(req: Request, { params }: Params) {
         and(eq(myMapsPoint.id, pointId), eq(myMapsPoint.my_maps_id, mapId)),
       )
       .returning({ id: myMapsPoint.id });
-    if (result.length === 0) return jsonError("Point not found", 404);
+    if (result.length === 0) return NextResponse.json({ error: "Point not found" }, { status: 404 });
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return jsonError("Delete failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }

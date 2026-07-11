@@ -4,9 +4,9 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { createAuthMiddleware, APIError } from "better-auth/api";
 
-import { db } from "../db";
-import { schema } from "../db/schema";
-import { sendDevEmail } from "../lib/email";
+import { db } from "@/db";
+import { schema } from "@/db/schema";
+import { sendDevEmail } from "@/lib/email";
 import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 import { APP_BASE_PATH, getPublicAuthUrl } from "@/lib/auth-config";
 

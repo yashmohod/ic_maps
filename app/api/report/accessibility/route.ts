@@ -11,7 +11,6 @@ import {
   parseReportDateQuery,
   reportCreatedAtConditions,
 } from "@/lib/report-date-query";
-import { jsonError } from "@/lib/utils";
 
 export const runtime = "nodejs";
 
@@ -64,7 +63,7 @@ export async function GET(req: Request) {
 
   const parsedDates = parseReportDateQuery(new URL(req.url).searchParams);
   if (!parsedDates.ok) {
-    return jsonError(parsedDates.error, 400);
+    return NextResponse.json({ error: parsedDates.error }, { status: 400 });
   }
 
   try {
@@ -91,11 +90,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ reports });
   } catch (err: unknown) {
     console.error("[API /api/report/accessibility GET] error", err);
-    return jsonError(
-      "Failed to fetch accessibility reports",
-      500,
-      err instanceof Error ? err.message : String(err),
-    );
+    return NextResponse.json({ error: "Failed to fetch accessibility reports", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -106,7 +101,7 @@ export async function POST(req: Request) {
     const photo = formData.get("photo");
 
     if (typeof textRaw !== "string") {
-      return jsonError("Missing text", 400);
+      return NextResponse.json({ error: "Missing text" }, { status: 400 });
     }
 
     const parsedText = accessibilityReportTextSchema.safeParse(textRaw);
@@ -121,17 +116,17 @@ export async function POST(req: Request) {
     }
 
     if (photo != null && !(photo instanceof File)) {
-      return jsonError("Invalid photo field", 400);
+      return NextResponse.json({ error: "Invalid photo field" }, { status: 400 });
     }
 
     const file = photo instanceof File && photo.size > 0 ? photo : null;
 
     if (file) {
       if (!ALLOWED_MIME_TYPES.has(file.type)) {
-        return jsonError("Unsupported file type. Use png/jpg/webp/gif.", 400);
+        return NextResponse.json({ error: "Unsupported file type. Use png/jpg/webp/gif." }, { status: 400 });
       }
       if (file.size > MAX_FILE_BYTES) {
-        return jsonError("File too large. Max size is 10MB.", 413);
+        return NextResponse.json({ error: "File too large. Max size is 10MB." }, { status: 413 });
       }
     }
 
@@ -148,7 +143,7 @@ export async function POST(req: Request) {
       .returning({ id: accessibilityReport.id });
 
     if (!inserted) {
-      return jsonError("Failed to create report", 500);
+      return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
     }
 
     let photoPath: string | null = null;
@@ -179,21 +174,13 @@ export async function POST(req: Request) {
           "[API /api/report/accessibility POST] photo save error",
           err,
         );
-        return jsonError(
-          "Failed to save photo",
-          500,
-          err instanceof Error ? err.message : String(err),
-        );
+        return NextResponse.json({ error: "Failed to save photo", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
       }
     }
 
     return NextResponse.json({ id: inserted.id, photoPath }, { status: 201 });
   } catch (err: unknown) {
     console.error("[API /api/report/accessibility POST] error", err);
-    return jsonError(
-      "Failed to submit accessibility report",
-      500,
-      err instanceof Error ? err.message : String(err),
-    );
+    return NextResponse.json({ error: "Failed to submit accessibility report", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }

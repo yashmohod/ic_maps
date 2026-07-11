@@ -31,7 +31,7 @@ export function turnDegreesAtNode(
   return turn;
 }
 
-export type RawOutdoorStepLike = {
+type RawOutdoorStepLike = {
   maneuver: OutdoorManeuver;
   distanceMeters: number;
 };

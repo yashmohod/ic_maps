@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { db, pool } from "@/db/index";
+import { db, pool } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
-import { jsonError, isValidLatLng, parseId } from "@/lib/utils";
+import { reloadGraph } from "@/lib/navigation";
+import { isValidLatLng, parseId } from "@/lib/utils";
 
 function getDetail(err: unknown): string {
   if (err instanceof Error && "cause" in err && err.cause instanceof Error)
@@ -19,13 +19,13 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { lat, lng } = body as { lat: unknown; lng: unknown };
 
     console.log(`[API ${ROUTE} POST] called`, { lat, lng });
 
-    if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
+    if (!isValidLatLng(lat, lng)) return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
 
     const latNum = lat as number;
     const lngNum = lng as number;
@@ -39,14 +39,14 @@ export async function POST(req: Request) {
 
     const inserted = result.rows[0];
     if (!inserted?.id) {
-      return jsonError("Insert failed", 500, "Insert did not return an id");
+      return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String("Insert did not return an id") } : {}) }, { status: 500 });
     }
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({ id: inserted.id }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Insert failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -56,7 +56,7 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { id, lat, lng } = body as {
       id: unknown;
@@ -67,9 +67,9 @@ export async function PUT(req: Request) {
     console.log(`[API ${ROUTE} PUT] called`, { id, lat, lng });
 
     const nid = parseId(id);
-    if (!nid) return jsonError("Invalid id", 400);
+    if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-    if (!isValidLatLng(lat, lng)) return jsonError("Invalid lat/lng", 400);
+    if (!isValidLatLng(lat, lng)) return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
     const latNum = lat as number;
     const lngNum = lng as number;
     const pointWkt = `POINT(${lngNum} ${latNum})`;
@@ -78,7 +78,7 @@ export async function PUT(req: Request) {
       [latNum, lngNum, pointWkt, nid],
     );
     if (result.rowCount === 0) {
-      return jsonError("Node not found", 404);
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
     await db.execute(sql`
@@ -90,11 +90,11 @@ export async function PUT(req: Request) {
     AND (e.node_a_id = ${nid} OR e.node_b_id = ${nid});
 `);
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Update failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -104,14 +104,14 @@ export async function DELETE(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { id } = body as { id: unknown };
 
     console.log(`[API ${ROUTE} DELETE] called`, { id });
 
     const nid = parseId(id);
-    if (!nid) return jsonError("Invalid id", 400);
+    if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const result = await db.execute(sql`
       DELETE FROM node_outside
@@ -120,15 +120,15 @@ export async function DELETE(req: Request) {
     `);
 
     if (result.rows.length === 0) {
-      return jsonError("Node not found", 404);
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Delete failed", 500, message);
+    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -142,7 +142,7 @@ export async function GET(req: Request) {
 
     if (idParam != null) {
       const nid = parseId(idParam);
-      if (!nid) return jsonError("Invalid id", 400);
+      if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
       const result = await db.execute(sql<{
         id: number;
@@ -169,7 +169,7 @@ export async function GET(req: Request) {
         WHERE id = ${nid};
       `);
 
-      if (result.rows.length === 0) return jsonError("Node not found", 404);
+      if (result.rows.length === 0) return NextResponse.json({ error: "Node not found" }, { status: 404 });
       const row = result.rows[0];
       return NextResponse.json(
         {
@@ -229,6 +229,6 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch nodes", 500, message);
+    return NextResponse.json({ error: "Could not fetch nodes", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }

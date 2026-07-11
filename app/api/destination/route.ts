@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
-import { db } from "@/db/index";
+import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
-import {
-  jsonError,
-  isNonEmptyString,
-  isValidLatLng,
-  parseId,
-  parsePolygon,
-} from "@/lib/utils";
+import { reloadGraph } from "@/lib/navigation";
+import { isNonEmptyString, isValidLatLng, parseId, parsePolygon } from "@/lib/utils";
 
 const ROUTE = "/api/destination";
 
@@ -19,7 +13,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { name, lat, lng, polygon } = body as {
       name: unknown;
@@ -31,23 +25,15 @@ export async function POST(req: Request) {
     console.log(`[API ${ROUTE} POST] called`, { name, lat, lng });
 
     if (!isNonEmptyString(name, 256)) {
-      return jsonError(
-        "Invalid name",
-        400,
-        "name must be a non-empty string (<=256 chars)",
-      );
+      return NextResponse.json({ error: "Invalid name", ...(process.env.NODE_ENV !== "production" ? { detail: String("name must be a non-empty string (<=256 chars)") } : {}) }, { status: 400 });
     }
     if (!isValidLatLng(lat, lng)) {
-      return jsonError("Invalid lat/lng", 400);
+      return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
     }
 
     const parsed = parsePolygon(polygon);
     if (!parsed) {
-      return jsonError(
-        "Invalid polygon",
-        400,
-        "polygon must be valid JSON (string or object)",
-      );
+      return NextResponse.json({ error: "Invalid polygon", ...(process.env.NODE_ENV !== "production" ? { detail: String("polygon must be valid JSON (string or object)") } : {}) }, { status: 400 });
     }
 
     // Insert first (polygon will be updated with destId/name in properties)
@@ -59,7 +45,7 @@ export async function POST(req: Request) {
 
     const inserted = result.rows[0];
     if (!inserted?.id) {
-      return jsonError("Insert failed", 500, "Insert did not return an id");
+      return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String("Insert did not return an id") } : {}) }, { status: 500 });
     }
 
     // Patch polygon properties with destId + name
@@ -81,7 +67,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error(`[API ${ROUTE} POST] error`, err);
     // Unexpected/DB errors -> 500
-    return jsonError("Destination insert failed", 500, err?.message ?? err);
+    return NextResponse.json({ error: "Destination insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(err?.message ?? err) } : {}) }, { status: 500 });
   }
 }
 
@@ -91,7 +77,7 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { id, name, lat, lng, polygon, openTime, closeTime } = body as {
       id: unknown;
@@ -106,26 +92,18 @@ export async function PUT(req: Request) {
     console.log(`[API ${ROUTE} PUT] called`, { id, name, lat, lng, openTime, closeTime });
 
     const nid = parseId(id);
-    if (!nid) return jsonError("Invalid id", 400);
+    if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     if (!isNonEmptyString(name, 256)) {
-      return jsonError(
-        "Invalid name",
-        400,
-        "name must be a non-empty string (<=256 chars)",
-      );
+      return NextResponse.json({ error: "Invalid name", ...(process.env.NODE_ENV !== "production" ? { detail: String("name must be a non-empty string (<=256 chars)") } : {}) }, { status: 400 });
     }
     if (!isValidLatLng(lat, lng)) {
-      return jsonError("Invalid lat/lng", 400);
+      return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
     }
 
     const parsed = parsePolygon(polygon);
     if (!parsed) {
-      return jsonError(
-        "Invalid polygon",
-        400,
-        "polygon must be valid JSON (string or object)",
-      );
+      return NextResponse.json({ error: "Invalid polygon", ...(process.env.NODE_ENV !== "production" ? { detail: String("polygon must be valid JSON (string or object)") } : {}) }, { status: 400 });
     }
 
     // Keep polygon properties consistent
@@ -167,13 +145,13 @@ export async function PUT(req: Request) {
     `);
 
     if (result.rows.length === 0) {
-      return jsonError("Destination not found", 404);
+      return NextResponse.json({ error: "Destination not found" }, { status: 404 });
     }
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Destination update failed", 500, err?.message ?? err);
+    return NextResponse.json({ error: "Destination update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(err?.message ?? err) } : {}) }, { status: 500 });
   }
 }
 
@@ -183,12 +161,12 @@ export async function DELETE(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { id } = body as { id: unknown };
     console.log(`[API ${ROUTE} DELETE] called`, { id });
     const nid = parseId(id);
-    if (!nid) return jsonError("Invalid id", 400);
+    if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const result = await db.execute(sql`
       DELETE FROM destination
@@ -197,14 +175,14 @@ export async function DELETE(req: Request) {
     `);
 
     if (result.rows.length === 0) {
-      return jsonError("Destination not found", 404);
+      return NextResponse.json({ error: "Destination not found" }, { status: 404 });
     }
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({}, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return jsonError("Destination delete failed", 500, err?.message ?? err);
+    return NextResponse.json({ error: "Destination delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(err?.message ?? err) } : {}) }, { status: 500 });
   }
 }
 
@@ -233,6 +211,6 @@ export async function GET(_req: Request) {
     return NextResponse.json({ destinations }, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return jsonError("Could not fetch destinations", 500, err?.message ?? err);
+    return NextResponse.json({ error: "Could not fetch destinations", ...(process.env.NODE_ENV !== "production" ? { detail: String(err?.message ?? err) } : {}) }, { status: 500 });
   }
 }

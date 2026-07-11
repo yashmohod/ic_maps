@@ -74,7 +74,8 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
   const pmtilesPath =
     options.pmtilesPath ?? withBasePath("/tiles/ithaca.pmtiles");
   const stylePath =
-    options.stylePath ?? withBasePath("/styles/osm-bright/style-local.json");
+    options.stylePath ??
+    withBasePath("/styles/osm-bright/style-local-light.json");
   const glyphsFallback =
     options.glyphsFallback ??
     "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf";

@@ -28,8 +28,6 @@ function readSafeAreaBottomPx(): number {
   return px;
 }
 
-export { DEFAULT_SNAP_POINTS as MAP_BOTTOM_SHEET_SNAP_POINTS };
-
 export type MapBottomSheetProps = {
   children: React.ReactNode;
   title?: React.ReactNode;

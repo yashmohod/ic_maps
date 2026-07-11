@@ -1,26 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { NextResponse } from "next/server";
-
-export { calcDistance, heuristic } from "./geo";
-
-const includeDetail = process.env.NODE_ENV !== "production";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-}
-
-export function jsonError(message: string, status: number, detail?: unknown) {
-  return NextResponse.json(
-    {
-      error: message,
-      // Include detail in dev, or for 5xx so clients can show the real error (e.g. PostGIS missing)
-      ...(detail != null && (includeDetail || status >= 500)
-        ? { detail: String(detail) }
-        : {}),
-    },
-    { status },
-  );
 }
 
 export function isFiniteNumber(v: unknown): v is number {
@@ -61,19 +43,32 @@ export function parsePolygon(
 
     if (!obj || typeof obj !== "object") return null;
 
-    const type = (obj as Record<string, unknown>).type;
+    const record = obj as Record<string, unknown>;
+    const type = record.type;
     if (typeof type !== "string") return null;
 
-    if (
-      !(obj as Record<string, unknown>).properties ||
-      typeof (obj as Record<string, unknown>).properties !== "object"
-    ) {
-      (obj as Record<string, unknown>).properties = {};
+    const geomType =
+      type === "Feature"
+        ? (record.geometry as { type?: string } | undefined)?.type
+        : type === "FeatureCollection"
+          ? (
+              (
+                record.features as
+                  | Array<{ geometry?: { type?: string } }>
+                  | undefined
+              )?.[0]?.geometry as { type?: string } | undefined
+            )?.type
+          : type;
+
+    if (geomType !== "Polygon") return null;
+
+    if (!record.properties || typeof record.properties !== "object") {
+      record.properties = {};
     }
 
     return {
-      polyObj: obj as Record<string, unknown>,
-      polyStr: JSON.stringify(obj),
+      polyObj: record,
+      polyStr: JSON.stringify(record),
     };
   } catch {
     return null;

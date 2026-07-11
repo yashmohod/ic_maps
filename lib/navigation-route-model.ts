@@ -1,13 +1,13 @@
 import type { Graph } from "@/lib/navigation-graph";
 import { nextNodeFromEdge } from "@/lib/navigation-graph";
 
-export type OutdoorEdgeRun = {
+type OutdoorEdgeRun = {
   kind: "outdoor";
   edgeIds: number[];
   nodeIds: number[];
 };
 
-export type IndoorShortcut = {
+type IndoorShortcut = {
   kind: "indoor";
   entranceOutdoorId: number;
   exitOutdoorId: number;

@@ -32,7 +32,7 @@ function outdoorNode(id: number, lat: number, lng: number): NodeOutside {
     is_stairs: false,
     is_blue_light: false,
     is_dead: false,
-    location: null,
+    location: { x: lng, y: lat },
   };
 }
 

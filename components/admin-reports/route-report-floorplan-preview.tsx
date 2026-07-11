@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 import { ReactFlowProvider } from "@xyflow/react";
 import {
   CircleDot,
@@ -12,7 +13,6 @@ import {
 
 import { FloorplanReadonlyCanvas } from "@/components/floorplan/floorplan-readonly-canvas";
 import { Spinner } from "@/components/ui/spinner";
-import apiClient from "@/lib/apiClient";
 import {
   floorplanApiToFlow,
   NODE_KIND_META,
@@ -100,12 +100,8 @@ function FloorplanPreviewInner({
     (async () => {
       try {
         const [nodesResp, edgesResp] = await Promise.all([
-          apiClient.get(
-            `/api/destination/floorplan/nodes?destinationId=${destinationId}`,
-          ),
-          apiClient.get(
-            `/api/destination/floorplan/edges?destinationId=${destinationId}`,
-          ),
+          fetch(withBasePath(`/api/destination/floorplan/nodes?destinationId=${destinationId}`)),
+          fetch(withBasePath(`/api/destination/floorplan/edges?destinationId=${destinationId}`)),
         ]);
 
         if (!nodesResp.ok || !edgesResp.ok) {

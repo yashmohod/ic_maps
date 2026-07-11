@@ -1,6 +1,4 @@
-// src/components/BuildingEditor.tsx
 "use client";
-import apiClient from "@/lib/apiClient"
 import React, {
   useState,
   useEffect,
@@ -10,6 +8,7 @@ import React, {
   JSX,
 } from "react";
 import { toast } from "sonner";
+import { withBasePath } from "@/lib/base-path";
 import { Map as ReactMap, type MapRef } from "@vis.gl/react-maplibre";
 import maplibregl, {
   type Map as MlMap,
@@ -26,7 +25,9 @@ import type {
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./page.css";
 
-import EditPanel from "@/components/BuildingInfoEditPanel";
+import EditPanel, {
+  type BuildingRow,
+} from "@/components/BuildingInfoEditPanel";
 import DrawControl from "@/components/BuildingDrawControls";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
@@ -38,17 +39,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { mapPageClass } from "@/lib/panel-classes";
 
 import type { ViewStateLite } from "@/lib/types/map";
-
-export type BuildingRow = {
-  id: number;
-  name: string;
-  lat: number;
-  lng: number;
-  polygon: string; // JSON string of a GeoJSON Feature
-  isParkingLot: boolean;
-  openTime: string;
-  closeTime: string;
-};
 
 type DrawEvent = {
   features: Array<Feature>;
@@ -85,8 +75,6 @@ const MapSection = React.memo(function MapSection({
   onSelectionChange,
   onModeChange,
 }: MapSectionProps) {
-
-
   return (
     <ReactMap
       ref={mapRef}
@@ -128,20 +116,16 @@ export default function BuildingEditor(): JSX.Element {
     Array<Feature<Polygon, GeoJsonProperties>>
   >([]);
 
-
-
-  const [currentBuilding, setCurrentBuilding] = useState<BuildingRow>(
-    {
-      id: -1,
-      name: "",
-      lat: -1,
-      lng: -1,
-      polygon: "", // JSON string of a GeoJSON Feature
-      isParkingLot: false,
-      openTime: "00:00:00",
-      closeTime: "23:59:59",
-    }
-  );
+  const [currentBuilding, setCurrentBuilding] = useState<BuildingRow>({
+    id: -1,
+    name: "",
+    lat: -1,
+    lng: -1,
+    polygon: "", // JSON string of a GeoJSON Feature
+    isParkingLot: false,
+    openTime: "00:00:00",
+    closeTime: "23:59:59",
+  });
 
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
@@ -158,7 +142,9 @@ export default function BuildingEditor(): JSX.Element {
 
   async function loadDestinations() {
     try {
-      const resp: any = await apiClient.get("/api/destination").then((r) => r.json());
+      const resp: any = await fetch(withBasePath("/api/destination")).then(
+        (r) => r.json(),
+      );
       if (!resp) {
         toast.error("Buildings failed to load");
         return;
@@ -176,7 +162,7 @@ export default function BuildingEditor(): JSX.Element {
                 Polygon,
                 GeoJsonProperties
               >;
-              return polyJ
+              return polyJ;
             } catch {
               return null;
             }
@@ -192,7 +178,11 @@ export default function BuildingEditor(): JSX.Element {
   async function onChangeIsParkingLot(v: boolean) {
     if (!currentBuilding) return;
     try {
-      const req = await apiClient.post("/api/destination/setParkingLot", { id: currentBuilding.id, isParkingLot: v })
+      const req = await fetch(withBasePath("/api/destination/setParkingLot"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: currentBuilding.id, isParkingLot: v }),
+      });
       if (req.status !== 200) {
         const resp = await req.json();
         toast.error(resp.error);
@@ -267,11 +257,18 @@ export default function BuildingEditor(): JSX.Element {
     lng /= ring.length - 1;
 
     try {
-      const req: any = await apiClient.post("/api/destination",
-        { name, lat, lng, polygon: JSON.stringify(feature) });
+      const req: any = await fetch(withBasePath("/api/destination"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          lat,
+          lng,
+          polygon: JSON.stringify(feature),
+        }),
+      });
 
       const resp = await req.json();
-
 
       if (req.status !== 201) {
         toast.error(resp?.error);
@@ -282,27 +279,42 @@ export default function BuildingEditor(): JSX.Element {
       draw?.setFeatureProperty?.(drawId, "name", name);
       const normalizedFeature = {
         ...(feature as any),
-        properties: { destId: resp.id, name: name }
+        properties: { destId: resp.id, name: name },
       } as Feature<Polygon, GeoJsonProperties>;
       const polygon = JSON.stringify(normalizedFeature);
-
 
       setPolys((p) => [...p, normalizedFeature]);
       setBuildings((prev) => {
         const newList: BuildingRow[] = [
           ...prev,
-          { id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" },
+          {
+            id: Number(resp.id),
+            name,
+            lat,
+            lng,
+            polygon,
+            isParkingLot: false,
+            openTime: "00:00:00",
+            closeTime: "23:59:59",
+          },
         ];
         buildingsRef.current = newList;
         return newList;
       });
-      // loadDestinations();
-      setCurrentBuilding({ id: Number(resp.id), name, lat, lng, polygon, isParkingLot: false, openTime: "00:00:00", closeTime: "23:59:59" });
+      setCurrentBuilding({
+        id: Number(resp.id),
+        name,
+        lat,
+        lng,
+        polygon,
+        isParkingLot: false,
+        openTime: "00:00:00",
+        closeTime: "23:59:59",
+      });
     } catch (err) {
       console.error(err);
       toast.error("Failed to create destination.");
     }
-
   }, []);
 
   const onUpdate = useCallback(async (e: DrawEvent, draw?: any) => {
@@ -322,21 +334,51 @@ export default function BuildingEditor(): JSX.Element {
     lat /= ring.length - 1;
     lng /= ring.length - 1;
 
-
     const polygon = JSON.stringify(feature);
 
     try {
-      const req: any = await apiClient.put("/api/destination", { id: feature?.properties?.destId, name: feature?.properties?.name, polygon, lat, lng });
+      const req: any = await fetch(withBasePath("/api/destination"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: feature?.properties?.destId,
+          name: feature?.properties?.name,
+          polygon,
+          lat,
+          lng,
+        }),
+      });
       const resp = await req.json();
       if (resp) {
         setPolys((old) =>
-          old.map((p) => (Number(p.properties?.destId) === feature?.properties?.destId ? feature : p)),
+          old.map((p) =>
+            Number(p.properties?.destId) === feature?.properties?.destId
+              ? feature
+              : p,
+          ),
         );
-        setCurrentBuilding((prev) => { return { ...prev, id: Number(feature?.properties?.destId), name: feature?.properties?.name, lat, lng, polygon } });
+        setCurrentBuilding((prev) => {
+          return {
+            ...prev,
+            id: Number(feature?.properties?.destId),
+            name: feature?.properties?.name,
+            lat,
+            lng,
+            polygon,
+          };
+        });
         const destId = Number(feature?.properties?.destId);
         setBuildings((prev) => {
           const next = prev.map((b) =>
-            b.id === destId ? { ...b, name: feature?.properties?.name as string, lat, lng, polygon } : b,
+            b.id === destId
+              ? {
+                  ...b,
+                  name: feature?.properties?.name as string,
+                  lat,
+                  lng,
+                  polygon,
+                }
+              : b,
           );
           buildingsRef.current = next;
           return next;
@@ -350,26 +392,9 @@ export default function BuildingEditor(): JSX.Element {
     }
   }, []);
 
-  const onDelete = useCallback(
-    async (e: DrawEvent, draw?: any) => {
-      // const f = e.features?.[0] as Feature | undefined;
-      // if (!f) return;
-
-      // const id = String(f.properties?.id ?? "");
-      // const resp: any = await deleteBuilding(id);
-
-      // if (resp) {
-      //   setPolys((old) => old.filter((p) => String((p.properties?.id) !== id)));
-      //   if (String(currentBuilding.id ?? "") === id) {
-      //     setCurrentBuilding({});
-      //     setcurEditName("");
-      //   }
-      // } else {
-      //   toast.error(resp?.message ?? "Failed to delete building");
-      // }
-    },
-    [currentBuilding.id],
-  );
+  const onDelete = useCallback(async (_e: DrawEvent, _draw?: any) => {
+    // Building delete not implemented yet.
+  }, []);
 
   const onSelectionChange = useCallback((e: DrawEvent, draw?: any) => {
     if (!e.features || e.features.length === 0) return;
@@ -380,13 +405,17 @@ export default function BuildingEditor(): JSX.Element {
     }
   }, []);
 
-  const onModeChange = useCallback(() => { }, []);
+  const onModeChange = useCallback(() => {}, []);
 
   const buildingInfoSave = async () => {
     if (!currentBuilding.id) return toast.error("Select a building first.");
     let curBuildingCopy = currentBuilding;
     try {
-      const resp = await apiClient.put("/api/destination", { ...curBuildingCopy });
+      const resp = await fetch(withBasePath("/api/destination"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...curBuildingCopy }),
+      });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         toast.error(data?.error ?? "Name could not be updated!");
@@ -409,14 +438,18 @@ export default function BuildingEditor(): JSX.Element {
   /** Render */
   if (isPending || !allowed) {
     return (
-      <div className={`grid place-items-center bg-background text-foreground ${mapPageClass}`}>
+      <div
+        className={`grid place-items-center bg-background text-foreground ${mapPageClass}`}
+      >
         <Spinner className="size-10" />
       </div>
     );
   }
 
   return (
-    <div className={`relative w-full bg-background text-foreground ${mapPageClass}`}>
+    <div
+      className={`relative w-full bg-background text-foreground ${mapPageClass}`}
+    >
       <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />

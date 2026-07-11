@@ -4,9 +4,13 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { myMapsPolygon } from "@/db/schema";
-import { requireSession } from "@/lib/auth-guards";
-import { getMapAccess } from "@/lib/mymaps-access";
-import { jsonError, parseId, parsePolygon } from "@/lib/utils";
+import { getSession, requireSession } from "@/lib/auth-guards";
+import {
+  getErrorDetail,
+  requireMapEditable,
+  requireMapReadable,
+} from "@/lib/mymaps-http";
+import { parseId, parsePolygon } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,22 +27,15 @@ const putSchema = z.object({
   polygon: z.unknown().optional(),
 });
 
-function getDetail(err: unknown): string {
-  if (err instanceof Error && "cause" in err && err.cause instanceof Error)
-    return err.cause.message;
-  return err instanceof Error ? err.message : String(err);
-}
-
 export async function GET(_req: Request, { params }: Params) {
-  const { session, error } = await requireSession();
-  if (error) return error;
-
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access || !access.canRead) return jsonError("Map not found", 404);
+    const session = await getSession();
+    const userId = session?.user?.id ?? null;
+    const gate = await requireMapReadable(mapId, userId);
+    if ("error" in gate) return gate.error;
 
     const polygons = await db
       .select()
@@ -48,7 +45,7 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ polygons }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return jsonError("Could not fetch polygons", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not fetch polygons", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -58,14 +55,13 @@ export async function POST(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
@@ -77,11 +73,7 @@ export async function POST(req: Request, { params }: Params) {
 
     const poly = parsePolygon(parsed.data.polygon);
     if (!poly) {
-      return jsonError(
-        "Invalid polygon",
-        400,
-        "polygon must be valid JSON (string or object)",
-      );
+      return NextResponse.json({ error: "Invalid polygon", ...(process.env.NODE_ENV !== "production" ? { detail: String("polygon must be valid JSON (string or object)") } : {}) }, { status: 400 });
     }
 
     const name = parsed.data.name ?? "";
@@ -112,10 +104,10 @@ export async function POST(req: Request, { params }: Params) {
       return NextResponse.json({ polygon: updated }, { status: 201 });
     }
 
-    return jsonError("Insert failed", 500);
+    return NextResponse.json({ error: "Insert failed" }, { status: 500 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Insert failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -125,14 +117,13 @@ export async function PUT(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
@@ -155,7 +146,7 @@ export async function PUT(req: Request, { params }: Params) {
       )
       .limit(1);
 
-    if (!existing) return jsonError("Polygon not found", 404);
+    if (!existing) return NextResponse.json({ error: "Polygon not found" }, { status: 404 });
 
     const updates: { name?: string; polygon?: string } = {};
     if (name !== undefined) updates.name = name;
@@ -163,11 +154,7 @@ export async function PUT(req: Request, { params }: Params) {
     if (polygon !== undefined) {
       const poly = parsePolygon(polygon);
       if (!poly) {
-        return jsonError(
-          "Invalid polygon",
-          400,
-          "polygon must be valid JSON (string or object)",
-        );
+        return NextResponse.json({ error: "Invalid polygon", ...(process.env.NODE_ENV !== "production" ? { detail: String("polygon must be valid JSON (string or object)") } : {}) }, { status: 400 });
       }
       const props = (poly.polyObj.properties ?? {}) as Record<string, unknown>;
       props.name = name ?? existing.name;
@@ -199,7 +186,7 @@ export async function PUT(req: Request, { params }: Params) {
     return NextResponse.json({ polygon: updated }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Update failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -209,11 +196,10 @@ export async function DELETE(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const { searchParams } = new URL(req.url);
     let polygonId = parseId(searchParams.get("polygonId"));
@@ -221,7 +207,7 @@ export async function DELETE(req: Request, { params }: Params) {
       const body = await req.json().catch(() => null);
       polygonId = parseId((body as { polygonId?: unknown } | null)?.polygonId);
     }
-    if (!polygonId) return jsonError("Missing or invalid polygonId", 400);
+    if (!polygonId) return NextResponse.json({ error: "Missing or invalid polygonId" }, { status: 400 });
 
     const result = await db
       .delete(myMapsPolygon)
@@ -233,11 +219,11 @@ export async function DELETE(req: Request, { params }: Params) {
       )
       .returning({ id: myMapsPolygon.id });
 
-    if (result.length === 0) return jsonError("Polygon not found", 404);
+    if (result.length === 0) return NextResponse.json({ error: "Polygon not found" }, { status: 404 });
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return jsonError("Delete failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }

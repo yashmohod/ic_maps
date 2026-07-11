@@ -228,12 +228,6 @@ export function isIndoorRouteReport(
   );
 }
 
-export function isEntranceRouteReport(
-  featureType: RouteReportFeatureType | string | null | undefined,
-): boolean {
-  return featureType === "entrance";
-}
-
 /** Group key for admin route reports: one group per specific map feature. */
 export function routeReportFeatureGroupKey(report: {
   featureType: string | null;
@@ -354,7 +348,7 @@ export function buildRouteReportPayload(input: {
   return null;
 }
 
-export function parsePolygon(
+export function parseDestinationPolygonCollection(
   polygon: string | null | undefined,
 ): GeoJSONFeatureCollection | null {
   if (!polygon) return null;
@@ -366,5 +360,3 @@ export function parsePolygon(
     return null;
   }
 }
-
-export { pinSchema, requiredTextSchema, optionalTextSchema };

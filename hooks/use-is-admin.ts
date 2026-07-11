@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 
 import { useDevMode } from "@/components/dev-mode-provider";
 import { useEffectiveSession } from "@/hooks/use-effective-session";
@@ -45,7 +46,7 @@ export function useIsAdmin() {
 
     void (async () => {
       try {
-        const resp = await fetch(`/api/users/${userId}`);
+        const resp = await fetch(withBasePath(`/api/users/${userId}`));
         if (!resp.ok) {
           if (mounted) setIsAdmin(false);
           return;

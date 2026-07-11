@@ -1,6 +1,6 @@
 "use client";
 
-import { type Session } from "@/lib/auth-client";
+import { withBasePath } from "@/lib/base-path";
 import { useEffectiveSession } from "@/hooks/use-effective-session";
 import { useIsIcUser } from "@/hooks/use-is-ic-user";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
@@ -207,7 +207,9 @@ export default function CustomRoutesPage(): JSX.Element {
     void (async () => {
       try {
         const res = await fetch(
-          `/api/shareableroute?id=${encodeURIComponent(String(route.id))}`,
+          withBasePath(
+            `/api/shareableroute?id=${encodeURIComponent(String(route.id))}`,
+          ),
         );
         const data = await res.json().catch(() => ({}));
         if (res.ok && Array.isArray(data.parkingLots)) {
@@ -241,7 +243,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setSaveEditPendingId(routeId);
     try {
-      const res = await fetch("/api/shareableroute", {
+      const res = await fetch(withBasePath("/api/shareableroute"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -334,7 +336,7 @@ export default function CustomRoutesPage(): JSX.Element {
     }
 
     try {
-      const res = await fetch("/api/shareableroute/all", {
+      const res = await fetch(withBasePath("/api/shareableroute/all"), {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
@@ -396,7 +398,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setCreatePending(true);
     try {
-      const res = await fetch("/api/shareableroute", {
+      const res = await fetch(withBasePath("/api/shareableroute"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -434,7 +436,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
     setDeletePending(true);
     try {
-      const res = await fetch("/api/shareableroute", {
+      const res = await fetch(withBasePath("/api/shareableroute"), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -510,7 +512,7 @@ export default function CustomRoutesPage(): JSX.Element {
 
   async function getDestinations() {
     try {
-      const res = await fetch("/api/destination");
+      const res = await fetch(withBasePath("/api/destination"));
       const data = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(data?.destinations)) {
         setDestinations(data.destinations);
@@ -570,7 +572,9 @@ export default function CustomRoutesPage(): JSX.Element {
     setBuildingNodesPending(true);
     try {
       const nodeRes = await fetch(
-        `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
+        withBasePath(
+          `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
+        ),
       );
       const nodeData = await nodeRes.json().catch(() => ({}));
       const details: Array<{ id: number; lat: number; lng: number }> =

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -11,8 +11,13 @@ import {
   myMapsText,
 } from "@/db/schema";
 import { getSession } from "@/lib/auth-guards";
-import { getMapAccess } from "@/lib/mymaps-access";
-import { jsonError, parseId } from "@/lib/utils";
+import {
+  getErrorDetail,
+  requireMapReadable,
+  toAccessPayload,
+  toPublicMap,
+} from "@/lib/mymaps-http";
+import { parseId } from "@/lib/utils";
 
 const ROUTE = "/api/mymaps/maps/[id]";
 
@@ -21,15 +26,14 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, { params }: Params) {
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
     const session = await getSession();
     const userId = session?.user?.id ?? null;
 
-    const access = await getMapAccess(mapId, userId);
-    if (!access || !access.canRead) {
-      return jsonError("Map not found", 404);
-    }
+    const gate = await requireMapReadable(mapId, userId);
+    if ("error" in gate) return gate.error;
+    const { access } = gate;
 
     const nodes = await db
       .select()
@@ -43,7 +47,12 @@ export async function GET(_req: Request, { params }: Params) {
         : await db
             .select()
             .from(myMapsEdge)
-            .where(inArray(myMapsEdge.node_a_id, nodeIds));
+            .where(
+              or(
+                inArray(myMapsEdge.node_a_id, nodeIds),
+                inArray(myMapsEdge.node_b_id, nodeIds),
+              ),
+            );
 
     const [polygons, lines, points, texts] = await Promise.all([
       db
@@ -55,15 +64,14 @@ export async function GET(_req: Request, { params }: Params) {
       db.select().from(myMapsText).where(eq(myMapsText.my_maps_id, mapId)),
     ]);
 
+    // Guests / public viewers do not need owner_id.
+    const mapPayload =
+      access.isOwner || access.role ? access.map : toPublicMap(access.map);
+
     return NextResponse.json(
       {
-        map: access.map,
-        access: {
-          role: access.role,
-          isOwner: access.isOwner,
-          canEdit: access.canEdit,
-          canManageSharing: access.canManageSharing,
-        },
+        map: mapPayload,
+        access: toAccessPayload(access),
         nodes,
         edges,
         polygons,
@@ -75,7 +83,6 @@ export async function GET(_req: Request, { params }: Params) {
     );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch map", 500, message);
+    return NextResponse.json({ error: "Could not fetch map", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }

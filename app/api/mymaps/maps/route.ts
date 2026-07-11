@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
 import { myMaps, myMapsCollaborator } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guards";
-import { getMapAccess } from "@/lib/mymaps-access";
-import { jsonError, parseId } from "@/lib/utils";
+import { getErrorDetail, requireMapReadable } from "@/lib/mymaps-http";
+import { parseId } from "@/lib/utils";
 
 const ROUTE = "/api/mymaps/maps";
 
@@ -25,19 +25,13 @@ const mapPutSchema = z
     { message: "Provide at least one field to update" },
   );
 
-function getDetail(err: unknown): string {
-  if (err instanceof Error && "cause" in err && err.cause instanceof Error)
-    return err.cause.message;
-  return err instanceof Error ? err.message : String(err);
-}
-
 export async function POST(req: Request) {
   const { session, error } = await requireSession();
   if (error) return error;
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = mapPostSchema.safeParse(body);
     if (!parsed.success) {
@@ -56,13 +50,13 @@ export async function POST(req: Request) {
       .returning();
 
     if (!inserted) {
-      return jsonError("Insert failed", 500, "Insert did not return a row");
+      return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String("Insert did not return a row") } : {}) }, { status: 500 });
     }
 
     return NextResponse.json({ map: inserted }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Insert failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -72,7 +66,7 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = mapPutSchema.safeParse(body);
     if (!parsed.success) {
@@ -83,31 +77,31 @@ export async function PUT(req: Request) {
     }
 
     const { id, name, is_public_view } = parsed.data;
-    const access = await getMapAccess(id, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
+    const gate = await requireMapReadable(id, session!.user.id);
+    if ("error" in gate) return gate.error;
+    const { access } = gate;
 
     if (is_public_view !== undefined && !access.isOwner) {
-      return jsonError("Only the owner can change visibility", 403);
+      return NextResponse.json({ error: "Only the owner can change visibility" }, { status: 403 });
     }
-
     if (name !== undefined && !access.canEdit) {
-      return jsonError("User role lacks permissions", 403);
-    }
-
-    if (!access.canEdit && is_public_view === undefined) {
-      return jsonError("User role lacks permissions", 403);
+      return NextResponse.json({ error: "User role lacks permissions" }, { status: 403 });
     }
 
     const updates: { name?: string; is_public_view?: boolean } = {};
     if (name !== undefined) updates.name = name;
     if (is_public_view !== undefined) updates.is_public_view = is_public_view;
 
-    await db.update(myMaps).set(updates).where(eq(myMaps.id, id));
+    const [updated] = await db
+      .update(myMaps)
+      .set(updates)
+      .where(eq(myMaps.id, id))
+      .returning();
 
-    return NextResponse.json({}, { status: 200 });
+    return NextResponse.json({ map: updated }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Update failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -146,8 +140,7 @@ export async function GET() {
     );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch MyMaps", 500, message);
+    return NextResponse.json({ error: "Could not fetch MyMaps", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -166,17 +159,13 @@ export async function DELETE(req: Request) {
       }
     }
 
-    if (!mapId) return jsonError("Missing or invalid id", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
-    const [existing] = await db
-      .select({ owner_id: myMaps.owner_id })
-      .from(myMaps)
-      .where(eq(myMaps.id, mapId))
-      .limit(1);
-
-    if (!existing) return jsonError("Map not found", 404);
-    if (existing.owner_id !== session!.user.id) {
-      return jsonError("Only the owner can delete this map", 403);
+    // 404 when missing or not readable — do not leak existence via 403.
+    const gate = await requireMapReadable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
+    if (!gate.access.isOwner) {
+      return NextResponse.json({ error: "Only the owner can delete this map" }, { status: 403 });
     }
 
     await db.delete(myMaps).where(eq(myMaps.id, mapId));
@@ -184,6 +173,6 @@ export async function DELETE(req: Request) {
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return jsonError("Could not delete map", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not delete map", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }

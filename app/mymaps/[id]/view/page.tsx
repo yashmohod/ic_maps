@@ -1,13 +1,7 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type JSX,
-} from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
+import { withBasePath } from "@/lib/base-path";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -16,7 +10,6 @@ import {
   Marker,
   Source,
   Layer,
-  type MapRef,
   type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
@@ -35,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
-import apiClient from "@/lib/apiClient";
+import { parseLineFeature, parsePolygonFeature } from "@/lib/mymaps-geo";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import {
   borderMutedClass,
@@ -63,43 +56,6 @@ type TextRow = {
   font_size: number;
 };
 
-function parsePolygonFeature(
-  raw: string,
-): Feature<Polygon, GeoJsonProperties> | null {
-  try {
-    const obj = JSON.parse(raw);
-    if (obj?.type === "Feature" && obj.geometry?.type === "Polygon") {
-      return obj as Feature<Polygon, GeoJsonProperties>;
-    }
-    if (obj?.type === "Polygon") {
-      return { type: "Feature", properties: {}, geometry: obj };
-    }
-    if (obj?.type === "FeatureCollection" && obj.features?.[0]) {
-      return obj.features[0] as Feature<Polygon, GeoJsonProperties>;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function parseLineFeature(
-  raw: string,
-): Feature<LineString, GeoJsonProperties> | null {
-  try {
-    const obj = JSON.parse(raw);
-    if (obj?.type === "Feature" && obj.geometry?.type === "LineString") {
-      return obj as Feature<LineString, GeoJsonProperties>;
-    }
-    if (obj?.type === "LineString") {
-      return { type: "Feature", properties: {}, geometry: obj };
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
 export default function MyMapPublicViewPage(): JSX.Element {
   const params = useParams();
   const rawId = params?.id;
@@ -118,7 +74,6 @@ export default function MyMapPublicViewPage(): JSX.Element {
   const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
-  const mapRef = useRef<MapRef | null>(null);
 
   const [mapName, setMapName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -137,7 +92,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
       return;
     }
     try {
-      const res = await apiClient.get(`/api/mymaps/maps/${mapId}`);
+      const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}`));
       if (!res.ok) {
         setNotFound(true);
         return;
@@ -314,7 +269,6 @@ export default function MyMapPublicViewPage(): JSX.Element {
           </div>
         ) : (
           <ReactMap
-            ref={mapRef}
             {...viewState}
             onMove={(e: ViewStateChangeEvent) =>
               setViewState((prev) => ({ ...prev, ...e.viewState }))

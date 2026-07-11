@@ -6,11 +6,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type JSX,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
+  Download,
   Eye,
   EyeOff,
   Link2,
@@ -20,6 +22,7 @@ import {
   Share2,
   Trash2,
   Type,
+  Upload,
   UserPlus,
 } from "lucide-react";
 import {
@@ -49,12 +52,31 @@ import DrawControl from "@/components/BuildingDrawControls";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { useRequireAuth } from "@/hooks/use-require-auth";
-import apiClient from "@/lib/apiClient";
+import {
+  featureCentroid,
+  parseLineFeature,
+  parsePolygonFeature,
+  translateFeature,
+} from "@/lib/mymaps-geo";
+import {
+  buildTransferPayload,
+  myMapsTransferSchema,
+  transferDownloadFilename,
+  type MyMapsTransfer,
+} from "@/lib/mymaps-transfer";
 import { withBasePath } from "@/lib/base-path";
 import { bearingTo, calcDistance } from "@/lib/geo";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
@@ -134,138 +156,6 @@ function deleteDrawFeature(
   }
 }
 
-function ringCentroid(
-  ring: Array<[number, number]>,
-): { lng: number; lat: number } | null {
-  if (!ring.length) return null;
-  const closed =
-    ring.length > 1 &&
-    ring[0]![0] === ring[ring.length - 1]![0] &&
-    ring[0]![1] === ring[ring.length - 1]![1];
-  const n = closed ? ring.length - 1 : ring.length;
-  if (n <= 0) return null;
-  let lng = 0;
-  let lat = 0;
-  for (let i = 0; i < n; i++) {
-    lng += ring[i]![0];
-    lat += ring[i]![1];
-  }
-  return { lng: lng / n, lat: lat / n };
-}
-
-function featureCentroid(
-  feature: Feature,
-): { lng: number; lat: number } | null {
-  const g = feature.geometry;
-  if (!g) return null;
-  if (g.type === "Point") {
-    return { lng: g.coordinates[0], lat: g.coordinates[1] };
-  }
-  if (g.type === "LineString") {
-    const coords = g.coordinates as Array<[number, number]>;
-    if (!coords.length) return null;
-    if (coords.length >= 2) {
-      const mid = Math.floor((coords.length - 1) / 2);
-      const a = coords[mid]!;
-      const b = coords[mid + 1] ?? a;
-      return { lng: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2 };
-    }
-    return { lng: coords[0]![0], lat: coords[0]![1] };
-  }
-  if (g.type === "Polygon") {
-    return ringCentroid(g.coordinates[0] as Array<[number, number]>);
-  }
-  return null;
-}
-
-function translateCoords(coords: unknown, dLng: number, dLat: number): unknown {
-  if (
-    Array.isArray(coords) &&
-    coords.length >= 2 &&
-    typeof coords[0] === "number" &&
-    typeof coords[1] === "number"
-  ) {
-    return [coords[0] + dLng, coords[1] + dLat];
-  }
-  if (Array.isArray(coords)) {
-    return coords.map((c) => translateCoords(c, dLng, dLat));
-  }
-  return coords;
-}
-
-function translateFeature(
-  feature: Feature,
-  dLng: number,
-  dLat: number,
-): Feature {
-  if (!feature.geometry) return feature;
-  const geometry = feature.geometry as {
-    type: string;
-    coordinates: unknown;
-    bbox?: unknown;
-  };
-  return {
-    ...feature,
-    geometry: {
-      type: geometry.type,
-      coordinates: translateCoords(geometry.coordinates, dLng, dLat),
-    } as Feature["geometry"],
-  };
-}
-
-function parsePolygonFeature(
-  raw: string,
-): Feature<Polygon, GeoJsonProperties> | null {
-  try {
-    const obj = JSON.parse(raw);
-    if (obj?.type === "Feature" && obj.geometry?.type === "Polygon") {
-      return obj as Feature<Polygon, GeoJsonProperties>;
-    }
-    if (obj?.type === "Polygon") {
-      return { type: "Feature", properties: {}, geometry: obj };
-    }
-    if (obj?.type === "FeatureCollection" && obj.features?.[0]) {
-      return obj.features[0] as Feature<Polygon, GeoJsonProperties>;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function parseLineFeature(
-  raw: string,
-): Feature<LineString, GeoJsonProperties> | null {
-  try {
-    const obj = JSON.parse(raw);
-    if (obj?.type === "Feature" && obj.geometry?.type === "LineString") {
-      return obj as Feature<LineString, GeoJsonProperties>;
-    }
-    if (obj?.type === "LineString") {
-      return { type: "Feature", properties: {}, geometry: obj };
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function pointRowToFeature(row: PointRow): Feature<Point, GeoJsonProperties> {
-  return {
-    type: "Feature",
-    id: `point-${row.id}`,
-    properties: {
-      id: `point-${row.id}`,
-      pointId: row.id,
-      name: row.name ?? "",
-    },
-    geometry: {
-      type: "Point",
-      coordinates: [row.lng, row.lat],
-    },
-  };
-}
-
 export default function MyMapsWorkspacePage(): JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -291,6 +181,16 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"viewer" | "editor">("viewer");
   const [invitePending, setInvitePending] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [importPayload, setImportPayload] = useState<MyMapsTransfer | null>(
+    null,
+  );
+  const [importPending, setImportPending] = useState(false);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
 
   const [viewState, setViewState] = useState<ViewStateLite>({
@@ -304,13 +204,17 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [clientReady, setClientReady] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const activeMapIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     setClientReady(true);
   }, []);
 
   useEffect(() => {
+    activeMapIdRef.current = selectedMapId;
     setMapReady(false);
+    setEditorError(null);
   }, [selectedMapId]);
 
   const [mapName, setMapName] = useState("");
@@ -342,6 +246,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const selectedRef = useRef(selectedId);
   const canEditRef = useRef(false);
   const nodesRef = useRef<SimpleNode[]>([]);
+  const edgesRef = useRef<EdgeIndexEntry[]>([]);
   const polygonsRef = useRef<PolygonRow[]>([]);
   const linesRef = useRef<LineRow[]>([]);
   const drawApiRef = useRef<MapLibreDraw | null>(null);
@@ -356,6 +261,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   selectedRef.current = selectedId;
   canEditRef.current = Boolean(access?.canEdit);
   nodesRef.current = nodes;
+  edgesRef.current = edges;
   polygonsRef.current = polygons;
   linesRef.current = lines;
 
@@ -369,7 +275,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   const loadMaps = useCallback(async () => {
     try {
-      const res = await apiClient.get("/api/mymaps/maps");
+      const res = await fetch(withBasePath("/api/mymaps/maps"));
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         toast.error(data?.error ?? "Could not load maps");
@@ -387,6 +293,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   const loadMap = useCallback(async (mapId: number) => {
     setEditorLoading(true);
+    setEditorError(null);
     setAccess(null);
     setNodes([]);
     setEdges([]);
@@ -396,16 +303,21 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     setTexts([]);
     setSelectedId(null);
     setSelectedPolygonId(null);
+    setSelectedLineId(null);
     setSelectedTextId(null);
     setMode("select");
     try {
-      const res = await apiClient.get(`/api/mymaps/maps/${mapId}`);
+      const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}`));
+      if (activeMapIdRef.current !== mapId) return;
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "Could not load map");
+        const msg = data?.error ?? "Could not load map";
+        setEditorError(msg);
+        toast.error(msg);
         return;
       }
       const data = await res.json();
+      if (activeMapIdRef.current !== mapId) return;
       setMapName(data.map?.name ?? "Untitled");
       setAccess(data.access ?? null);
       setNodes(
@@ -441,9 +353,12 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       setPoints(data.points ?? []);
       setTexts(data.texts ?? []);
     } catch {
-      toast.error("Could not load map");
+      if (activeMapIdRef.current === mapId) {
+        setEditorError("Could not load map");
+        toast.error("Could not load map");
+      }
     } finally {
-      setEditorLoading(false);
+      if (activeMapIdRef.current === mapId) setEditorLoading(false);
     }
   }, []);
 
@@ -492,8 +407,6 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
     return out;
   }, [lines]);
-
-  const pointFeatures = useMemo(() => points.map(pointRowToFeature), [points]);
 
   // Draw is create-only (no sync of saved features) to avoid duplicate flash.
   const drawFeatures = useMemo(() => [] as Feature[], []);
@@ -582,7 +495,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
     setCreatePending(true);
     try {
-      const res = await apiClient.post("/api/mymaps/maps", { name });
+      const res = await fetch(withBasePath("/api/mymaps/maps"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         toast.error(data?.error ?? "Could not create map");
@@ -606,7 +523,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
     setSavePending(true);
     try {
-      const res = await apiClient.put("/api/mymaps/maps", { id, name });
+      const res = await fetch(withBasePath("/api/mymaps/maps"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         toast.error(data?.error ?? "Could not rename map");
@@ -622,9 +543,13 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   }
 
   async function togglePublic(map: OwnedMap) {
-    const res = await apiClient.put("/api/mymaps/maps", {
-      id: map.id,
-      is_public_view: !map.is_public_view,
+    const res = await fetch(withBasePath("/api/mymaps/maps"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: map.id,
+        is_public_view: !map.is_public_view,
+      }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -638,36 +563,38 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   }
 
   async function deleteMap(id: number) {
-    if (
-      !confirm(
-        "Delete this map and all of its nodes, edges, drawings, and texts?",
-      )
-    ) {
-      return;
+    setDeletePending(true);
+    try {
+      const res = await fetch(withBasePath(`/api/mymaps/maps?id=${id}`), {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error ?? "Could not delete map");
+        return;
+      }
+      toast.success("Map deleted");
+      setDeleteTarget(null);
+      if (selectedMapId === id) selectMap(null);
+      await loadMaps();
+    } finally {
+      setDeletePending(false);
     }
-    const res = await apiClient.del(`/api/mymaps/maps?id=${id}`);
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      toast.error(data?.error ?? "Could not delete map");
-      return;
-    }
-    toast.success("Map deleted");
-    if (selectedMapId === id) selectMap(null);
-    await loadMaps();
   }
 
   async function openInvite(mapId: number) {
     setInviteMapId(mapId);
     setInviteEmail("");
     setInviteRole("viewer");
-    const res = await apiClient.get(
-      `/api/mymaps/maps/collaborator?mapId=${mapId}`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/collaborator?mapId=${mapId}`),
     );
     if (res.ok) {
       const data = await res.json();
       setCollaborators(data.collaborators ?? []);
     } else {
       setCollaborators([]);
+      toast.error("Could not load collaborators");
     }
   }
 
@@ -680,19 +607,30 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
     setInvitePending(true);
     try {
-      const res = await apiClient.post("/api/mymaps/maps/collaborator", {
-        mapId: inviteMapId,
-        email,
-        role: inviteRole,
+      const res = await fetch(withBasePath("/api/mymaps/maps/collaborator"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mapId: inviteMapId,
+          email,
+          role: inviteRole,
+        }),
       });
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
         toast.error(data?.error ?? "Could not add collaborator");
         return;
       }
-      toast.success("Collaborator added");
-      setInviteEmail("");
-      await openInvite(inviteMapId);
+      if (data?.collaborator) {
+        toast.success("Collaborator added");
+        setInviteEmail("");
+        await openInvite(inviteMapId);
+      } else {
+        toast.message(
+          data?.message ?? "If that user exists, they were invited.",
+        );
+        setInviteEmail("");
+      }
     } finally {
       setInvitePending(false);
     }
@@ -700,8 +638,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function removeCollaborator(collaboratorId: string) {
     if (inviteMapId == null) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/collaborator?mapId=${inviteMapId}&collaboratorId=${encodeURIComponent(collaboratorId)}`,
+    const res = await fetch(
+      withBasePath(
+        `/api/mymaps/maps/collaborator?mapId=${inviteMapId}&collaboratorId=${encodeURIComponent(collaboratorId)}`,
+      ),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -720,11 +661,87 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     );
   }
 
+  function exportMapElements() {
+    if (selectedMapId == null) return;
+    const payload = buildTransferPayload({
+      mapName,
+      nodes,
+      edges,
+      polygons,
+      lines,
+      points,
+      texts,
+    });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = transferDownloadFilename(selectedMapId, mapName);
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Map elements exported");
+  }
+
+  function onImportFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = JSON.parse(String(reader.result ?? ""));
+        const parsed = myMapsTransferSchema.safeParse(raw);
+        if (!parsed.success) {
+          toast.error("Invalid map export file");
+          return;
+        }
+        setImportPayload(parsed.data);
+      } catch {
+        toast.error("Could not read file");
+      }
+    };
+    reader.onerror = () => toast.error("Could not read file");
+    reader.readAsText(file);
+  }
+
+  async function runImport(mode: "merge" | "replace") {
+    if (!selectedMapId || !importPayload || !canEditRef.current) return;
+    setImportPending(true);
+    try {
+      const res = await fetch(
+        withBasePath(`/api/mymaps/maps/${selectedMapId}/import`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, payload: importPayload }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error ?? "Import failed");
+        return;
+      }
+      setImportPayload(null);
+      toast.success(mode === "replace" ? "Map replaced" : "Elements merged");
+      await loadMap(selectedMapId);
+    } catch {
+      toast.error("Import failed");
+    } finally {
+      setImportPending(false);
+    }
+  }
+
   async function addNode(lat: number, lng: number): Promise<SimpleNode | null> {
     if (!selectedMapId || !canEditRef.current) return null;
-    const res = await apiClient.post(
-      `/api/mymaps/maps/${selectedMapId}/nodes`,
-      { lat, lng, name: "" },
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/nodes`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat, lng, name: "" }),
+      },
     );
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -750,34 +767,52 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   }
 
   async function connectNodes(from: number, to: number) {
-    if (!selectedMapId || !canEditRef.current || from === to) return;
-    const bidir = biDirectionalRef.current;
-    const res = await apiClient.post(
-      `/api/mymaps/maps/${selectedMapId}/edges`,
-      { from, to, biDirectional: bidir },
+    const mapId = activeMapIdRef.current;
+    if (!mapId || !canEditRef.current || from === to) return;
+    const already = edgesRef.current.some(
+      (e) =>
+        (e.from === from && e.to === to) ||
+        (e.biDirectional && e.from === to && e.to === from),
     );
+    if (already) return;
+    const bidir = biDirectionalRef.current;
+    const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}/edges`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to,
+        biDirectional: bidir,
+      }),
+    });
+    if (activeMapIdRef.current !== mapId) return;
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       toast.error(data?.error ?? "Could not add edge");
       return;
     }
     const data = await res.json();
-    setEdges((prev) => [
-      ...prev,
-      {
-        id: data.edge.id,
-        from: data.from,
-        to: data.to,
-        biDirectional: bidir,
-        incline: 0,
-      },
-    ]);
+    if (data.existing) return;
+    setEdges((prev) => {
+      if (prev.some((e) => e.id === data.edge.id)) return prev;
+      return [
+        ...prev,
+        {
+          id: data.edge.id,
+          from: data.from,
+          to: data.to,
+          biDirectional: bidir,
+          incline: 0,
+        },
+      ];
+    });
   }
 
   async function deleteNode(id: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/${selectedMapId}/nodes?nodeId=${id}`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/nodes?nodeId=${id}`),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       toast.error("Could not delete node");
@@ -790,8 +825,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function deleteEdge(id: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/${selectedMapId}/edges?edgeId=${id}`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/edges?edgeId=${id}`),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       toast.error("Could not delete edge");
@@ -802,8 +838,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function deletePolygon(id: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/${selectedMapId}/polygons?polygonId=${id}`,
+    const res = await fetch(
+      withBasePath(
+        `/api/mymaps/maps/${selectedMapId}/polygons?polygonId=${id}`,
+      ),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       toast.error("Could not delete polygon");
@@ -818,8 +857,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function deleteLine(id: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/${selectedMapId}/lines?lineId=${id}`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/lines?lineId=${id}`),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       toast.error("Could not delete line");
@@ -830,8 +870,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function deletePoint(id: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/${selectedMapId}/points?pointId=${id}`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/points?pointId=${id}`),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       toast.error("Could not delete point");
@@ -842,8 +883,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function deleteText(id: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.del(
-      `/api/mymaps/maps/${selectedMapId}/texts?textId=${id}`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/texts?textId=${id}`),
+      { method: "DELETE" },
     );
     if (!res.ok) {
       toast.error("Could not delete text");
@@ -858,9 +900,13 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function addText(lat: number, lng: number) {
     if (!selectedMapId || !canEditRef.current) return;
-    const res = await apiClient.post(
-      `/api/mymaps/maps/${selectedMapId}/texts`,
-      { text: "New text", lat, lng, font_size: 14 },
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/texts`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "New text", lat, lng, font_size: 14 }),
+      },
     );
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -878,11 +924,18 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   async function moveText(id: number, lat: number, lng: number) {
     if (!selectedMapId || !canEditRef.current) return;
     setTexts((prev) => prev.map((t) => (t.id === id ? { ...t, lat, lng } : t)));
-    const res = await apiClient.put(`/api/mymaps/maps/${selectedMapId}/texts`, {
-      textId: id,
-      lat,
-      lng,
-    });
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/texts`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          textId: id,
+          lat,
+          lng,
+        }),
+      },
+    );
     if (!res.ok) {
       toast.error("Could not move text");
       return;
@@ -892,17 +945,30 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   }
 
   async function moveNode(id: number, lat: number, lng: number) {
-    if (!selectedMapId || !canEditRef.current) return;
+    const mapId = activeMapIdRef.current;
+    if (!mapId || !canEditRef.current) return;
+    const prevNode = nodesRef.current.find((n) => n.id === id);
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, lat, lng } : n)));
     nodesRef.current = nodesRef.current.map((n) =>
       n.id === id ? { ...n, lat, lng } : n,
     );
-    const res = await apiClient.put(`/api/mymaps/maps/${selectedMapId}/nodes`, {
-      nodeId: id,
-      lat,
-      lng,
+    const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}/nodes`), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nodeId: id,
+        lat,
+        lng,
+      }),
     });
+    if (activeMapIdRef.current !== mapId) return;
     if (!res.ok) {
+      if (prevNode) {
+        setNodes((prev) => prev.map((n) => (n.id === id ? prevNode : n)));
+        nodesRef.current = nodesRef.current.map((n) =>
+          n.id === id ? prevNode : n,
+        );
+      }
       toast.error("Could not move node");
       return;
     }
@@ -917,12 +983,16 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     setPoints((prev) =>
       prev.map((p) => (p.id === id ? { ...p, lat, lng } : p)),
     );
-    const res = await apiClient.put(
-      `/api/mymaps/maps/${selectedMapId}/points`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/points`),
       {
-        pointId: id,
-        lat,
-        lng,
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pointId: id,
+          lat,
+          lng,
+        }),
       },
     );
     if (!res.ok) {
@@ -935,16 +1005,29 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     );
   }
 
-  async function persistPolygon(polygonId: number) {
-    if (!selectedMapId || !canEditRef.current) return;
+  async function persistPolygon(
+    polygonId: number,
+    featureOverride?: ReturnType<typeof parsePolygonFeature>,
+  ) {
+    const mapId = activeMapIdRef.current;
+    if (!mapId || !canEditRef.current) return;
     const row = polygonsRef.current.find((p) => p.id === polygonId);
     if (!row) return;
-    const feature = parsePolygonFeature(row.polygon);
+    const feature = featureOverride ?? parsePolygonFeature(row.polygon);
     if (!feature) return;
-    const res = await apiClient.put(
-      `/api/mymaps/maps/${selectedMapId}/polygons`,
-      { polygonId, polygon: feature, name: row.name },
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${mapId}/polygons`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          polygonId,
+          polygon: feature,
+          name: row.name,
+        }),
+      },
     );
+    if (activeMapIdRef.current !== mapId) return;
     if (!res.ok) {
       toast.error("Could not move polygon");
       return;
@@ -955,17 +1038,26 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     );
   }
 
-  async function persistLine(lineId: number) {
-    if (!selectedMapId || !canEditRef.current) return;
+  async function persistLine(
+    lineId: number,
+    featureOverride?: ReturnType<typeof parseLineFeature>,
+  ) {
+    const mapId = activeMapIdRef.current;
+    if (!mapId || !canEditRef.current) return;
     const row = linesRef.current.find((l) => l.id === lineId);
     if (!row) return;
-    const feature = parseLineFeature(row.geometry);
+    const feature = featureOverride ?? parseLineFeature(row.geometry);
     if (!feature) return;
-    const res = await apiClient.put(`/api/mymaps/maps/${selectedMapId}/lines`, {
-      lineId,
-      geometry: feature,
-      name: row.name,
+    const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}/lines`), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lineId,
+        geometry: feature,
+        name: row.name,
+      }),
     });
+    if (activeMapIdRef.current !== mapId) return;
     if (!res.ok) {
       toast.error("Could not move line");
       return;
@@ -983,11 +1075,18 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
     const font_size = clampFontSize(Number(textFontSizeInput));
     setTextFontSizeInput(String(font_size));
-    const res = await apiClient.put(`/api/mymaps/maps/${selectedMapId}/texts`, {
-      textId: selectedTextId,
-      text,
-      font_size,
-    });
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/texts`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          textId: selectedTextId,
+          text,
+          font_size,
+        }),
+      },
+    );
     if (!res.ok) {
       toast.error("Could not save text");
       return;
@@ -1116,9 +1215,13 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
       if (gType === "Polygon") {
         const name = `Area ${Date.now().toString().slice(-4)}`;
-        const res = await apiClient.post(
-          `/api/mymaps/maps/${selectedMapId}/polygons`,
-          { name, polygon: feature },
+        const res = await fetch(
+          withBasePath(`/api/mymaps/maps/${selectedMapId}/polygons`),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, polygon: feature }),
+          },
         );
         if (!res.ok) {
           toast.error("Could not save polygon");
@@ -1185,11 +1288,15 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   async function savePolygonName() {
     if (!selectedMapId || selectedPolygonId == null || !access?.canEdit) return;
-    const res = await apiClient.put(
-      `/api/mymaps/maps/${selectedMapId}/polygons`,
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/polygons`),
       {
-        polygonId: selectedPolygonId,
-        name: polygonName.trim() || "Untitled",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          polygonId: selectedPolygonId,
+          name: polygonName.trim() || "Untitled",
+        }),
       },
     );
     if (!res.ok) {
@@ -1333,7 +1440,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   size="icon"
                   variant="ghost"
                   aria-label="Delete"
-                  onClick={() => void deleteMap(map.id)}
+                  onClick={() =>
+                    setDeleteTarget({ id: map.id, name: map.name })
+                  }
                 >
                   <Trash2 size={14} />
                 </Button>
@@ -1477,9 +1586,47 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   {mapName || "Loading…"}
                 </p>
                 <p className="text-[11px] text-panel-muted-foreground">
-                  {access?.role ?? (editorLoading ? "…" : "viewer")}
-                  {canEdit ? " · editing" : " · read-only"}
+                  {editorLoading
+                    ? "Loading…"
+                    : editorError
+                      ? "Error"
+                      : access?.role
+                        ? `${access.role}${canEdit ? " · editing" : " · read-only"}`
+                        : "read-only"}
                 </p>
+              </div>
+              <div
+                className={`flex shrink-0 items-center gap-1 rounded-2xl border p-1 ${borderMutedClass} ${surfacePanelClass}`}
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={editorLoading || !!editorError}
+                  onClick={() => exportMapElements()}
+                >
+                  <Download size={14} />
+                  Export
+                </Button>
+                {canEdit ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={editorLoading || !!editorError}
+                    onClick={() => importFileRef.current?.click()}
+                  >
+                    <Upload size={14} />
+                    Import
+                  </Button>
+                ) : null}
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={onImportFileChange}
+                />
               </div>
             </div>
 
@@ -1522,8 +1669,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   {mode === "select" ? (
                     <div className="space-y-2">
                       <p className="text-[11px] text-panel-muted-foreground">
-                        Drag nodes, points, text, or a selected area/line handle
-                        to move them.
+                        Drag nodes (path points), text, areas, or legacy
+                        markers/lines to move them.
                       </p>
                       {selectedPolygonId != null ? (
                         <div className="flex flex-col gap-1">
@@ -1554,7 +1701,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         {(
                           [
                             ["point", "Node"],
-                            ["line", "Line"],
+                            ["line", "Path"],
                             ["polygon", "Area"],
                           ] as const
                         ).map(([key, label]) => (
@@ -1657,6 +1804,25 @@ export default function MyMapsWorkspacePage(): JSX.Element {
               {editorLoading ? (
                 <div className="absolute inset-0 z-20 grid place-items-center bg-background/40">
                   <Spinner className="size-8" />
+                </div>
+              ) : null}
+              {editorError && !editorLoading ? (
+                <div className="absolute inset-0 z-20 grid place-items-center bg-background/70 p-6 text-center">
+                  <div>
+                    <p className="text-sm font-medium">{editorError}</p>
+                    <Button
+                      type="button"
+                      className="mt-3"
+                      size="sm"
+                      onClick={() =>
+                        selectedMapId != null
+                          ? void loadMap(selectedMapId)
+                          : undefined
+                      }
+                    >
+                      Retry
+                    </Button>
+                  </div>
                 </div>
               ) : null}
               {!clientReady || !canRenderMap ? (
@@ -1896,17 +2062,25 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                                 name: String(f.properties?.name ?? ""),
                               };
                               const polygonJson = JSON.stringify(moved);
-                              setPolygons((prev) =>
-                                prev.map((p) =>
+                              setPolygons((prev) => {
+                                const next = prev.map((p) =>
                                   p.id === polygonId
                                     ? { ...p, polygon: polygonJson }
                                     : p,
-                                ),
-                              );
+                                );
+                                polygonsRef.current = next;
+                                return next;
+                              });
                             }}
                             onDragEnd={() => {
+                              const row = polygonsRef.current.find(
+                                (p) => p.id === polygonId,
+                              );
                               geomDragRef.current = null;
-                              void persistPolygon(polygonId);
+                              void persistPolygon(
+                                polygonId,
+                                row ? parsePolygonFeature(row.polygon) : null,
+                              );
                             }}
                             onClick={(e) => {
                               e.originalEvent.stopPropagation();
@@ -1985,17 +2159,25 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                                 name: String(f.properties?.name ?? ""),
                               };
                               const geometryJson = JSON.stringify(moved);
-                              setLines((prev) =>
-                                prev.map((l) =>
+                              setLines((prev) => {
+                                const next = prev.map((l) =>
                                   l.id === lineId
                                     ? { ...l, geometry: geometryJson }
                                     : l,
-                                ),
-                              );
+                                );
+                                linesRef.current = next;
+                                return next;
+                              });
                             }}
                             onDragEnd={() => {
+                              const row = linesRef.current.find(
+                                (l) => l.id === lineId,
+                              );
                               geomDragRef.current = null;
-                              void persistLine(lineId);
+                              void persistLine(
+                                lineId,
+                                row ? parseLineFeature(row.geometry) : null,
+                              );
                             }}
                             onClick={(e) => {
                               e.originalEvent.stopPropagation();
@@ -2192,6 +2374,112 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           </div>
         </div>
       ) : null}
+
+      <Dialog
+        open={deleteTarget != null}
+        onOpenChange={(open) => {
+          if (!open && !deletePending) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete map</DialogTitle>
+            <DialogDescription>
+              This will permanently remove{" "}
+              {deleteTarget?.name ? (
+                <span className="font-medium text-foreground">
+                  {deleteTarget.name}
+                </span>
+              ) : (
+                "this map"
+              )}{" "}
+              and all of its nodes, edges, drawings, and texts. This action
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deletePending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!deleteTarget || deletePending}
+              onClick={() => {
+                if (!deleteTarget) return;
+                void deleteMap(deleteTarget.id);
+              }}
+            >
+              {deletePending ? (
+                <>
+                  <Spinner className="size-4" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete map"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={importPayload != null}
+        onOpenChange={(open) => {
+          if (!open && !importPending) setImportPayload(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import map elements</DialogTitle>
+            <DialogDescription>
+              Choose how to apply the file
+              {importPayload?.mapName ? (
+                <>
+                  {" "}
+                  from{" "}
+                  <span className="font-medium text-foreground">
+                    {importPayload.mapName}
+                  </span>
+                </>
+              ) : null}
+              . Merge keeps existing elements; Replace clears this map first.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setImportPayload(null)}
+              disabled={importPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={importPending}
+              onClick={() => void runImport("merge")}
+            >
+              {importPending ? <Spinner className="size-4" /> : null}
+              Merge
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={importPending}
+              onClick={() => void runImport("replace")}
+            >
+              Replace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

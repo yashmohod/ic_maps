@@ -2,7 +2,7 @@ import type { SQL } from "drizzle-orm";
 import { and, gte, lte } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 
-export type ParsedReportDateQuery =
+type ParsedReportDateQuery =
   | { ok: true; from?: Date; to?: Date }
   | { ok: false; error: string };
 

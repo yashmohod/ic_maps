@@ -8,7 +8,7 @@ import {
   user_favorite_destination,
 } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guards";
-import { jsonError, parseId } from "@/lib/utils";
+import { parseId } from "@/lib/utils";
 
 const ROUTE = "/api/favorites";
 
@@ -40,7 +40,7 @@ export async function GET() {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch favorites", 500, message);
+    return NextResponse.json({ error: "Could not fetch favorites", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = favoritePostSchema.safeParse(body);
     if (!parsed.success) {
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       .from(destination)
       .where(eq(destination.id, destinationId))
       .limit(1);
-    if (!dest) return jsonError("Destination not found", 404);
+    if (!dest) return NextResponse.json({ error: "Destination not found" }, { status: 404 });
 
     await db
       .insert(user_favorite_destination)
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not add favorite", 500, message);
+    return NextResponse.json({ error: "Could not add favorite", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -91,7 +91,7 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const destinationId = parseId(searchParams.get("destinationId"));
-    if (!destinationId) return jsonError("Missing or invalid destinationId", 400);
+    if (!destinationId) return NextResponse.json({ error: "Missing or invalid destinationId" }, { status: 400 });
 
     await db
       .delete(user_favorite_destination)
@@ -106,6 +106,6 @@ export async function DELETE(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not remove favorite", 500, message);
+    return NextResponse.json({ error: "Could not remove favorite", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }

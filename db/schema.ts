@@ -15,7 +15,7 @@ import {
   foreignKey,
   time,
 } from "drizzle-orm/pg-core";
-import { deserialize } from "v8";
+
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
 
@@ -23,7 +23,6 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
 
   isAdmin: boolean("is_admin").notNull().default(false),
-  isRouteManager: boolean("is_route_manager").notNull().default(false),
 
   emailVerified: boolean("email_verified").notNull().default(false),
 
@@ -255,18 +254,6 @@ export const edgeOutside = pgTable(
     index("idx_edge_outside_b").on(t.node_b_id),
   ],
 );
-
-// outageLog
-export const outageLog = pgTable("outage_log", {
-  id: serial("id").primaryKey(),
-  datetime: timestamp("datetime", {
-    precision: 6,
-    withTimezone: true,
-  }).defaultNow(),
-  inside_node: boolean("inside_node").notNull().default(false),
-  node_id: integer("node_id").notNull(),
-  note: text("note").default(""),
-});
 
 //buildings
 export const destination = pgTable("destination", {
@@ -639,32 +626,9 @@ export const schema = {
   myMapsPoint,
   myMapsText,
 };
-export type User = InferSelectModel<typeof user>;
 export type NodeOutside = InferSelectModel<typeof nodeOutside>;
 export type NodeInside = InferSelectModel<typeof nodeInside>;
 export type EdgeOutside = InferSelectModel<typeof edgeOutside>;
 export type EdgeInside = InferSelectModel<typeof edgeInside>;
-
-export type Destination = InferSelectModel<typeof destination>;
-export type Route = InferSelectModel<typeof route>;
-export type RouteDestination = InferSelectModel<typeof route_destination>;
-export type RouteParkingLot = InferSelectModel<typeof route_parking_lot>;
 export type DestinationNode = InferSelectModel<typeof destinationNode>;
-export type UserFavoriteDestination = InferSelectModel<
-  typeof user_favorite_destination
->;
-export type DestinationChain = InferSelectModel<typeof destination_chain>;
-export type DestinationChainStop = InferSelectModel<
-  typeof destination_chain_stop
->;
-export type BugReport = InferSelectModel<typeof bugReport>;
-export type AccessibilityReport = InferSelectModel<typeof accessibilityReport>;
-export type RouteReport = InferSelectModel<typeof routeReport>;
 export type MyMaps = InferSelectModel<typeof myMaps>;
-export type MyMapsCollaborator = InferSelectModel<typeof myMapsCollaborator>;
-export type MyMapsEdge = InferSelectModel<typeof myMapsEdge>;
-export type MyMapsNode = InferSelectModel<typeof myMapsNode>;
-export type MyMapsPolygon = InferSelectModel<typeof myMapsPolygon>;
-export type MyMapsLine = InferSelectModel<typeof myMapsLine>;
-export type MyMapsPoint = InferSelectModel<typeof myMapsPoint>;
-export type MyMapsText = InferSelectModel<typeof myMapsText>;

@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import apiClient from "@/lib/apiClient";
 import type { DeadFeatureLists } from "@/lib/dead-features";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +30,7 @@ export function DeadFeaturesPanel({
   const loadLists = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await apiClient.get("/api/map/dead-feature");
+      const resp = await fetch(withBasePath("/api/map/dead-feature"));
       if (!resp.ok) throw new Error("Failed to load dead features");
       const payload = (await resp.json()) as DeadFeatureLists;
       setLists(payload);
@@ -50,10 +50,14 @@ export function DeadFeaturesPanel({
     const key = `${scope}:${id}`;
     setUpdatingId(key);
     try {
-      const resp = await apiClient.post("/api/map/dead-feature", {
-        scope,
-        id,
-        value: false,
+      const resp = await fetch(withBasePath("/api/map/dead-feature"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope,
+          id,
+          value: false,
+        }),
       });
       if (!resp.ok) throw new Error("Update failed");
       const payload = (await resp.json()) as DeadFeatureLists;
@@ -137,34 +141,4 @@ export function DeadFeaturesPanel({
       </div>
     </div>
   );
-}
-
-export function routeReportDeadTarget(
-  report: {
-    featureType: string | null;
-    nodeOutsideId: number | null;
-    nodeInsideId: number | null;
-  },
-  isIndoor: (featureType: string | null) => boolean,
-): { scope: "outside" | "inside"; id: number } | null {
-  if (isIndoor(report.featureType) && report.nodeInsideId != null) {
-    return { scope: "inside", id: report.nodeInsideId };
-  }
-  if (report.nodeOutsideId != null) {
-    return { scope: "outside", id: report.nodeOutsideId };
-  }
-  return null;
-}
-
-export async function markRouteReportFeatureDead(
-  target: { scope: "outside" | "inside"; id: number },
-  value = true,
-): Promise<DeadFeatureLists | null> {
-  const resp = await apiClient.post("/api/map/dead-feature", {
-    scope: target.scope,
-    id: target.id,
-    value,
-  });
-  if (!resp.ok) return null;
-  return (await resp.json()) as DeadFeatureLists;
 }

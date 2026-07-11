@@ -22,9 +22,8 @@ until docker exec postgress pg_isready -U root -d icmaps 2>/dev/null; do
   sleep 2
 done
 
-echo "==> Regenerating migrations and migrating..."
-rm -rf ./drizzle/*
-npx drizzle-kit generate
+# Migrations are hand-written (drizzle/*.sql + meta/_journal.json); never regenerate.
+echo "==> Applying committed migrations..."
 npx drizzle-kit migrate
 
 echo "==> Seeding and starting dev server..."

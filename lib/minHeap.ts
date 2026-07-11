@@ -1,5 +1,5 @@
 /** Comparator: return <0 if a before b, 0 if equal, >0 if a after b */
-export type Compare<T> = (a: T, b: T) => number;
+type Compare<T> = (a: T, b: T) => number;
 
 export class MinHeap<T> {
   /** 1-based: index 0 unused */

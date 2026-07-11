@@ -35,11 +35,11 @@ export function heuristic(
   return deg * METERS_PER_DEGREE_LAT;
 }
 
-export function toRad(deg: number) {
+function toRad(deg: number) {
   return (deg * Math.PI) / 180;
 }
 
-export function toDeg(rad: number) {
+function toDeg(rad: number) {
   return (rad * 180) / Math.PI;
 }
 

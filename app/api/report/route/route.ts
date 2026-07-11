@@ -15,7 +15,6 @@ import {
   parseReportDateQuery,
   reportCreatedAtConditions,
 } from "@/lib/report-date-query";
-import { jsonError } from "@/lib/utils";
 
 export const runtime = "nodejs";
 
@@ -92,7 +91,7 @@ export async function GET(req: Request) {
 
   const parsedDates = parseReportDateQuery(new URL(req.url).searchParams);
   if (!parsedDates.ok) {
-    return jsonError(parsedDates.error, 400);
+    return NextResponse.json({ error: parsedDates.error }, { status: 400 });
   }
 
   try {
@@ -137,18 +136,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ reports });
   } catch (err: unknown) {
     console.error("[API /api/report/route GET] error", err);
-    return jsonError(
-      "Failed to fetch route reports",
-      500,
-      err instanceof Error ? err.message : String(err),
-    );
+    return NextResponse.json({ error: "Failed to fetch route reports", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = routeReportPayloadSchema.safeParse(body);
     if (!parsed.success) {
@@ -177,7 +172,7 @@ export async function POST(req: Request) {
         })
         .returning({ id: routeReport.id });
 
-      if (!inserted) return jsonError("Failed to create report", 500);
+      if (!inserted) return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
       return NextResponse.json({ id: inserted.id }, { status: 201 });
     }
 
@@ -185,7 +180,7 @@ export async function POST(req: Request) {
       data.destinationId,
       data.locationType,
     );
-    if (!destCheck.ok) return jsonError(destCheck.error, 400);
+    if (!destCheck.ok) return NextResponse.json({ error: destCheck.error }, { status: 400 });
 
     if (data.featureType === "entrance") {
       const valid = await verifyOutsideNode(
@@ -193,7 +188,7 @@ export async function POST(req: Request) {
         data.nodeOutsideId,
       );
       if (!valid) {
-        return jsonError("Entrance does not belong to this destination", 400);
+        return NextResponse.json({ error: "Entrance does not belong to this destination" }, { status: 400 });
       }
 
       const [inserted] = await db
@@ -208,7 +203,7 @@ export async function POST(req: Request) {
         })
         .returning({ id: routeReport.id });
 
-      if (!inserted) return jsonError("Failed to create report", 500);
+      if (!inserted) return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
       return NextResponse.json({ id: inserted.id }, { status: 201 });
     }
 
@@ -223,10 +218,7 @@ export async function POST(req: Request) {
         data.featureType,
       );
       if (!valid) {
-        return jsonError(
-          "Indoor feature does not belong to this destination",
-          400,
-        );
+        return NextResponse.json({ error: "Indoor feature does not belong to this destination" }, { status: 400 });
       }
 
       const [inserted] = await db
@@ -241,7 +233,7 @@ export async function POST(req: Request) {
         })
         .returning({ id: routeReport.id });
 
-      if (!inserted) return jsonError("Failed to create report", 500);
+      if (!inserted) return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
       return NextResponse.json({ id: inserted.id }, { status: 201 });
     }
 
@@ -259,17 +251,13 @@ export async function POST(req: Request) {
         })
         .returning({ id: routeReport.id });
 
-      if (!inserted) return jsonError("Failed to create report", 500);
+      if (!inserted) return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
       return NextResponse.json({ id: inserted.id }, { status: 201 });
     }
 
-    return jsonError("Unsupported report type", 400);
+    return NextResponse.json({ error: "Unsupported report type" }, { status: 400 });
   } catch (err: unknown) {
     console.error("[API /api/report/route POST] error", err);
-    return jsonError(
-      "Failed to submit route report",
-      500,
-      err instanceof Error ? err.message : String(err),
-    );
+    return NextResponse.json({ error: "Failed to submit route report", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }

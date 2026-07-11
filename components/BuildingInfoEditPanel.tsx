@@ -8,8 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 
-import type { BuildingRow } from "@/app/destination-editor/page";
 import { mapBottomSheetClass, touchTargetClass } from "@/lib/panel-classes";
+
+export type BuildingRow = {
+  id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  polygon: string; // JSON string of a GeoJSON Feature
+  isParkingLot: boolean;
+  openTime: string;
+  closeTime: string;
+};
 
 type Props = {
   currentBuilding: BuildingRow;

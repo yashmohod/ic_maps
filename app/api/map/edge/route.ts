@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/db/index";
+import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { refreshNavGraphAfterMutation } from "@/lib/nav-graph-refresh";
-import { calcDistance } from "@/lib/utils";
-import { jsonError, parseId } from "@/lib/utils";
+import { reloadGraph } from "@/lib/navigation";
+import { calcDistance } from "@/lib/geo";
+import { parseId } from "@/lib/utils";
 
 const ROUTE = "/api/map/edge";
 
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = edgePostSchema.safeParse(body);
     if (!parsed.success) {
@@ -71,16 +71,16 @@ export async function POST(req: Request) {
 
     const inserted = result.rows[0];
     if (!inserted?.id) {
-      return jsonError("Insert failed", 500, "Insert did not return an id");
+      return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String("Insert did not return an id") } : {}) }, { status: 500 });
     }
     const ff = direction ? a : b;
     const tt = direction ? b : a;
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({ id: inserted.id, a:ff, b:tt }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Insert failed", 500, message);
+    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -90,7 +90,7 @@ export async function DELETE(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = edgeDeleteSchema.safeParse(body);
     if (!parsed.success) {
@@ -109,15 +109,15 @@ export async function DELETE(req: Request) {
     `);
 
     if (result.rowCount === 0) {
-      return jsonError("Edge not found", 404);
+      return NextResponse.json({ error: "Edge not found" }, { status: 404 });
     }
 
-    await refreshNavGraphAfterMutation();
+    await reloadGraph().catch(console.error);
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Delete failed", 500, message);
+    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -131,7 +131,7 @@ export async function GET(req: Request) {
 
     if (idParam != null) {
       const nid = parseId(idParam);
-      if (!nid) return jsonError("Invalid id", 400);
+      if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
       const result = await db.execute(sql<{
         id: number;
@@ -154,7 +154,7 @@ export async function GET(req: Request) {
         WHERE id = ${nid};
       `);
 
-      if (result.rows.length === 0) return jsonError("Edge not found", 404);
+      if (result.rows.length === 0) return NextResponse.json({ error: "Edge not found" }, { status: 404 });
       const row = result.rows[0];
       return NextResponse.json({
         row: {
@@ -203,6 +203,6 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch nodes", 500, message);
+    return NextResponse.json({ error: "Could not fetch nodes", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }

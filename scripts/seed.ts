@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { sql } from "drizzle-orm";
-import { db, pool } from "@/db"; // adjust path alias if needed
+import { db, pool } from "@/db";
 import { createReadStream } from "node:fs";
 import * as readline from "node:readline";
 import path from "node:path";

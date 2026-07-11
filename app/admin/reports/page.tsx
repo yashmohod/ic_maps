@@ -8,11 +8,11 @@ import { toast } from "sonner";
 import { RouteReportFloorplanPreview } from "@/components/admin-reports/route-report-floorplan-preview";
 import { RouteReportOutdoorPreview } from "@/components/admin-reports/route-report-outdoor-preview";
 import { ReportDateFilter } from "@/components/admin-reports/report-date-filter";
+import { DeadFeaturesPanel } from "@/components/admin-reports/dead-features-panel";
 import {
-  DeadFeaturesPanel,
   markRouteReportFeatureDead,
   routeReportDeadTarget,
-} from "@/components/admin-reports/dead-features-panel";
+} from "@/lib/dead-features";
 import { HomeLogo } from "@/components/home-logo";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -25,7 +25,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
-import apiClient from "@/lib/apiClient";
 import { withBasePath } from "@/lib/base-path";
 import {
   buildReportDateQueryString,
@@ -240,9 +239,9 @@ export default function AdminReportsPage() {
     (async () => {
       try {
         const [bugResp, a11yResp, routeResp] = await Promise.all([
-          apiClient.get(`/api/report/bug${dateQuery}`),
-          apiClient.get(`/api/report/accessibility${dateQuery}`),
-          apiClient.get(`/api/report/route${dateQuery}`),
+          fetch(withBasePath(`/api/report/bug${dateQuery}`)),
+          fetch(withBasePath(`/api/report/accessibility${dateQuery}`)),
+          fetch(withBasePath(`/api/report/route${dateQuery}`)),
         ]);
 
         if (!bugResp.ok || !a11yResp.ok || !routeResp.ok) {

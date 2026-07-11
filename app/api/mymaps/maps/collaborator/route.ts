@@ -5,8 +5,12 @@ import { z } from "zod";
 import { db } from "@/db";
 import { myMapsCollaborator, user } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guards";
-import { getMapAccess } from "@/lib/mymaps-access";
-import { jsonError, parseId } from "@/lib/utils";
+import {
+  getErrorDetail,
+  requireMapOwner,
+  requireMapReadable,
+} from "@/lib/mymaps-http";
+import { parseId } from "@/lib/utils";
 
 const ROUTE = "/api/mymaps/maps/collaborator";
 
@@ -29,12 +33,6 @@ const putSchema = z.object({
   role: roleSchema,
 });
 
-function getDetail(err: unknown): string {
-  if (err instanceof Error && "cause" in err && err.cause instanceof Error)
-    return err.cause.message;
-  return err instanceof Error ? err.message : String(err);
-}
-
 async function resolveUserId(opts: {
   collaboratorId?: string;
   email?: string;
@@ -48,17 +46,17 @@ async function resolveUserId(opts: {
     return row ?? null;
   }
   if (opts.email) {
+    const email = opts.email.trim();
     const [row] = await db
       .select({ id: user.id, name: user.name, email: user.email })
       .from(user)
-      .where(eq(user.email, opts.email.trim().toLowerCase()))
+      .where(eq(user.email, email.toLowerCase()))
       .limit(1);
     if (row) return row;
-    // try exact email match without lowercasing if stored mixed-case
     const [row2] = await db
       .select({ id: user.id, name: user.name, email: user.email })
       .from(user)
-      .where(eq(user.email, opts.email.trim()))
+      .where(eq(user.email, email))
       .limit(1);
     return row2 ?? null;
   }
@@ -71,13 +69,10 @@ export async function GET(req: Request) {
 
   try {
     const mapId = parseId(new URL(req.url).searchParams.get("mapId"));
-    if (!mapId) return jsonError("Missing or invalid mapId", 400);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid mapId" }, { status: 400 });
 
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.isOwner) {
-      return jsonError("Only the owner can list collaborators", 403);
-    }
+    const gate = await requireMapOwner(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const rows = await db
       .select({
@@ -93,7 +88,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ collaborators: rows }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return jsonError("Could not fetch collaborators", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not fetch collaborators", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -103,7 +98,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
@@ -114,19 +109,23 @@ export async function POST(req: Request) {
     }
 
     const { mapId, collaboratorId, email, role } = parsed.data;
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.isOwner) {
-      return jsonError("Only the owner can add collaborators", 403);
-    }
+    const gate = await requireMapOwner(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
+    const { access } = gate;
 
     const target = await resolveUserId({ collaboratorId, email });
-    if (!target) return jsonError("User not found", 404);
+    // Avoid email enumeration: same response whether user exists or not.
+    if (!target) {
+      return NextResponse.json(
+        { ok: true, message: "If that user exists, they were invited." },
+        { status: 200 },
+      );
+    }
     if (target.id === session!.user.id) {
-      return jsonError("Cannot add yourself as a collaborator", 400);
+      return NextResponse.json({ error: "Cannot add yourself as a collaborator" }, { status: 400 });
     }
     if (target.id === access.map.owner_id) {
-      return jsonError("Owner is already the map owner", 400);
+      return NextResponse.json({ error: "Owner is already the map owner" }, { status: 400 });
     }
 
     await db
@@ -157,7 +156,7 @@ export async function POST(req: Request) {
     );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Could not add collaborator", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not add collaborator", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -167,7 +166,7 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
@@ -178,11 +177,8 @@ export async function PUT(req: Request) {
     }
 
     const { mapId, collaboratorId, role } = parsed.data;
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.isOwner) {
-      return jsonError("Only the owner can update collaborators", 403);
-    }
+    const gate = await requireMapOwner(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const result = await db
       .update(myMapsCollaborator)
@@ -196,13 +192,16 @@ export async function PUT(req: Request) {
       .returning();
 
     if (result.length === 0) {
-      return jsonError("Collaborator not found", 404);
+      return NextResponse.json({ error: "Collaborator not found" }, { status: 404 });
     }
 
-    return NextResponse.json({}, { status: 200 });
+    return NextResponse.json(
+      { collaborator: { collaborator_id: collaboratorId, role } },
+      { status: 200 },
+    );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Could not update collaborator", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not update collaborator", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -215,15 +214,16 @@ export async function DELETE(req: Request) {
     const mapId = parseId(searchParams.get("mapId"));
     const collaboratorId = searchParams.get("collaboratorId");
     if (!mapId || !collaboratorId) {
-      return jsonError("Missing or invalid mapId/collaboratorId", 400);
+      return NextResponse.json({ error: "Missing or invalid mapId/collaboratorId" }, { status: 400 });
     }
 
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
+    const gate = await requireMapReadable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
+    const { access } = gate;
 
     const isSelf = collaboratorId === session!.user.id;
     if (!access.isOwner && !isSelf) {
-      return jsonError("Only the owner can remove collaborators", 403);
+      return NextResponse.json({ error: "Only the owner can remove collaborators" }, { status: 403 });
     }
 
     const result = await db
@@ -237,12 +237,12 @@ export async function DELETE(req: Request) {
       .returning();
 
     if (result.length === 0) {
-      return jsonError("Collaborator not found", 404);
+      return NextResponse.json({ error: "Collaborator not found" }, { status: 404 });
     }
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return jsonError("Could not remove collaborator", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not remove collaborator", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }

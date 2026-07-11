@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 import { toast } from "sonner";
 
-import ComboboxSelect from "@/components/DropDown";
+import ComboboxSelect from "@/components/ComboboxSelect";
 import { RouteReportMap } from "@/components/route-report-map";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +14,6 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
-import apiClient from "@/lib/apiClient";
 import {
   buildRouteReportPayload,
   entranceLabel,
@@ -23,7 +23,7 @@ import {
   insideNodeLabel,
   LOCATION_TYPE_ITEMS,
   mapMode,
-  parsePolygon,
+  parseDestinationPolygonCollection,
   requiresDescription,
   requiresPin,
   showsMap,
@@ -73,7 +73,7 @@ export function RouteReportForm({
 
     (async () => {
       try {
-        const resp = await apiClient.get("/api/destination");
+        const resp = await fetch(withBasePath("/api/destination"));
         const payload = await resp.json();
         if (cancelled) return;
 
@@ -118,7 +118,7 @@ export function RouteReportForm({
   );
 
   const polygon = useMemo(
-    () => parsePolygon(selectedDestination?.polygon),
+    () => parseDestinationPolygonCollection(selectedDestination?.polygon),
     [selectedDestination],
   );
 
@@ -135,8 +135,10 @@ export function RouteReportForm({
     (async () => {
       try {
         if (featureType === "entrance") {
-          const resp = await apiClient.get(
-            `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
+          const resp = await fetch(
+            withBasePath(
+              `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
+            ),
           );
           const payload = await resp.json();
           if (cancelled) return;
@@ -154,8 +156,10 @@ export function RouteReportForm({
           featureType === "ramp" ||
           featureType === "stairs"
         ) {
-          const resp = await apiClient.get(
-            `/api/destination/floorplan/nodes?destinationId=${encodeURIComponent(destinationId)}`,
+          const resp = await fetch(
+            withBasePath(
+              `/api/destination/floorplan/nodes?destinationId=${encodeURIComponent(destinationId)}`,
+            ),
           );
           const payload = await resp.json();
           if (cancelled) return;
@@ -339,7 +343,11 @@ export function RouteReportForm({
 
     setLoading(true);
     try {
-      const resp = await apiClient.post("/api/report/route", payload);
+      const resp = await fetch(withBasePath("/api/report/route"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
       const data = (await resp.json().catch(() => null)) as {
         error?: string;

@@ -123,7 +123,9 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error: "Upload failed",
-        detail: err?.message ?? String(err),
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: err?.message ?? String(err) }
+          : {}),
       },
       { status: 500 },
     );

@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 
-import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,7 +91,7 @@ export function BugReportForm({
       formData.append("text", values.text);
       if (photoFile) formData.append("photo", photoFile);
 
-      const resp = await apiClient.postForm("/api/report/bug", formData);
+      const resp = await fetch(withBasePath("/api/report/bug"), { method: "POST", body: formData });
 
       const data = (await resp.json().catch(() => null)) as {
         error?: string;

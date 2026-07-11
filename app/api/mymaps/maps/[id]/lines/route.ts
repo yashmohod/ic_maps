@@ -4,9 +4,13 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { myMapsLine } from "@/db/schema";
-import { requireSession } from "@/lib/auth-guards";
-import { getMapAccess } from "@/lib/mymaps-access";
-import { jsonError, parseId, parsePolygon } from "@/lib/utils";
+import { getSession, requireSession } from "@/lib/auth-guards";
+import {
+  getErrorDetail,
+  requireMapEditable,
+  requireMapReadable,
+} from "@/lib/mymaps-http";
+import { parseId } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
 const ROUTE = "/api/mymaps/maps/[id]/lines";
@@ -22,46 +26,50 @@ const putSchema = z.object({
   geometry: z.unknown().optional(),
 });
 
-function getDetail(err: unknown): string {
-  if (err instanceof Error && "cause" in err && err.cause instanceof Error)
-    return err.cause.message;
-  return err instanceof Error ? err.message : String(err);
-}
-
 function parseLineGeometry(input: unknown): string | null {
-  const parsed = parsePolygon(input);
-  if (!parsed) return null;
-  const type = parsed.polyObj.type;
-  const geomType =
-    type === "Feature"
-      ? (parsed.polyObj.geometry as { type?: string } | undefined)?.type
-      : type;
-  if (geomType !== "LineString" && type !== "Feature") {
-    // allow Feature wrapping LineString
-  }
-  if (type === "Feature") {
-    const g = parsed.polyObj.geometry as { type?: string } | undefined;
-    if (g?.type !== "LineString") return null;
-  } else if (type === "LineString") {
-    return JSON.stringify({
-      type: "Feature",
-      properties: parsed.polyObj.properties ?? {},
-      geometry: parsed.polyObj,
-    });
-  } else {
+  try {
+    const obj =
+      typeof input === "string"
+        ? JSON.parse(input)
+        : typeof input === "object" && input != null
+          ? input
+          : null;
+    if (!obj || typeof obj !== "object") return null;
+    const record = obj as Record<string, unknown>;
+
+    if (record.type === "Feature") {
+      const g = record.geometry as { type?: string } | undefined;
+      if (g?.type !== "LineString") return null;
+      if (!record.properties || typeof record.properties !== "object") {
+        record.properties = {};
+      }
+      return JSON.stringify(record);
+    }
+
+    if (record.type === "LineString") {
+      return JSON.stringify({
+        type: "Feature",
+        properties: {},
+        geometry: record,
+      });
+    }
+
+    return null;
+  } catch {
     return null;
   }
-  return parsed.polyStr;
 }
 
 export async function GET(_req: Request, { params }: Params) {
-  const { session, error } = await requireSession();
-  if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access || !access.canRead) return jsonError("Map not found", 404);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const session = await getSession();
+    const userId = session?.user?.id ?? null;
+    const gate = await requireMapReadable(mapId, userId);
+    if ("error" in gate) return gate.error;
+
     const lines = await db
       .select()
       .from(myMapsLine)
@@ -69,7 +77,7 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ lines }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return jsonError("Could not fetch lines", 500, getDetail(err));
+    return NextResponse.json({ error: "Could not fetch lines", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -78,13 +86,13 @@ export async function POST(req: Request, { params }: Params) {
   if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -94,7 +102,7 @@ export async function POST(req: Request, { params }: Params) {
     }
 
     const geomStr = parseLineGeometry(parsed.data.geometry);
-    if (!geomStr) return jsonError("Invalid LineString geometry", 400);
+    if (!geomStr) return NextResponse.json({ error: "Invalid LineString geometry" }, { status: 400 });
 
     const name = parsed.data.name ?? "";
     const obj = JSON.parse(geomStr) as {
@@ -111,7 +119,7 @@ export async function POST(req: Request, { params }: Params) {
       })
       .returning();
 
-    if (!inserted) return jsonError("Insert failed", 500);
+    if (!inserted) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
     obj.properties = { ...obj.properties, lineId: inserted.id };
     const [updated] = await db
       .update(myMapsLine)
@@ -122,7 +130,7 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ line: updated }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return jsonError("Insert failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -131,13 +139,13 @@ export async function PUT(req: Request, { params }: Params) {
   if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -152,13 +160,13 @@ export async function PUT(req: Request, { params }: Params) {
       .from(myMapsLine)
       .where(and(eq(myMapsLine.id, lineId), eq(myMapsLine.my_maps_id, mapId)))
       .limit(1);
-    if (!existing) return jsonError("Line not found", 404);
+    if (!existing) return NextResponse.json({ error: "Line not found" }, { status: 404 });
 
     const updates: { name?: string; geometry?: string } = {};
     if (name !== undefined) updates.name = name;
     if (geometry !== undefined) {
       const geomStr = parseLineGeometry(geometry);
-      if (!geomStr) return jsonError("Invalid LineString geometry", 400);
+      if (!geomStr) return NextResponse.json({ error: "Invalid LineString geometry" }, { status: 400 });
       const obj = JSON.parse(geomStr) as {
         properties?: Record<string, unknown>;
       };
@@ -180,7 +188,7 @@ export async function PUT(req: Request, { params }: Params) {
     return NextResponse.json({ line: updated }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return jsonError("Update failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -189,10 +197,10 @@ export async function DELETE(req: Request, { params }: Params) {
   if (error) return error;
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return jsonError("Missing or invalid id", 400);
-    const access = await getMapAccess(mapId, session!.user.id);
-    if (!access) return jsonError("Map not found", 404);
-    if (!access.canEdit) return jsonError("User role lacks permissions", 403);
+    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+
+    const gate = await requireMapEditable(mapId, session!.user.id);
+    if ("error" in gate) return gate.error;
 
     const { searchParams } = new URL(req.url);
     let lineId = parseId(searchParams.get("lineId"));
@@ -200,16 +208,16 @@ export async function DELETE(req: Request, { params }: Params) {
       const body = await req.json().catch(() => null);
       lineId = parseId((body as { lineId?: unknown } | null)?.lineId);
     }
-    if (!lineId) return jsonError("Missing or invalid lineId", 400);
+    if (!lineId) return NextResponse.json({ error: "Missing or invalid lineId" }, { status: 400 });
 
     const result = await db
       .delete(myMapsLine)
       .where(and(eq(myMapsLine.id, lineId), eq(myMapsLine.my_maps_id, mapId)))
       .returning({ id: myMapsLine.id });
-    if (result.length === 0) return jsonError("Line not found", 404);
+    if (result.length === 0) return NextResponse.json({ error: "Line not found" }, { status: 404 });
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return jsonError("Delete failed", 500, getDetail(err));
+    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
   }
 }

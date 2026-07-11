@@ -1,5 +1,6 @@
 "use client";
 import { Toggle } from "@/components/ui/toggle";
+import { withBasePath } from "@/lib/base-path";
 import React, { useRef, useState, useMemo, useEffect, type JSX } from "react";
 import {
   Map as ReactMap,
@@ -19,8 +20,8 @@ import {
   CAMPUS_BOUNDS,
 } from "@/lib/map-constants";
 import { EditorToolsMenu } from "@/components/EditorToolsMenu";
-import ProfileOptions from "../components/profileOptions";
-import NavModeMap from "../components/NavMode";
+import ProfileOptions from "@/components/profileOptions";
+import NavModeMap from "@/components/NavModeMap";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
@@ -29,7 +30,6 @@ import { DestinationSearchCombobox } from "@/components/DestinationSearchCombobo
 import { TripStopMarkers } from "@/components/TripStopMarkers";
 import { RoutePathLayer } from "@/components/RoutePathLayer";
 import Link from "next/link";
-import { type Session } from "@/lib/auth-client";
 import { useEffectiveSession } from "@/hooks/use-effective-session";
 import { useIsIcUser } from "@/hooks/use-is-ic-user";
 import {
@@ -47,7 +47,6 @@ import {
   XIcon,
 } from "lucide-react";
 import maplibregl from "maplibre-gl";
-import apiClient from "@/lib/apiClient";
 import { Slider } from "@/components/ui/slider";
 import { NavConditions } from "@/lib/navigation";
 import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
@@ -86,8 +85,6 @@ import {
 import type { NavStep } from "@/lib/navigation-types";
 import { useDistanceUnits } from "@/hooks/use-distance-units";
 import { useNavigationProgress } from "@/hooks/use-navigation-progress";
-
-export type Destination = MapDestination;
 
 type FavoriteRow = {
   id: number;
@@ -178,7 +175,7 @@ export default function NavigationMap(): JSX.Element {
   const [[swLng, swLat], [neLng, neLat]] = CAMPUS_BOUNDS;
 
   const [selectedDest, setSelectedDest] = useState<number>(0);
-  const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [destinations, setDestinations] = useState<MapDestination[]>([]);
   const [destinationsFirstLoadPending, setDestinationsFirstLoadPending] =
     useState(true);
   const [userPos, setUserPos] = useState<UserPos | null>(null);
@@ -300,7 +297,7 @@ export default function NavigationMap(): JSX.Element {
 
     graphPrefetchRef.current = (async () => {
       try {
-        const req = await apiClient.get("/api/map/all");
+        const req = await fetch(withBasePath("/api/map/all"));
         if (req.status !== 200) return;
         const data = await req.json();
         setMarkers(data.nodes as MarkerNode[]);
@@ -568,7 +565,7 @@ export default function NavigationMap(): JSX.Element {
     }
 
     try {
-      const curDestination: Destination | undefined = destinations.find(
+      const curDestination: MapDestination | undefined = destinations.find(
         (cur) => cur.id === id,
       );
       if (!curDestination)
@@ -585,8 +582,10 @@ export default function NavigationMap(): JSX.Element {
       }
       setCurBuildingPoly(curDestinationPoly);
 
-      const req: any = await apiClient.get(
-        `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
+      const req: any = await fetch(
+        withBasePath(
+          `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
+        ),
       );
       const resp = await req.json();
 
@@ -676,7 +675,7 @@ export default function NavigationMap(): JSX.Element {
 
   async function loadFavorites() {
     try {
-      const req = await apiClient.get("/api/favorites");
+      const req = await fetch(withBasePath("/api/favorites"));
       if (req.status !== 200) return;
       const data = (await req.json()) as { favorites?: FavoriteRow[] };
       setFavorites(data.favorites ?? []);
@@ -687,7 +686,7 @@ export default function NavigationMap(): JSX.Element {
 
   async function loadChains() {
     try {
-      const req = await apiClient.get("/api/destination-chains");
+      const req = await fetch(withBasePath("/api/destination-chains"));
       if (req.status !== 200) return;
       const data = (await req.json()) as { chains?: ChainRow[] };
       setChains(data.chains ?? []);
@@ -704,15 +703,22 @@ export default function NavigationMap(): JSX.Element {
     const isFav = favoriteIdSet.has(destId);
     try {
       if (isFav) {
-        const req = await apiClient.del(
-          `/api/favorites?destinationId=${encodeURIComponent(destId)}`,
+        const req = await fetch(
+          withBasePath(
+            `/api/favorites?destinationId=${encodeURIComponent(destId)}`,
+          ),
+          { method: "DELETE" },
         );
         if (req.status !== 200) throw new Error("remove failed");
         setFavorites((prev) => prev.filter((f) => f.id !== destId));
         toast.success("Building removed from favorites");
       } else {
-        const req = await apiClient.post("/api/favorites", {
-          destinationId: destId,
+        const req = await fetch(withBasePath("/api/favorites"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destinationId: destId,
+          }),
         });
         if (req.status !== 201) throw new Error("add failed");
         const dest = destinations.find((d) => Number(d.id) === destId);
@@ -763,9 +769,13 @@ export default function NavigationMap(): JSX.Element {
       return;
     }
     try {
-      const req = await apiClient.post("/api/destination-chains", {
-        name,
-        destinationIds: destinationStops,
+      const req = await fetch(withBasePath("/api/destination-chains"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          destinationIds: destinationStops,
+        }),
       });
       if (req.status !== 201) throw new Error("save failed");
       setChainNameInput("");
@@ -877,7 +887,11 @@ export default function NavigationMap(): JSX.Element {
             navConditions: curNavConditions,
           };
 
-    const req = await apiClient.post("/api/map/navigateTo", payload);
+    const req = await fetch(withBasePath("/api/map/navigateTo"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
     const resp = (await req.json().catch(() => ({}))) as NavigateToResponse & {
       error?: string;
     };
@@ -1051,7 +1065,7 @@ export default function NavigationMap(): JSX.Element {
 
   async function getBuildings() {
     try {
-      const req = await apiClient.get("/api/destination");
+      const req = await fetch(withBasePath("/api/destination"));
       if (req.status !== 200) return toast.error("Buildings did not load!");
       const resp = await req.json();
       setDestinations(resp.destinations || []);
@@ -1079,28 +1093,6 @@ export default function NavigationMap(): JSX.Element {
     void recalcRouteForNavMode(curNavConditions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curNavConditions]);
-
-  // Once NavModeMap loads the new mode graph, build the route geometry
-  // useEffect(() => {
-  //   if (!pendingPathKeys || pendingPathKeys.length === 0) return;
-  //   if (!markers.length || !edgeIndex.length) return;
-
-  //   const coords = buildRouteFeature(pendingPathKeys);
-
-  //   if (!coords) {
-  //     const key = pendingPathKeys.slice(0, 3).join(",");
-  //     if (lastRecalcToastRef.current !== key) {
-  //       lastRecalcToastRef.current = key;
-  //       toast.error("Route geometry couldn't be built for this mode.");
-  //     }
-  //     setPendingPathKeys(null);
-  //     return;
-  //   }
-
-  //   fitToUserAndDest(coords, { duration: 900 });
-  //   setPendingPathKeys(null);
-  //   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [pendingPathKeys, markers, edgeIndex]);
 
   useEffect(() => {
     if (!mapReady) return;

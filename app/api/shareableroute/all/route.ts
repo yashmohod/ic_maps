@@ -4,7 +4,6 @@ import { eq, asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { route, route_destination, destination } from "@/db/schema";
 import { requireIthacaEduSession } from "@/lib/auth-guards";
-import { jsonError } from "@/lib/utils";
 
 const ROUTE = "/api/shareableroute/all";
 
@@ -13,7 +12,7 @@ export async function GET() {
     console.log(`[API ${ROUTE} GET] called`);
     const { session, error } = await requireIthacaEduSession();
     if (error) return error;
-    if (!session?.user?.id) return jsonError("Unauthorized", 401);
+    if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const routeRows = await db
       .select()
@@ -67,6 +66,6 @@ export async function GET() {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch routes", 500, message);
+    return NextResponse.json({ error: "Could not fetch routes", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }

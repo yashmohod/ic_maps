@@ -28,20 +28,19 @@ Deployment: single private VM (college); scale-out later with Redis.
 | Geolocation denied — clearer UX             | UX                    | Explain enable steps + manual dest-only mode |
 | Fix marketing copy: “turn-by-turn”          | Expectation gap       | GPS follow + recalc ≠ step list unless built |
 | Code split large pages                      | Low-end phone perf    | dynamic import editors, React Flow           |
-| Complete `apiClient` error handling         | Fewer silent failures | Typed errors + toast                         |
-| Repurpose or remove `isRouteManager`        | Schema clarity        | → area maintainer / mark nodes closed        |
-| Proxy: auth redirects, security headers     | Centralized guards    | Replace no-op `app/proxy.ts`                 |
+| Complete client fetch error handling        | Fewer silent failures | Toast on non-ok `fetch(withBasePath(...))`   |
+| Proxy: auth redirects, security headers     | Centralized guards    | Next middleware / reverse proxy              |
 
 ## P2 — After IT approval / growth
 
-| Item                                           | Impact                     | Notes                                             |
-| ---------------------------------------------- | -------------------------- | ------------------------------------------------- |
-| Email verification (Resend)                    | Account trust              | Currently off intentionally                       |
-| Redis pub/sub graph invalidation               | Multi-instance consistency | When 2+ Node processes                            |
-| Tests: `lib/navigation.ts` + critical APIs     | Regression safety          | Highest ROI                                       |
-| Text-based indoor guidance from node names     | Product                    | No floorplan images; “West elevator to 3rd floor” |
-| Node closure / outage feature                  | Operations                 | Use repurposed route-manager role                 |
-| Lighter SVG readonly floorplan (admin reports) | Bundle size                | Drop React Flow on read-only views                |
+| Item                                           | Impact                     | Notes                                              |
+| ---------------------------------------------- | -------------------------- | -------------------------------------------------- |
+| Email verification (Resend)                    | Account trust              | Currently off intentionally                        |
+| Redis pub/sub graph invalidation               | Multi-instance consistency | When 2+ Node processes                             |
+| Tests: `lib/navigation.ts` + critical APIs     | Regression safety          | Highest ROI                                        |
+| Text-based indoor guidance from node names     | Product                    | No floorplan images; “West elevator to 3rd floor”  |
+| Node closure / outage feature                  | Operations                 | New feature if needed; unused `outage_log` dropped |
+| Lighter SVG readonly floorplan (admin reports) | Bundle size                | Drop React Flow on read-only views                 |
 
 ## P3 — Nice to have
 
@@ -66,5 +65,6 @@ Deployment: single private VM (college); scale-out later with Redis.
 - Indoor/outdoor elevator fields in schema (routing logic TBD)
 - Per-floor segmented graphs; exit at `is_exit` doors
 - Single-process in-memory graph (OK for one VM)
-- `@ithaca.edu` shareable routes (not `isRouteManager`)
+- `@ithaca.edu` shareable routes
+- Removed unused `isRouteManager` column and `outage_log` table
 - Elevator / multi-floor indoor routing — **data model**; pathfinding rules still to be completed

@@ -2,7 +2,7 @@ import "server-only";
 
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { calcDistance } from "@/lib/utils";
+import { calcDistance } from "@/lib/geo";
 import type { Graph, NavConditions } from "@/lib/navigation-graph";
 import {
   endNodeFromPath,

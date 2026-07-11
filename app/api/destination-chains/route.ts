@@ -9,7 +9,7 @@ import {
   destination_chain_stop,
 } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guards";
-import { jsonError, isNonEmptyString, parseId } from "@/lib/utils";
+import { isNonEmptyString, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/destination-chains";
 
@@ -101,7 +101,7 @@ export async function GET() {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not fetch chains", 500, message);
+    return NextResponse.json({ error: "Could not fetch chains", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = chainPostSchema.safeParse(body);
     if (!parsed.success) {
@@ -123,10 +123,10 @@ export async function POST(req: Request) {
 
     const { name, destinationIds } = parsed.data;
     if (!isNonEmptyString(name, 256)) {
-      return jsonError("name must be a non-empty string (max 256 chars)", 400);
+      return NextResponse.json({ error: "name must be a non-empty string (max 256 chars)" }, { status: 400 });
     }
     if (!(await validateDestinationIds(destinationIds))) {
-      return jsonError("One or more destination IDs are invalid", 400);
+      return NextResponse.json({ error: "One or more destination IDs are invalid" }, { status: 400 });
     }
 
     const [inserted] = await db
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
       })
       .returning({ id: destination_chain.id });
 
-    if (!inserted?.id) return jsonError("Insert failed", 500);
+    if (!inserted?.id) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
 
     await db.insert(destination_chain_stop).values(
       destinationIds.map((destination_id, index) => ({
@@ -151,7 +151,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not create chain", 500, message);
+    return NextResponse.json({ error: "Could not create chain", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -161,7 +161,7 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return jsonError("Invalid JSON body", 400);
+    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = chainPutSchema.safeParse(body);
     if (!parsed.success) {
@@ -178,14 +178,14 @@ export async function PUT(req: Request) {
       .where(eq(destination_chain.id, id))
       .limit(1);
 
-    if (!existing) return jsonError("Chain not found", 404);
+    if (!existing) return NextResponse.json({ error: "Chain not found" }, { status: 404 });
     if (existing.user_id !== session!.user.id) {
-      return jsonError("Forbidden", 403);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     if (name !== undefined) {
       if (!isNonEmptyString(name, 256)) {
-        return jsonError("name must be a non-empty string (max 256 chars)", 400);
+        return NextResponse.json({ error: "name must be a non-empty string (max 256 chars)" }, { status: 400 });
       }
       await db
         .update(destination_chain)
@@ -195,7 +195,7 @@ export async function PUT(req: Request) {
 
     if (destinationIds !== undefined) {
       if (!(await validateDestinationIds(destinationIds))) {
-        return jsonError("One or more destination IDs are invalid", 400);
+        return NextResponse.json({ error: "One or more destination IDs are invalid" }, { status: 400 });
       }
       await db
         .delete(destination_chain_stop)
@@ -213,7 +213,7 @@ export async function PUT(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not update chain", 500, message);
+    return NextResponse.json({ error: "Could not update chain", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }
 
@@ -224,7 +224,7 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const chainId = parseId(searchParams.get("id"));
-    if (!chainId) return jsonError("Missing or invalid id", 400);
+    if (!chainId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
 
     const [existing] = await db
       .select()
@@ -232,9 +232,9 @@ export async function DELETE(req: Request) {
       .where(eq(destination_chain.id, chainId))
       .limit(1);
 
-    if (!existing) return jsonError("Chain not found", 404);
+    if (!existing) return NextResponse.json({ error: "Chain not found" }, { status: 404 });
     if (existing.user_id !== session!.user.id) {
-      return jsonError("Forbidden", 403);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     await db.delete(destination_chain).where(eq(destination_chain.id, chainId));
@@ -242,6 +242,6 @@ export async function DELETE(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return jsonError("Could not delete chain", 500, message);
+    return NextResponse.json({ error: "Could not delete chain", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
   }
 }

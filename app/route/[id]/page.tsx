@@ -1,7 +1,7 @@
-// src/app/route/[id]/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { withBasePath } from "@/lib/base-path";
 import {
   Map as ReactMap,
   Marker,
@@ -35,7 +35,6 @@ import {
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import type { NavConditions } from "@/lib/navigation";
-import apiClient from "@/lib/apiClient";
 import { bearingTo, makeCircleGeoJSON } from "@/lib/geo";
 import {
   surfaceSubtleClass,
@@ -60,8 +59,8 @@ import {
 } from "@/lib/distance-display";
 import { useNavigationProgress } from "@/hooks/use-navigation-progress";
 
-import NavModeMap from "@/components/NavMode";
-import ComboboxSelect from "@/components/DropDown";
+import NavModeMap from "@/components/NavModeMap";
+import ComboboxSelect from "@/components/ComboboxSelect";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
@@ -200,7 +199,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     if (graphPrefetchRef.current) return graphPrefetchRef.current;
     graphPrefetchRef.current = (async () => {
       try {
-        const res = await apiClient.get("/api/map/all");
+        const res = await fetch(withBasePath("/api/map/all"));
         if (res.status !== 200) return;
         const data = await res.json();
         setMarkers(data.nodes ?? []);
@@ -585,7 +584,11 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         body.destId = routeInfo.destinationId;
       }
 
-      const res = await apiClient.post("/api/map/navigateTo", body);
+      const res = await fetch(withBasePath("/api/map/navigateTo"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const data = (await res
         .json()
         .catch(() => ({}))) as NavigateToResponse & {

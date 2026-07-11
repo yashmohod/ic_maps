@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
-import { db } from "@/db/index";
-import { calcDistance, heuristic } from "./utils";
+import { db } from "@/db";
+import { calcDistance, heuristic } from "@/lib/geo";
 import {
   durationSecondsFromDistance,
   lineStringLengthMeters,
@@ -24,14 +24,10 @@ import {
   type Graph,
   type NavConditions,
 } from "@/lib/navigation-graph";
+import type { RouteLegMetrics } from "@/lib/types/map";
 
 export type { Graph, NavConditions } from "@/lib/navigation-graph";
-export {
-  buildGraph,
-  endNodeFromPath,
-  nextNodeFromEdge,
-  reconstructIndoorPath,
-} from "@/lib/navigation-graph";
+export { endNodeFromPath, nextNodeFromEdge } from "@/lib/navigation-graph";
 
 const FILE = "navigation.ts";
 function logReturnNull(_reason: string): void {}
@@ -204,12 +200,6 @@ function dedupeCoords(coords: [number, number][]): [number, number][] {
   }
   return out;
 }
-
-export type RouteLegMetrics = {
-  destinationId: number;
-  distanceMeters: number;
-  durationSeconds: number;
-};
 
 export type RouteMetrics = {
   distanceMeters: number;

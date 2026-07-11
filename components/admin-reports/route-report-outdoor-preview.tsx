@@ -12,7 +12,10 @@ import {
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
 } from "@/lib/map-constants";
-import { parsePolygon, type RouteReportFeatureType } from "@/lib/route-report";
+import {
+  parseDestinationPolygonCollection,
+  type RouteReportFeatureType,
+} from "@/lib/route-report";
 import type { GeoJSONFeatureCollection } from "@/lib/types/map";
 import { cn } from "@/lib/utils";
 
@@ -73,7 +76,7 @@ export function RouteReportOutdoorPreview({
   const canRenderMap = baseStyle != null;
 
   const polygon = useMemo(
-    () => parsePolygon(destinationPolygon),
+    () => parseDestinationPolygonCollection(destinationPolygon),
     [destinationPolygon],
   );
 
