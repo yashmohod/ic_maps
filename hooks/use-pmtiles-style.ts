@@ -71,8 +71,10 @@ function absolutizeTemplateUrl(value: string, base: string) {
 }
 
 export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
-  const pmtilesPath = options.pmtilesPath ?? withBasePath("/tiles/ithaca.pmtiles");
-  const stylePath = options.stylePath ?? withBasePath("/styles/osm-bright/style-local.json");
+  const pmtilesPath =
+    options.pmtilesPath ?? withBasePath("/tiles/ithaca.pmtiles");
+  const stylePath =
+    options.stylePath ?? withBasePath("/styles/osm-bright/style-local.json");
   const glyphsFallback =
     options.glyphsFallback ??
     "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf";
@@ -103,7 +105,10 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
 
     (async () => {
       try {
-        const pmtilesUrl = new URL(pmtilesPath, window.location.origin).toString();
+        const pmtilesUrl = new URL(
+          pmtilesPath,
+          window.location.origin,
+        ).toString();
         const pmtiles = ensurePmtiles(pmtilesUrl);
         const cachedLayers = tilesetLayerCache.get(pmtilesPath);
         if (cachedLayers) {
@@ -119,10 +124,11 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
           (async () => {
             try {
               const m: any = await pmtiles.getMetadata();
-              const ids: string[] =
-                (m?.vector_layers ?? m?.vectorLayers ?? []).map((v: any) =>
-                  String(v.id),
-                );
+              const ids: string[] = (
+                m?.vector_layers ??
+                m?.vectorLayers ??
+                []
+              ).map((v: any) => String(v.id));
               const setIds = new Set(ids);
               tilesetLayerCache.set(pmtilesPath, setIds);
               return setIds;
@@ -170,7 +176,10 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
             const src: any = style.sources[k];
             if (!src || typeof src !== "object") continue;
 
-            if (typeof src.url === "string" && !src.url.startsWith("pmtiles://")) {
+            if (
+              typeof src.url === "string" &&
+              !src.url.startsWith("pmtiles://")
+            ) {
               src.url = absolutizeTemplateUrl(src.url, styleUrl);
             }
             if (Array.isArray(src.tiles)) {
@@ -181,12 +190,11 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
           }
         }
 
-        const srcKey =
-          style?.sources?.openmaptiles
-            ? "openmaptiles"
-            : Object.keys(style?.sources ?? {}).find(
+        const srcKey = style?.sources?.openmaptiles
+          ? "openmaptiles"
+          : (Object.keys(style?.sources ?? {}).find(
               (k) => style.sources[k]?.type === "vector",
-            ) ?? "openmaptiles";
+            ) ?? "openmaptiles");
 
         style.sources = style.sources ?? {};
         style.sources[srcKey] = {
@@ -200,7 +208,18 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
         if (Array.isArray(style.layers)) {
           style.layers = style.layers.filter((ly: any) => {
             if (!ly || typeof ly !== "object") return false;
+            // Sprite was deleted above; drop layers that need it.
             if (ly.type === "symbol") return false;
+            const paint = ly.paint ?? {};
+            const layout = ly.layout ?? {};
+            if (
+              paint["fill-pattern"] ||
+              paint["line-pattern"] ||
+              paint["background-pattern"] ||
+              layout["icon-image"]
+            ) {
+              return false;
+            }
             if (!ly.source) return true;
             if (ly.source !== srcKey) return true;
 

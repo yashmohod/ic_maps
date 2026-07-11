@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { myMaps, myMapsCollaborator } from "@/db/schema";
 import { requireSession } from "@/lib/auth-guards";
+import { getMapAccess } from "@/lib/mymaps-access";
 import { jsonError, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/mymaps/maps";
@@ -23,10 +24,6 @@ const mapPutSchema = z
     (body) => body.name !== undefined || body.is_public_view !== undefined,
     { message: "Provide at least one field to update" },
   );
-
-const mapDeleteSchema = z.object({
-  id: z.coerce.number().int().positive(),
-});
 
 function getDetail(err: unknown): string {
   if (err instanceof Error && "cause" in err && err.cause instanceof Error)
@@ -86,37 +83,19 @@ export async function PUT(req: Request) {
     }
 
     const { id, name, is_public_view } = parsed.data;
-    const userId = session!.user.id;
+    const access = await getMapAccess(id, session!.user.id);
+    if (!access) return jsonError("Map not found", 404);
 
-    const [map] = await db
-      .select({ owner_id: myMaps.owner_id })
-      .from(myMaps)
-      .where(eq(myMaps.id, id))
-      .limit(1);
-
-    if (!map) return jsonError("Map not found", 404);
-
-    const isOwner = map.owner_id === userId;
-
-    if (!isOwner) {
-      const [collab] = await db
-        .select({ role: myMapsCollaborator.role })
-        .from(myMapsCollaborator)
-        .where(
-          and(
-            eq(myMapsCollaborator.my_maps_id, id),
-            eq(myMapsCollaborator.collarorator_id, userId),
-          ),
-        )
-        .limit(1);
-
-      if (collab?.role !== "editor") {
-        return jsonError("User role lacks permissions", 403);
-      }
+    if (is_public_view !== undefined && !access.isOwner) {
+      return jsonError("Only the owner can change visibility", 403);
     }
 
-    if (is_public_view !== undefined && !isOwner) {
-      return jsonError("Only the owner can change visibility", 403);
+    if (name !== undefined && !access.canEdit) {
+      return jsonError("User role lacks permissions", 403);
+    }
+
+    if (!access.canEdit && is_public_view === undefined) {
+      return jsonError("User role lacks permissions", 403);
     }
 
     const updates: { name?: string; is_public_view?: boolean } = {};
@@ -142,7 +121,7 @@ export async function GET() {
       .select()
       .from(myMaps)
       .where(eq(myMaps.owner_id, userId))
-      .orderBy(desc(myMaps.create_at));
+      .orderBy(desc(myMaps.created_at));
 
     const collaboration_maps = await db
       .select({
@@ -150,7 +129,7 @@ export async function GET() {
         name: myMaps.name,
         is_public_view: myMaps.is_public_view,
         owner_id: myMaps.owner_id,
-        create_at: myMaps.create_at,
+        created_at: myMaps.created_at,
         role: myMapsCollaborator.role,
       })
       .from(myMaps)
@@ -158,8 +137,8 @@ export async function GET() {
         myMapsCollaborator,
         eq(myMaps.id, myMapsCollaborator.my_maps_id),
       )
-      .where(eq(myMapsCollaborator.collarorator_id, userId))
-      .orderBy(desc(myMaps.create_at));
+      .where(eq(myMapsCollaborator.collaborator_id, userId))
+      .orderBy(desc(myMaps.created_at));
 
     return NextResponse.json(
       { owned_maps, collaboration_maps },
@@ -182,14 +161,8 @@ export async function DELETE(req: Request) {
 
     if (!mapId) {
       const body = await req.json().catch(() => null);
-      const parsed = body ? mapDeleteSchema.safeParse(body) : null;
-      if (parsed?.success) {
-        mapId = parsed.data.id;
-      } else if (parsed && !parsed.success) {
-        return NextResponse.json(
-          { error: "Validation failed", details: parsed.error.flatten() },
-          { status: 400 },
-        );
+      if (body) {
+        mapId = parseId((body as { id?: unknown }).id);
       }
     }
 

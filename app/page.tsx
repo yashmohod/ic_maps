@@ -1241,6 +1241,7 @@ export default function NavigationMap(): JSX.Element {
           <EditorToolsMenu
             isAdmin={isAdmin}
             isIcUser={isIcUser}
+            isSignedIn={isSignedIn}
             devMode={devMode}
           />
 

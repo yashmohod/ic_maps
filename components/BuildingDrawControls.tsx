@@ -32,8 +32,12 @@ type Props = {
   controls?: DrawControls;
   displayControlsDefault?: boolean;
 
-  polys: Array<Feature<Polygon, GeoJsonProperties>>;
+  /** Drawn features to sync (polygons, lines, points). */
+  features?: Feature[];
+  /** @deprecated use features */
+  polys?: Array<Feature<Polygon, GeoJsonProperties>>;
 
+  onReady?: (draw: MapLibreDraw | null) => void;
   onCreate?: (e: DrawEvent, draw: MapLibreDraw) => void;
   onUpdate?: (e: DrawEvent, draw: MapLibreDraw) => void;
   onDelete?: (e: DrawEvent, draw: MapLibreDraw) => void;
@@ -76,7 +80,12 @@ function fallbackStyles() {
         ["!=", "meta", "midpoint"],
         ["!=", "active", "true"],
       ],
-      paint: { "circle-radius": 5, "circle-color": "#1a5276", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
+      paint: {
+        "circle-radius": 5,
+        "circle-color": "#1a5276",
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+      },
     },
     {
       id: "gl-draw-points.hot",
@@ -102,14 +111,12 @@ function getId(f: any): string {
   return String(f?.id ?? f?.properties?.id ?? "");
 }
 
-function normalizeFeatures(
-  polys: Array<Feature<Polygon, GeoJsonProperties>>,
-): Array<Feature<Polygon, GeoJsonProperties>> {
+function normalizeFeatures(features: Feature[]): Feature[] {
   // Ensure stable feature.id exists (Draw identity depends on top-level id)
   const seen = new Set<string>();
-  const out: Array<Feature<Polygon, GeoJsonProperties>> = [];
+  const out: Feature[] = [];
 
-  for (const f of polys ?? []) {
+  for (const f of features ?? []) {
     const id = getId(f);
     const normalized =
       id && id !== "undefined"
@@ -117,7 +124,7 @@ function normalizeFeatures(
             ...(f as any),
             id,
             properties: { ...(f.properties ?? {}), id },
-          } as Feature<Polygon, GeoJsonProperties>)
+          } as Feature)
         : f;
 
     const nid = getId(normalized);
@@ -134,8 +141,9 @@ export default function DrawControl({
   position = "top-left",
   controls = { polygon: true },
   displayControlsDefault = false,
+  features,
   polys,
-
+  onReady,
   onCreate,
   onUpdate,
   onDelete,
@@ -143,15 +151,17 @@ export default function DrawControl({
   onModeChange,
 }: Props): null {
   const drawRef = useRef<MapLibreDraw | null>(null);
+  const incomingFeatures = features ?? (polys as Feature[] | undefined) ?? [];
 
-  // ✅ store latest polys so when draw becomes ready we can sync immediately
-  const polysRef = useRef<Array<Feature<Polygon, GeoJsonProperties>>>([]);
+  // ✅ store latest features so when draw becomes ready we can sync immediately
+  const featuresRef = useRef<Feature[]>([]);
   useEffect(() => {
-    polysRef.current = polys ?? [];
-  }, [polys]);
+    featuresRef.current = incomingFeatures;
+  }, [incomingFeatures]);
 
   // keep latest handlers without reinstalling draw control
   const handlersRef = useRef({
+    onReady,
     onCreate,
     onUpdate,
     onDelete,
@@ -160,21 +170,20 @@ export default function DrawControl({
   });
   useEffect(() => {
     handlersRef.current = {
+      onReady,
       onCreate,
       onUpdate,
       onDelete,
       onSelectionChange,
       onModeChange,
     };
-  }, [onCreate, onUpdate, onDelete, onSelectionChange, onModeChange]);
+  }, [onReady, onCreate, onUpdate, onDelete, onSelectionChange, onModeChange]);
 
   const controlsKey = useMemo(() => JSON.stringify(controls ?? {}), [controls]);
 
-  // ✅ function to sync a set of polys into draw
+  // ✅ function to sync a set of features into draw
   const syncIntoDraw = (draw: any, incomingRaw: any[]) => {
-    const incoming = normalizeFeatures(
-      incomingRaw as Array<Feature<Polygon, GeoJsonProperties>>,
-    );
+    const incoming = normalizeFeatures(incomingRaw as Feature[]);
 
     // If user has a selection, don't nuke state
     const selectedIds: string[] =
@@ -274,8 +283,9 @@ export default function DrawControl({
     map.on("draw.selectionchange" as any, handleSel);
     map.on("draw.modechange" as any, handleMode);
 
-    // ✅ CRITICAL: sync immediately using latest polys (fixes “first load shows nothing”)
-    syncIntoDraw(draw as any, polysRef.current);
+    // ✅ CRITICAL: sync immediately using latest features
+    syncIntoDraw(draw as any, featuresRef.current);
+    handlersRef.current.onReady?.(draw);
 
     return () => {
       map.off("draw.create" as any, handleCreate);
@@ -288,17 +298,18 @@ export default function DrawControl({
         map.removeControl(draw as any);
       } catch {}
       drawRef.current = null;
+      handlersRef.current.onReady?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, position, displayControlsDefault, controlsKey]);
 
-  // ✅ also resync any time polys changes AFTER draw exists
+  // ✅ also resync any time features change AFTER draw exists
   useEffect(() => {
     const draw = drawRef.current as any;
     if (!draw) return;
-    syncIntoDraw(draw, polys ?? []);
+    syncIntoDraw(draw, incomingFeatures);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [polys]);
+  }, [incomingFeatures]);
 
   return null;
 }

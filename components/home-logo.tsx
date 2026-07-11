@@ -16,6 +16,7 @@ export function HomeLogo({ className = "" }: Props) {
         alt="Ithaca College logo"
         width={160}
         height={40}
+        style={{ width: "auto", height: "auto" }}
         className={`max-h-10 w-auto dark:hidden ${className}`}
       />
       <Image
@@ -23,6 +24,7 @@ export function HomeLogo({ className = "" }: Props) {
         alt="Ithaca College logo"
         width={160}
         height={40}
+        style={{ width: "auto", height: "auto" }}
         className={`hidden max-h-10 w-auto dark:block ${className}`}
       />
     </>

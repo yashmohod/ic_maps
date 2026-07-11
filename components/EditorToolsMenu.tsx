@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Flag,
   Layers,
+  Map as MapIcon,
   Route,
   Share,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import {
 type EditorToolsMenuProps = {
   isAdmin: boolean;
   isIcUser: boolean;
+  isSignedIn?: boolean;
   devMode?: boolean;
   chipClassName?: string;
 };
@@ -44,12 +46,21 @@ type ToolLink = {
 function useToolLinks(
   isAdmin: boolean,
   isIcUser: boolean,
+  isSignedIn: boolean,
   devMode: boolean,
 ): ToolLink[] {
   const canUseEditors = isAdmin || devMode;
   const canUseCustomRoutes = isIcUser || devMode;
+  const canUseMyMaps = isSignedIn || devMode;
 
   return [
+    {
+      href: "/mymaps",
+      label: "My Maps",
+      description: "Create and share personal campus maps",
+      icon: <MapIcon size={22} aria-hidden="true" />,
+      show: canUseMyMaps,
+    },
     {
       href: "/route-editor",
       label: "Route Editor",
@@ -172,10 +183,11 @@ function AccessibilityReportButton() {
 export function EditorToolsMenu({
   isAdmin,
   isIcUser,
+  isSignedIn = false,
   devMode = false,
   chipClassName = mapHeaderChipClass,
 }: EditorToolsMenuProps) {
-  const links = useToolLinks(isAdmin, isIcUser, devMode);
+  const links = useToolLinks(isAdmin, isIcUser, isSignedIn, devMode);
 
   const chipClass = `${chipClassName} shrink-0 px-2`;
 

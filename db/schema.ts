@@ -506,8 +506,9 @@ export const myMaps = pgTable("my_maps", {
   owner_id: text("owner_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  create_at: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  created_at: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 });
+
 export const myMapsCollaborator = pgTable(
   "my_maps_collaborator",
   {
@@ -516,12 +517,14 @@ export const myMapsCollaborator = pgTable(
         onDelete: "cascade",
       })
       .notNull(),
-    collarorator_id: text("collaborator_id").references(() => user.id, {
-      onDelete: "cascade",
-    }),
+    collaborator_id: text("collaborator_id")
+      .notNull()
+      .references(() => user.id, {
+        onDelete: "cascade",
+      }),
     role: text("role").notNull().default("viewer"),
   },
-  (t) => [primaryKey({ columns: [t.my_maps_id, t.collarorator_id] })],
+  (t) => [primaryKey({ columns: [t.my_maps_id, t.collaborator_id] })],
 );
 
 export const myMapsNode = pgTable("my_maps_node", {
@@ -536,6 +539,7 @@ export const myMapsNode = pgTable("my_maps_node", {
   lng: doublePrecision("lng").notNull().default(0),
 });
 
+/** Table name is my_map_polygon (singular) for historical reasons. */
 export const myMapsPolygon = pgTable("my_map_polygon", {
   id: serial("id").primaryKey(),
   my_maps_id: integer("my_maps_id")
@@ -547,6 +551,7 @@ export const myMapsPolygon = pgTable("my_map_polygon", {
   polygon: text("polygon").default(""),
 });
 
+/** Table name is my_map_edge (singular) for historical reasons. */
 export const myMapsEdge = pgTable(
   "my_map_edge",
   {
@@ -566,11 +571,44 @@ export const myMapsEdge = pgTable(
     incline: doublePrecision("incline").notNull().default(0), // meters
   },
   (t) => [
-    unique("edge_outside_pair_unique").on(t.node_a_id, t.node_b_id),
-    index("idx_edge_outside_a").on(t.node_a_id),
-    index("idx_edge_outside_b").on(t.node_b_id),
+    unique("my_map_edge_pair_unique").on(t.node_a_id, t.node_b_id),
+    index("idx_my_map_edge_a").on(t.node_a_id),
+    index("idx_my_map_edge_b").on(t.node_b_id),
   ],
 );
+
+/** Freehand / drawn LineString annotations (MapLibre Draw line_string). */
+export const myMapsLine = pgTable("my_map_line", {
+  id: serial("id").primaryKey(),
+  my_maps_id: integer("my_maps_id")
+    .references(() => myMaps.id, { onDelete: "cascade" })
+    .notNull(),
+  name: text("name").default(""),
+  geometry: text("geometry").notNull().default(""),
+});
+
+/** Drawn point annotations (MapLibre Draw point), separate from graph nodes. */
+export const myMapsPoint = pgTable("my_map_point", {
+  id: serial("id").primaryKey(),
+  my_maps_id: integer("my_maps_id")
+    .references(() => myMaps.id, { onDelete: "cascade" })
+    .notNull(),
+  name: text("name").default(""),
+  lat: doublePrecision("lat").notNull().default(0),
+  lng: doublePrecision("lng").notNull().default(0),
+});
+
+/** Text box annotations placed on the map. */
+export const myMapsText = pgTable("my_map_text", {
+  id: serial("id").primaryKey(),
+  my_maps_id: integer("my_maps_id")
+    .references(() => myMaps.id, { onDelete: "cascade" })
+    .notNull(),
+  text: text("text").notNull().default(""),
+  lat: doublePrecision("lat").notNull().default(0),
+  lng: doublePrecision("lng").notNull().default(0),
+  font_size: integer("font_size").notNull().default(14),
+});
 
 export const schema = {
   user,
@@ -593,9 +631,13 @@ export const schema = {
   accessibilityReport,
   routeReport,
   myMaps,
+  myMapsCollaborator,
   myMapsEdge,
   myMapsNode,
   myMapsPolygon,
+  myMapsLine,
+  myMapsPoint,
+  myMapsText,
 };
 export type User = InferSelectModel<typeof user>;
 export type NodeOutside = InferSelectModel<typeof nodeOutside>;
@@ -619,6 +661,10 @@ export type BugReport = InferSelectModel<typeof bugReport>;
 export type AccessibilityReport = InferSelectModel<typeof accessibilityReport>;
 export type RouteReport = InferSelectModel<typeof routeReport>;
 export type MyMaps = InferSelectModel<typeof myMaps>;
+export type MyMapsCollaborator = InferSelectModel<typeof myMapsCollaborator>;
 export type MyMapsEdge = InferSelectModel<typeof myMapsEdge>;
 export type MyMapsNode = InferSelectModel<typeof myMapsNode>;
 export type MyMapsPolygon = InferSelectModel<typeof myMapsPolygon>;
+export type MyMapsLine = InferSelectModel<typeof myMapsLine>;
+export type MyMapsPoint = InferSelectModel<typeof myMapsPoint>;
+export type MyMapsText = InferSelectModel<typeof myMapsText>;
