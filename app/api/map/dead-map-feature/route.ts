@@ -3,16 +3,16 @@ import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth-guards";
 import {
-  listDeadFeatures,
+  listDeadMapFeatures,
   setInsideNodeDead,
   setOutsideNodeDead,
-} from "@/lib/dead-features";
+} from "@/lib/dead-map-features";
 import { reloadGraph } from "@/lib/navigation";
 import { parseBoolean, parseId } from "@/lib/utils";
 
-const ROUTE = "/api/map/dead-feature";
+const ROUTE = "/api/map/dead-map-feature";
 
-const deadFeatureBodySchema = z.object({
+const deadMapFeatureBodySchema = z.object({
   scope: z.enum(["outside", "inside"]),
   id: z.number().int().positive(),
   value: z.boolean(),
@@ -23,11 +23,11 @@ export async function GET() {
   if (error) return error;
 
   try {
-    const lists = await listDeadFeatures();
+    const lists = await listDeadMapFeatures();
     return NextResponse.json(lists);
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return NextResponse.json({ error: "Failed to fetch dead features", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
+    return NextResponse.json({ error: "Failed to fetch dead map features", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     if (!id) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     if (value == null) return NextResponse.json({ error: "Invalid value (must be boolean)" }, { status: 400 });
 
-    const parsed = deadFeatureBodySchema.safeParse({
+    const parsed = deadMapFeatureBodySchema.safeParse({
       scope: body.scope,
       id,
       value,
@@ -66,10 +66,10 @@ export async function POST(req: Request) {
     }
 
     await reloadGraph().catch(console.error);
-    const lists = await listDeadFeatures();
+    const lists = await listDeadMapFeatures();
     return NextResponse.json(lists);
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return NextResponse.json({ error: "Failed to update dead feature", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
+    return NextResponse.json({ error: "Failed to update dead map feature", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
   }
 }

@@ -27,7 +27,7 @@ Use this file to onboard quickly. Do not edit the plan file (e.g. `codebase_refa
 | `app/mymaps/workspace.tsx`            | Personal maps editor (draw tools, collaborators).                                                       |
 | `app/mymaps/[id]/view/page.tsx`       | Public/shared MyMaps view.                                                                              |
 | `app/report/*`                        | Bug / accessibility / route report forms.                                                               |
-| `app/admin/reports/page.tsx`          | Admin report inbox + dead-feature tools.                                                                |
+| `app/admin/reports/page.tsx`          | Admin report inbox + dead map feature tools.                                                            |
 | `app/account/*`                       | Login, signup, settings.                                                                                |
 | `components/NavModeMap.tsx`           | Renders route path + nodes on map (no NavMode CRUD; modes are hardcoded).                               |
 | `components/ComboboxSelect.tsx`       | Shared searchable select (shadcn Command + Popover).                                                    |
@@ -41,7 +41,7 @@ Use this file to onboard quickly. Do not edit the plan file (e.g. `codebase_refa
 | `db/schema.ts`                        | Drizzle schema (PostgreSQL). `route_destination` has composite PK `(route_id, destination_id)`.         |
 | `app/api/mymaps/**`                   | MyMaps CRUD + collaborator APIs.                                                                        |
 | `app/api/report/**`                   | Report submission + admin list endpoints.                                                               |
-| `app/api/map/dead-feature`            | Mark outdoor/indoor nodes dead (admin).                                                                 |
+| `app/api/map/dead-map-feature`        | Mark outdoor/indoor map nodes dead (admin).                                                             |
 
 ---
 
@@ -60,7 +60,7 @@ Use this file to onboard quickly. Do not edit the plan file (e.g. `codebase_refa
 
 - **Public (no login)**: Building/destination reads (`GET /api/destination`, `GET /api/destination/outsideNode`, floorplan reads), routing (`POST /api/map/navigateTo`), shareable route views (`GET /api/shareableroute?id=…`), and public MyMaps reads when `is_public_view`.
 - **Session required**: Favorites (`/api/favorites`), favorite trips (`/api/destination-chains`), account profile updates (`PATCH /api/users/[id]` for self), shareable route management (`POST/PUT/DELETE /api/shareableroute`, `GET /api/shareableroute/all`), MyMaps mutations.
-- **Admin required**: Map/destination mutations (nodes, edges, buildings), user list (`GET /api/users`), admin flag changes (`PATCH /api/users/[id]` `isAdmin`), user deletion (`DELETE /api/users/[id]`), report admin GETs, dead-feature mutations.
+- **Admin required**: Map/destination mutations (nodes, edges, buildings), user list (`GET /api/users`), admin flag changes (`PATCH /api/users/[id]` `isAdmin`), user deletion (`DELETE /api/users/[id]`), report admin GETs, dead map feature mutations.
 - **DEV Mode**: In development only, set `DEV_Mode=true` in `.env` to skip all page/API auth guards (`lib/dev-mode.ts`; client receives the flag via `DevModeProvider` in `app/layout.tsx`). Ignored when `NODE_ENV=production`.
 - **Page guards**: `/account/setting` requires login; editor pages require admin. Login and signup stay public.
 - **Pattern**: Prefer `lib/auth-guards`:

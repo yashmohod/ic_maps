@@ -110,7 +110,7 @@ export default function RouteEditor(): JSX.Element {
     | "delete"
     | "navMode"
     | "destination"
-    | "deadFeature";
+    | "deadMapFeature";
   const [mode, setMode] = useState<EditorMode>("select");
   const [showNodes, setShowNodes] = useState<boolean>(true);
 
@@ -367,13 +367,13 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
-  async function toggleDeadFeatureNode(id: number) {
+  async function toggleDeadMapFeatureNode(id: number) {
     const cur = markers.find((m) => m.id === id);
     if (!cur) return;
 
     const nextValue = !cur.isDead;
     try {
-      const req = await fetch(withBasePath("/api/map/dead-feature"), {
+      const req = await fetch(withBasePath("/api/map/dead-map-feature"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -383,7 +383,7 @@ export default function RouteEditor(): JSX.Element {
         }),
       });
       if (req.status !== 200) {
-        toast.error("Could not update dead feature status.");
+        toast.error("Could not update dead map feature status.");
         return;
       }
       const lists = (await req.json()) as {
@@ -394,10 +394,12 @@ export default function RouteEditor(): JSX.Element {
       setMarkers((prev) =>
         prev.map((m) => ({ ...m, isDead: deadOutside.has(m.id) })),
       );
-      toast.success(nextValue ? "Marked as dead." : "Removed from dead list.");
+      toast.success(
+        nextValue ? "Marked as dead map feature." : "Removed from dead map list.",
+      );
     } catch (err) {
       console.error(err);
-      toast.error("Failed to update dead feature.");
+      toast.error("Failed to update dead map feature.");
     }
   }
 
@@ -555,8 +557,8 @@ export default function RouteEditor(): JSX.Element {
     if (modeRef.current === "delete") return void deleteNode(id);
     if (modeRef.current === "destination") return void addToBuildingGroup(id);
     if (modeRef.current === "navMode") return void setNavModeNode(id);
-    if (modeRef.current === "deadFeature")
-      return void toggleDeadFeatureNode(id);
+    if (modeRef.current === "deadMapFeature")
+      return void toggleDeadMapFeatureNode(id);
 
     if (modeRef.current === "select") {
       const cur = selectedRef.current;
@@ -786,13 +788,13 @@ export default function RouteEditor(): JSX.Element {
 
           <button
             className={`min-h-11 px-3 py-2 rounded ${
-              mode === "deadFeature"
+              mode === "deadMapFeature"
                 ? "bg-destructive text-white"
                 : "bg-secondary text-secondary-foreground"
             }`}
-            onClick={() => setMode("deadFeature")}
+            onClick={() => setMode("deadMapFeature")}
           >
-            Dead Feature
+            Dead Map Feature
           </button>
 
           <div className="mx-2 w-px h-5 bg-border" />
@@ -875,11 +877,11 @@ export default function RouteEditor(): JSX.Element {
           </div>
         )}
 
-        {mode === "deadFeature" && (
+        {mode === "deadMapFeature" && (
           <div className={`rounded-xl px-3 py-2 ${panelClass}`}>
             <span className="text-sm font-medium">
-              Click nodes to add or remove from the dead feature list. Dead
-              nodes are highlighted in red.
+              Click nodes to add or remove from the dead map feature list. Dead
+              map nodes are highlighted in red.
             </span>
           </div>
         )}
@@ -960,12 +962,12 @@ export default function RouteEditor(): JSX.Element {
                 mode === "destination" && curDestinationNodes.has(m.id);
               const isNavModeSet =
                 mode === "navMode" && Boolean(m[navModes[curNavMode].param]);
-              const isDeadFeature = mode === "deadFeature" && m.isDead;
+              const isDeadMapFeature = mode === "deadMapFeature" && m.isDead;
               const isDrawSel = mode === "select" && m.id === selectedId;
               if (mode === "navMode" && false) return null;
 
               const colorClass =
-                isDrawSel || isNavModeSet || isDeadFeature
+                isDrawSel || isNavModeSet || isDeadMapFeature
                   ? "bg-destructive"
                   : isBuildingSel
                     ? "bg-brand-cta"
