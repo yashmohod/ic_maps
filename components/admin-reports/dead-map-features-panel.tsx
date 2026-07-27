@@ -6,21 +6,21 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import type { DeadFeatureLists } from "@/lib/dead-features";
+import type { DeadMapFeatureLists } from "@/lib/dead-map-features-client";
 import { cn } from "@/lib/utils";
 
-type DeadFeaturesPanelProps = {
+type DeadMapFeaturesPanelProps = {
   className?: string;
   refreshKey?: number;
-  onListsChange?: (lists: DeadFeatureLists) => void;
+  onListsChange?: (lists: DeadMapFeatureLists) => void;
 };
 
-export function DeadFeaturesPanel({
+export function DeadMapFeaturesPanel({
   className,
   refreshKey = 0,
   onListsChange,
-}: DeadFeaturesPanelProps) {
-  const [lists, setLists] = useState<DeadFeatureLists>({
+}: DeadMapFeaturesPanelProps) {
+  const [lists, setLists] = useState<DeadMapFeatureLists>({
     outsideIds: [],
     insideIds: [],
   });
@@ -30,13 +30,13 @@ export function DeadFeaturesPanel({
   const loadLists = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch(withBasePath("/api/map/dead-feature"));
-      if (!resp.ok) throw new Error("Failed to load dead features");
-      const payload = (await resp.json()) as DeadFeatureLists;
+      const resp = await fetch(withBasePath("/api/map/dead-map-feature"));
+      if (!resp.ok) throw new Error("Failed to load dead map features");
+      const payload = (await resp.json()) as DeadMapFeatureLists;
       setLists(payload);
       onListsChange?.(payload);
     } catch {
-      toast.error("Could not load dead feature lists");
+      toast.error("Could not load dead map feature lists");
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export function DeadFeaturesPanel({
     const key = `${scope}:${id}`;
     setUpdatingId(key);
     try {
-      const resp = await fetch(withBasePath("/api/map/dead-feature"), {
+      const resp = await fetch(withBasePath("/api/map/dead-map-feature"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -60,11 +60,11 @@ export function DeadFeaturesPanel({
         }),
       });
       if (!resp.ok) throw new Error("Update failed");
-      const payload = (await resp.json()) as DeadFeatureLists;
+      const payload = (await resp.json()) as DeadMapFeatureLists;
       setLists(payload);
       onListsChange?.(payload);
     } catch {
-      toast.error("Could not remove dead feature");
+      toast.error("Could not remove dead map feature");
     } finally {
       setUpdatingId(null);
     }
@@ -81,7 +81,7 @@ export function DeadFeaturesPanel({
   return (
     <div className={cn("grid gap-4 sm:grid-cols-2", className)}>
       <div className="border-border rounded-xl border p-3">
-        <h3 className="mb-2 text-sm font-semibold">Dead outside nodes</h3>
+        <h3 className="mb-2 text-sm font-semibold">Dead outdoor map nodes</h3>
         {lists.outsideIds.length === 0 ? (
           <p className="text-muted-foreground text-xs">None marked dead.</p>
         ) : (
@@ -111,7 +111,7 @@ export function DeadFeaturesPanel({
       </div>
 
       <div className="border-border rounded-xl border p-3">
-        <h3 className="mb-2 text-sm font-semibold">Dead inside nodes</h3>
+        <h3 className="mb-2 text-sm font-semibold">Dead indoor map nodes</h3>
         {lists.insideIds.length === 0 ? (
           <p className="text-muted-foreground text-xs">None marked dead.</p>
         ) : (

@@ -8,11 +8,11 @@ import { toast } from "sonner";
 import { RouteReportFloorplanPreview } from "@/components/admin-reports/route-report-floorplan-preview";
 import { RouteReportOutdoorPreview } from "@/components/admin-reports/route-report-outdoor-preview";
 import { ReportDateFilter } from "@/components/admin-reports/report-date-filter";
-import { DeadFeaturesPanel } from "@/components/admin-reports/dead-features-panel";
+import { DeadMapFeaturesPanel } from "@/components/admin-reports/dead-map-features-panel";
 import {
-  markRouteReportFeatureDead,
-  routeReportDeadTarget,
-} from "@/lib/dead-features";
+  markRouteReportMapFeatureDead,
+  routeReportDeadMapTarget,
+} from "@/lib/dead-map-features-client";
 import { HomeLogo } from "@/components/home-logo";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -317,7 +317,7 @@ export default function AdminReportsPage() {
   const selectedDeadTarget = useMemo(
     () =>
       selectedRouteReport
-        ? routeReportDeadTarget(selectedRouteReport, isIndoorRouteReport)
+        ? routeReportDeadMapTarget(selectedRouteReport, isIndoorRouteReport)
         : null,
     [selectedRouteReport],
   );
@@ -326,15 +326,15 @@ export default function AdminReportsPage() {
     if (!selectedDeadTarget) return;
     setMarkingDead(true);
     try {
-      const lists = await markRouteReportFeatureDead(selectedDeadTarget, true);
+      const lists = await markRouteReportMapFeatureDead(selectedDeadTarget, true);
       if (!lists) {
-        toast.error("Could not mark feature as dead");
+        toast.error("Could not mark map feature as dead");
         return;
       }
       setDeadListRefreshKey((key) => key + 1);
-      toast.success("Feature added to dead list");
+      toast.success("Map feature added to dead list");
     } catch {
-      toast.error("Could not mark feature as dead");
+      toast.error("Could not mark map feature as dead");
     } finally {
       setMarkingDead(false);
     }
@@ -591,13 +591,13 @@ export default function AdminReportsPage() {
 
               <Card className="min-w-0">
                 <CardHeader>
-                  <CardTitle>Dead features</CardTitle>
+                  <CardTitle>Dead map features</CardTitle>
                   <CardDescription>
-                    Outdoor and indoor nodes marked unusable for routing.
+                    Outdoor and indoor map nodes marked unusable for routing.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <DeadFeaturesPanel refreshKey={deadListRefreshKey} />
+                  <DeadMapFeaturesPanel refreshKey={deadListRefreshKey} />
                 </CardContent>
               </Card>
             </div>
@@ -660,7 +660,7 @@ export default function AdminReportsPage() {
                       >
                         {markingDead
                           ? "Marking..."
-                          : "Add feature to dead list"}
+                          : "Add map feature to dead list"}
                       </Button>
                     ) : (
                       <p className="text-muted-foreground text-xs">

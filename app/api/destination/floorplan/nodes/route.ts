@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
 import { stripBasePath } from "@/lib/base-path";
-import { setInsideNodeDead } from "@/lib/dead-features";
+import { setInsideNodeDead } from "@/lib/dead-map-features";
 import { reloadGraph } from "@/lib/navigation";
 import { isFiniteNumber, parseId } from "@/lib/utils";
 
