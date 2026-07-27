@@ -30,6 +30,8 @@ type Props = {
   position?: DrawPosition;
   controls?: DrawControls;
   displayControlsDefault?: boolean;
+  /** Active draw color for in-progress preview styles. */
+  activeColor?: string;
 
   /** Drawn features to sync (polygons, lines, points). */
   features?: Feature[];
@@ -44,31 +46,33 @@ type Props = {
   onModeChange?: (e: unknown, draw: MapLibreDraw) => void;
 };
 
-function fallbackStyles() {
+function fallbackStyles(activeColor = "#35D5A4") {
+  const cold = "#1a5276";
+  const hot = activeColor;
   return [
     {
       id: "gl-draw-polygon-fill.cold",
       type: "fill",
       filter: ["all", ["==", "$type", "Polygon"], ["!=", "active", "true"]],
-      paint: { "fill-color": "#1a5276", "fill-opacity": 0.4 },
+      paint: { "fill-color": cold, "fill-opacity": 0.4 },
     },
     {
       id: "gl-draw-polygon-fill.hot",
       type: "fill",
       filter: ["all", ["==", "$type", "Polygon"], ["==", "active", "true"]],
-      paint: { "fill-color": "#35D5A4", "fill-opacity": 0.4 },
+      paint: { "fill-color": hot, "fill-opacity": 0.4 },
     },
     {
       id: "gl-draw-lines.cold",
       type: "line",
       filter: ["all", ["==", "$type", "LineString"], ["!=", "active", "true"]],
-      paint: { "line-color": "#1a5276", "line-width": 2 },
+      paint: { "line-color": cold, "line-width": 2 },
     },
     {
       id: "gl-draw-lines.hot",
       type: "line",
       filter: ["all", ["==", "$type", "LineString"], ["==", "active", "true"]],
-      paint: { "line-color": "#35D5A4", "line-width": 2 },
+      paint: { "line-color": hot, "line-width": 2 },
     },
     {
       id: "gl-draw-points.cold",
@@ -81,7 +85,7 @@ function fallbackStyles() {
       ],
       paint: {
         "circle-radius": 5,
-        "circle-color": "#1a5276",
+        "circle-color": cold,
         "circle-stroke-width": 2,
         "circle-stroke-color": "#ffffff",
       },
@@ -95,13 +99,13 @@ function fallbackStyles() {
         ["!=", "meta", "midpoint"],
         ["==", "active", "true"],
       ],
-      paint: { "circle-radius": 5, "circle-color": "#35D5A4" },
+      paint: { "circle-radius": 5, "circle-color": hot },
     },
     {
       id: "gl-draw-points.mid",
       type: "circle",
       filter: ["all", ["==", "$type", "Point"], ["==", "meta", "midpoint"]],
-      paint: { "circle-radius": 3, "circle-color": "#35D5A4" },
+      paint: { "circle-radius": 3, "circle-color": hot },
     },
   ];
 }
@@ -140,6 +144,7 @@ export default function DrawControl({
   position = "top-left",
   controls = { polygon: true },
   displayControlsDefault = false,
+  activeColor = "#35D5A4",
   features,
   polys,
   onReady,
@@ -262,7 +267,7 @@ export default function DrawControl({
     const draw = new MapLibreDraw({
       displayControlsDefault,
       controls,
-      styles: fallbackStyles(),
+      styles: fallbackStyles(activeColor),
     });
 
     map.addControl(draw as any, position);
@@ -300,7 +305,7 @@ export default function DrawControl({
       handlersRef.current.onReady?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, position, displayControlsDefault, controlsKey]);
+  }, [map, position, displayControlsDefault, controlsKey, activeColor]);
 
   // ✅ also resync any time features change AFTER draw exists
   useEffect(() => {

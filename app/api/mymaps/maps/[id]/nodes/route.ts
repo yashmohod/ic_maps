@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { myMapsEdge, myMapsNode } from "@/db/schema";
 import { getSession, requireSession } from "@/lib/auth-guards";
+import { hexColorSchema } from "@/lib/mymaps-color";
 import {
   getErrorDetail,
   requireMapEditable,
@@ -21,6 +22,7 @@ const postSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   name: z.string().max(256).optional().default(""),
+  color: hexColorSchema,
 });
 
 const putSchema = z.object({
@@ -28,12 +30,20 @@ const putSchema = z.object({
   lat: z.number().optional(),
   lng: z.number().optional(),
   name: z.string().max(256).optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/)
+    .optional(),
 });
 
 export async function GET(_req: Request, { params }: Params) {
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const session = await getSession();
     const userId = session?.user?.id ?? null;
@@ -48,7 +58,15 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ nodes }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return NextResponse.json({ error: "Could not fetch nodes", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not fetch nodes",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -58,13 +76,18 @@ export async function POST(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const gate = await requireMapEditable(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
@@ -74,18 +97,27 @@ export async function POST(req: Request, { params }: Params) {
       );
     }
 
-    const { lat, lng, name } = parsed.data;
-    if (!isValidLatLng(lat, lng)) return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
+    const { lat, lng, name, color } = parsed.data;
+    if (!isValidLatLng(lat, lng))
+      return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
 
     const [inserted] = await db
       .insert(myMapsNode)
-      .values({ my_maps_id: mapId, lat, lng, name: name ?? "" })
+      .values({ my_maps_id: mapId, lat, lng, name: name ?? "", color })
       .returning();
 
     return NextResponse.json({ node: inserted }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Insert failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -95,13 +127,18 @@ export async function PUT(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const gate = await requireMapEditable(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
@@ -111,7 +148,7 @@ export async function PUT(req: Request, { params }: Params) {
       );
     }
 
-    const { nodeId, lat, lng, name } = parsed.data;
+    const { nodeId, lat, lng, name, color } = parsed.data;
 
     const updated = await db.transaction(async (tx) => {
       const [existing] = await tx
@@ -128,11 +165,17 @@ export async function PUT(req: Request, { params }: Params) {
         throw new Error("INVALID_LAT_LNG");
       }
 
-      const updates: { lat: number; lng: number; name?: string } = {
+      const updates: {
+        lat: number;
+        lng: number;
+        name?: string;
+        color?: string;
+      } = {
         lat: nextLat,
         lng: nextLng,
       };
       if (name !== undefined) updates.name = name;
+      if (color !== undefined) updates.color = color;
 
       const [row] = await tx
         .update(myMapsNode)
@@ -174,14 +217,23 @@ export async function PUT(req: Request, { params }: Params) {
       return row;
     });
 
-    if (!updated) return NextResponse.json({ error: "Node not found" }, { status: 404 });
+    if (!updated)
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
     return NextResponse.json({ node: updated }, { status: 200 });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "INVALID_LAT_LNG") {
       return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
     }
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Update failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -191,7 +243,11 @@ export async function DELETE(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const gate = await requireMapEditable(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
@@ -202,18 +258,31 @@ export async function DELETE(req: Request, { params }: Params) {
       const body = await req.json().catch(() => null);
       nodeId = parseId((body as { nodeId?: unknown } | null)?.nodeId);
     }
-    if (!nodeId) return NextResponse.json({ error: "Missing or invalid nodeId" }, { status: 400 });
+    if (!nodeId)
+      return NextResponse.json(
+        { error: "Missing or invalid nodeId" },
+        { status: 400 },
+      );
 
     const result = await db
       .delete(myMapsNode)
       .where(and(eq(myMapsNode.id, nodeId), eq(myMapsNode.my_maps_id, mapId)))
       .returning({ id: myMapsNode.id });
 
-    if (result.length === 0) return NextResponse.json({ error: "Node not found" }, { status: 404 });
+    if (result.length === 0)
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Delete failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

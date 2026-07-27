@@ -34,6 +34,7 @@ export type EdgeIndexEntry = {
   to: number;
   biDirectional: boolean;
   incline: number;
+  color?: string;
 };
 
 export type GeoJSONFeatureCollection = {

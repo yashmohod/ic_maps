@@ -45,7 +45,13 @@ describe("remapEdgeEndpoints", () => {
       idMap,
     );
     expect(remapped).toEqual([
-      { from: 100, to: 200, biDirectional: false, incline: 1.5 },
+      {
+        from: 100,
+        to: 200,
+        biDirectional: false,
+        incline: 1.5,
+        color: "#35D5A4",
+      },
     ]);
   });
 });

@@ -524,6 +524,7 @@ export const myMapsNode = pgTable("my_maps_node", {
   name: text("name").default(""),
   lat: doublePrecision("lat").notNull().default(0),
   lng: doublePrecision("lng").notNull().default(0),
+  color: text("color").notNull().default("#35D5A4"),
 });
 
 /** Table name is my_map_polygon (singular) for historical reasons. */
@@ -536,6 +537,7 @@ export const myMapsPolygon = pgTable("my_map_polygon", {
     .notNull(),
   name: text("name").default(""),
   polygon: text("polygon").default(""),
+  color: text("color").notNull().default("#35D5A4"),
 });
 
 /** Table name is my_map_edge (singular) for historical reasons. */
@@ -556,6 +558,7 @@ export const myMapsEdge = pgTable(
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
     distance: doublePrecision("distance").notNull(), // meters
     incline: doublePrecision("incline").notNull().default(0), // meters
+    color: text("color").notNull().default("#35D5A4"),
   },
   (t) => [
     unique("my_map_edge_pair_unique").on(t.node_a_id, t.node_b_id),

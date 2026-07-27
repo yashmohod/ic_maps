@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { myMapsPolygon } from "@/db/schema";
 import { getSession, requireSession } from "@/lib/auth-guards";
+import { hexColorSchema } from "@/lib/mymaps-color";
 import {
   getErrorDetail,
   requireMapEditable,
@@ -19,18 +20,27 @@ const ROUTE = "/api/mymaps/maps/[id]/polygons";
 const postSchema = z.object({
   name: z.string().trim().min(1).max(256).optional().default(""),
   polygon: z.unknown(),
+  color: hexColorSchema,
 });
 
 const putSchema = z.object({
   polygonId: z.coerce.number().int().positive(),
   name: z.string().trim().min(1).max(256).optional(),
   polygon: z.unknown().optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/)
+    .optional(),
 });
 
 export async function GET(_req: Request, { params }: Params) {
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const session = await getSession();
     const userId = session?.user?.id ?? null;
@@ -45,7 +55,15 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ polygons }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return NextResponse.json({ error: "Could not fetch polygons", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not fetch polygons",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -55,13 +73,18 @@ export async function POST(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const gate = await requireMapEditable(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
@@ -73,13 +96,25 @@ export async function POST(req: Request, { params }: Params) {
 
     const poly = parsePolygon(parsed.data.polygon);
     if (!poly) {
-      return NextResponse.json({ error: "Invalid polygon", ...(process.env.NODE_ENV !== "production" ? { detail: String("polygon must be valid JSON (string or object)") } : {}) }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: "Invalid polygon",
+          ...(process.env.NODE_ENV !== "production"
+            ? {
+                detail: String("polygon must be valid JSON (string or object)"),
+              }
+            : {}),
+        },
+        { status: 400 },
+      );
     }
 
     const name = parsed.data.name ?? "";
+    const color = parsed.data.color;
     const props = (poly.polyObj.properties ?? {}) as Record<string, unknown>;
     props.name = name;
     props.myMapsId = mapId;
+    props.color = color;
     poly.polyObj.properties = props;
     const polyStr = JSON.stringify(poly.polyObj);
 
@@ -89,6 +124,7 @@ export async function POST(req: Request, { params }: Params) {
         my_maps_id: mapId,
         name,
         polygon: polyStr,
+        color,
       })
       .returning();
 
@@ -107,7 +143,15 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Insert failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -117,13 +161,18 @@ export async function PUT(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const gate = await requireMapEditable(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
 
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
@@ -133,7 +182,7 @@ export async function PUT(req: Request, { params }: Params) {
       );
     }
 
-    const { polygonId, name, polygon } = parsed.data;
+    const { polygonId, name, polygon, color } = parsed.data;
 
     const [existing] = await db
       .select()
@@ -146,32 +195,51 @@ export async function PUT(req: Request, { params }: Params) {
       )
       .limit(1);
 
-    if (!existing) return NextResponse.json({ error: "Polygon not found" }, { status: 404 });
+    if (!existing)
+      return NextResponse.json({ error: "Polygon not found" }, { status: 404 });
 
-    const updates: { name?: string; polygon?: string } = {};
+    const updates: { name?: string; polygon?: string; color?: string } = {};
     if (name !== undefined) updates.name = name;
+    if (color !== undefined) updates.color = color;
 
     if (polygon !== undefined) {
       const poly = parsePolygon(polygon);
       if (!poly) {
-        return NextResponse.json({ error: "Invalid polygon", ...(process.env.NODE_ENV !== "production" ? { detail: String("polygon must be valid JSON (string or object)") } : {}) }, { status: 400 });
+        return NextResponse.json(
+          {
+            error: "Invalid polygon",
+            ...(process.env.NODE_ENV !== "production"
+              ? {
+                  detail: String(
+                    "polygon must be valid JSON (string or object)",
+                  ),
+                }
+              : {}),
+          },
+          { status: 400 },
+        );
       }
       const props = (poly.polyObj.properties ?? {}) as Record<string, unknown>;
       props.name = name ?? existing.name;
       props.myMapsId = mapId;
       props.polygonId = polygonId;
+      props.color = color ?? existing.color;
       poly.polyObj.properties = props;
       updates.polygon = JSON.stringify(poly.polyObj);
-    } else if (name !== undefined && existing.polygon) {
+    } else if (
+      (name !== undefined || color !== undefined) &&
+      existing.polygon
+    ) {
       const poly = parsePolygon(existing.polygon);
       if (poly) {
         const props = (poly.polyObj.properties ?? {}) as Record<
           string,
           unknown
         >;
-        props.name = name;
+        props.name = name ?? existing.name;
         props.polygonId = polygonId;
         props.myMapsId = mapId;
+        props.color = color ?? existing.color;
         poly.polyObj.properties = props;
         updates.polygon = JSON.stringify(poly.polyObj);
       }
@@ -186,7 +254,15 @@ export async function PUT(req: Request, { params }: Params) {
     return NextResponse.json({ polygon: updated }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Update failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -196,7 +272,11 @@ export async function DELETE(req: Request, { params }: Params) {
 
   try {
     const mapId = parseId((await params).id);
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid id" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid id" },
+        { status: 400 },
+      );
 
     const gate = await requireMapEditable(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
@@ -207,7 +287,11 @@ export async function DELETE(req: Request, { params }: Params) {
       const body = await req.json().catch(() => null);
       polygonId = parseId((body as { polygonId?: unknown } | null)?.polygonId);
     }
-    if (!polygonId) return NextResponse.json({ error: "Missing or invalid polygonId" }, { status: 400 });
+    if (!polygonId)
+      return NextResponse.json(
+        { error: "Missing or invalid polygonId" },
+        { status: 400 },
+      );
 
     const result = await db
       .delete(myMapsPolygon)
@@ -219,11 +303,20 @@ export async function DELETE(req: Request, { params }: Params) {
       )
       .returning({ id: myMapsPolygon.id });
 
-    if (result.length === 0) return NextResponse.json({ error: "Polygon not found" }, { status: 404 });
+    if (result.length === 0)
+      return NextResponse.json({ error: "Polygon not found" }, { status: 404 });
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Delete failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

@@ -29,6 +29,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { parseLineFeature, parsePolygonFeature } from "@/lib/mymaps-geo";
+import { MYMAPS_DEFAULT_COLOR, normalizeHexColor } from "@/lib/mymaps-color";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import {
   borderMutedClass,
@@ -38,14 +39,26 @@ import {
 } from "@/lib/panel-classes";
 import type { ViewStateLite } from "@/lib/types/map";
 
-type SimpleNode = { id: number; lat: number; lng: number; name: string };
+type SimpleNode = {
+  id: number;
+  lat: number;
+  lng: number;
+  name: string;
+  color: string;
+};
 type EdgeRow = {
   id: number;
   from: number;
   to: number;
   biDirectional: boolean;
+  color: string;
 };
-type PolygonRow = { id: number; name: string; polygon: string };
+type PolygonRow = {
+  id: number;
+  name: string;
+  polygon: string;
+  color: string;
+};
 type LineRow = { id: number; name: string; geometry: string };
 type PointRow = { id: number; name: string; lat: number; lng: number };
 type TextRow = {
@@ -101,11 +114,18 @@ export default function MyMapPublicViewPage(): JSX.Element {
       setMapName(data.map?.name ?? "Shared map");
       setNodes(
         (data.nodes ?? []).map(
-          (n: { id: number; lat: number; lng: number; name?: string }) => ({
+          (n: {
+            id: number;
+            lat: number;
+            lng: number;
+            name?: string;
+            color?: string;
+          }) => ({
             id: n.id,
             lat: n.lat,
             lng: n.lng,
             name: n.name ?? "",
+            color: normalizeHexColor(n.color),
           }),
         ),
       );
@@ -117,15 +137,31 @@ export default function MyMapPublicViewPage(): JSX.Element {
             node_b_id: number;
             bi_directional: boolean;
             direction: boolean;
+            color?: string;
           }) => ({
             id: e.id,
             from: e.direction ? e.node_a_id : e.node_b_id,
             to: e.direction ? e.node_b_id : e.node_a_id,
             biDirectional: Boolean(e.bi_directional),
+            color: normalizeHexColor(e.color),
           }),
         ),
       );
-      setPolygons(data.polygons ?? []);
+      setPolygons(
+        (data.polygons ?? []).map(
+          (p: {
+            id: number;
+            name?: string;
+            polygon: string;
+            color?: string;
+          }) => ({
+            id: p.id,
+            name: p.name ?? "",
+            polygon: p.polygon,
+            color: normalizeHexColor(p.color),
+          }),
+        ),
+      );
       setLines(data.lines ?? []);
       setPoints(data.points ?? []);
       setTexts(data.texts ?? []);
@@ -146,7 +182,11 @@ export default function MyMapPublicViewPage(): JSX.Element {
     for (const row of polygons) {
       const f = parsePolygonFeature(row.polygon);
       if (!f) continue;
-      f.properties = { ...(f.properties ?? {}), name: row.name };
+      f.properties = {
+        ...(f.properties ?? {}),
+        name: row.name,
+        color: row.color || MYMAPS_DEFAULT_COLOR,
+      };
       out.push(f);
     }
     return out;
@@ -176,6 +216,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
         properties: {
           id: e.id,
           bidir: e.biDirectional ? 1 : 0,
+          color: e.color || MYMAPS_DEFAULT_COLOR,
         },
         geometry: {
           type: "LineString",
@@ -197,7 +238,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
       filter: ["==", ["get", "bidir"], 1],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#35D5A4",
+        "line-color": ["coalesce", ["get", "color"], MYMAPS_DEFAULT_COLOR],
         "line-width": 3,
         "line-opacity": 0.95,
       },
@@ -213,7 +254,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
       filter: ["==", ["get", "bidir"], 0],
       layout: { "line-cap": "butt", "line-join": "round" },
       paint: {
-        "line-color": "#003c71",
+        "line-color": ["coalesce", ["get", "color"], MYMAPS_DEFAULT_COLOR],
         "line-width": 3,
         "line-opacity": 0.95,
         "line-dasharray": [2, 1.5],
@@ -289,12 +330,26 @@ export default function MyMapPublicViewPage(): JSX.Element {
                 <Layer
                   id="mymap-view-poly-fill"
                   type="fill"
-                  paint={{ "fill-color": "#1a5276", "fill-opacity": 0.35 }}
+                  paint={{
+                    "fill-color": [
+                      "coalesce",
+                      ["get", "color"],
+                      MYMAPS_DEFAULT_COLOR,
+                    ],
+                    "fill-opacity": 0.35,
+                  }}
                 />
                 <Layer
                   id="mymap-view-poly-line"
                   type="line"
-                  paint={{ "line-color": "#35D5A4", "line-width": 2 }}
+                  paint={{
+                    "line-color": [
+                      "coalesce",
+                      ["get", "color"],
+                      MYMAPS_DEFAULT_COLOR,
+                    ],
+                    "line-width": 2,
+                  }}
                 />
               </Source>
             ) : null}
@@ -332,7 +387,10 @@ export default function MyMapPublicViewPage(): JSX.Element {
                 anchor="center"
               >
                 <div
-                  className="h-3 w-3 rounded-full border-2 border-white bg-[#003c71] shadow"
+                  className="h-3 w-3 rounded-full border-2 border-white shadow"
+                  style={{
+                    backgroundColor: n.color || MYMAPS_DEFAULT_COLOR,
+                  }}
                   title={n.name || `Node ${n.id}`}
                 />
               </Marker>

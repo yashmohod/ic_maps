@@ -17,6 +17,7 @@ import {
   EyeOff,
   Link2,
   MousePointer2,
+  Palette,
   Pencil,
   Plus,
   Share2,
@@ -72,6 +73,12 @@ import {
   translateFeature,
 } from "@/lib/mymaps-geo";
 import {
+  MYMAPS_COLOR_PALETTE,
+  MYMAPS_DEFAULT_COLOR,
+  isHexColor,
+  normalizeHexColor,
+} from "@/lib/mymaps-color";
+import {
   buildTransferPayload,
   myMapsTransferSchema,
   transferDownloadFilename,
@@ -112,9 +119,15 @@ type SimpleNode = {
   lat: number;
   lng: number;
   name: string;
+  color: string;
 };
 
-type PolygonRow = { id: number; name: string; polygon: string };
+type PolygonRow = {
+  id: number;
+  name: string;
+  polygon: string;
+  color: string;
+};
 type LineRow = { id: number; name: string; geometry: string };
 type PointRow = { id: number; name: string; lat: number; lng: number };
 type TextRow = {
@@ -132,7 +145,7 @@ type MapAccess = {
   canManageSharing: boolean;
 };
 
-type EditorMode = "select" | "draw" | "text" | "delete";
+type EditorMode = "select" | "draw" | "text" | "color" | "delete";
 type DrawTool = "point" | "line" | "polygon";
 
 type DrawEvent = { features: Feature[] };
@@ -228,10 +241,13 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const [texts, setTexts] = useState<TextRow[]>([]);
   const [mode, setMode] = useState<EditorMode>("select");
   const [drawTool, setDrawTool] = useState<DrawTool>("point");
+  const [drawColor, setDrawColor] = useState(MYMAPS_DEFAULT_COLOR);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [biDirectional, setBiDirectional] = useState(true);
   const biDirectionalRef = useRef(biDirectional);
   biDirectionalRef.current = biDirectional;
+  const drawColorRef = useRef(drawColor);
+  drawColorRef.current = drawColor;
 
   const [selectedPolygonId, setSelectedPolygonId] = useState<number | null>(
     null,
@@ -322,11 +338,18 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       setAccess(data.access ?? null);
       setNodes(
         (data.nodes ?? []).map(
-          (n: { id: number; lat: number; lng: number; name?: string }) => ({
+          (n: {
+            id: number;
+            lat: number;
+            lng: number;
+            name?: string;
+            color?: string;
+          }) => ({
             id: n.id,
             lat: n.lat,
             lng: n.lng,
             name: n.name ?? "",
+            color: normalizeHexColor(n.color),
           }),
         ),
       );
@@ -339,16 +362,32 @@ export default function MyMapsWorkspacePage(): JSX.Element {
             bi_directional: boolean;
             direction: boolean;
             incline?: number;
+            color?: string;
           }) => ({
             id: e.id,
             from: e.direction ? e.node_a_id : e.node_b_id,
             to: e.direction ? e.node_b_id : e.node_a_id,
             biDirectional: Boolean(e.bi_directional),
             incline: e.incline ?? 0,
+            color: normalizeHexColor(e.color),
           }),
         ),
       );
-      setPolygons(data.polygons ?? []);
+      setPolygons(
+        (data.polygons ?? []).map(
+          (p: {
+            id: number;
+            name?: string;
+            polygon: string;
+            color?: string;
+          }) => ({
+            id: p.id,
+            name: p.name ?? "",
+            polygon: p.polygon,
+            color: normalizeHexColor(p.color),
+          }),
+        ),
+      );
       setLines(data.lines ?? []);
       setPoints(data.points ?? []);
       setTexts(data.texts ?? []);
@@ -384,6 +423,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         id,
         polygonId: row.id,
         name: row.name,
+        color: row.color || MYMAPS_DEFAULT_COLOR,
       };
       out.push(f);
     }
@@ -441,6 +481,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           id: e.id,
           // MapLibre expression-friendly 1/0 (avoid boolean property quirks)
           bidir: e.biDirectional ? 1 : 0,
+          color: e.color || MYMAPS_DEFAULT_COLOR,
         },
         geometry: {
           type: "LineString",
@@ -462,7 +503,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       filter: ["==", ["get", "bidir"], 1],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#35D5A4",
+        "line-color": ["coalesce", ["get", "color"], MYMAPS_DEFAULT_COLOR],
         "line-width": 4,
         "line-opacity": 0.95,
       },
@@ -478,7 +519,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       filter: ["==", ["get", "bidir"], 0],
       layout: { "line-cap": "butt", "line-join": "round" },
       paint: {
-        "line-color": "#003c71",
+        "line-color": ["coalesce", ["get", "color"], MYMAPS_DEFAULT_COLOR],
         "line-width": 4,
         "line-opacity": 0.95,
         "line-dasharray": [2, 1.5],
@@ -740,7 +781,12 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat, lng, name: "" }),
+        body: JSON.stringify({
+          lat,
+          lng,
+          name: "",
+          color: drawColorRef.current,
+        }),
       },
     );
     if (!res.ok) {
@@ -783,6 +829,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         from,
         to,
         biDirectional: bidir,
+        color: drawColorRef.current,
       }),
     });
     if (activeMapIdRef.current !== mapId) return;
@@ -803,6 +850,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           to: data.to,
           biDirectional: bidir,
           incline: 0,
+          color: data.edge?.color ?? drawColorRef.current,
         },
       ];
     });
@@ -1107,6 +1155,26 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         return;
       }
       const features = e.features ?? [];
+      if (m === "color") {
+        const edgeHit = features.find(
+          (f) =>
+            f.layer?.id === "mymap-edges-bidir" ||
+            f.layer?.id === "mymap-edges-oneway",
+        );
+        if (edgeHit?.properties?.id) {
+          void recolorEdge(Number(edgeHit.properties.id));
+          return;
+        }
+        const polyHit = features.find(
+          (f) =>
+            f.layer?.id === "mymap-poly-fill" ||
+            f.layer?.id === "mymap-poly-line",
+        );
+        if (polyHit?.properties?.polygonId) {
+          void recolorPolygon(Number(polyHit.properties.polygonId));
+        }
+        return;
+      }
       if (m === "delete") {
         const edgeHit = features.find(
           (f) =>
@@ -1173,6 +1241,10 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       void deleteNode(id);
       return;
     }
+    if (m === "color") {
+      void recolorNode(id);
+      return;
+    }
     if (m === "draw" && drawTool === "line") {
       // Click-to-connect while in line draw tool
       if (selectedRef.current == null) {
@@ -1187,6 +1259,111 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     setSelectedTextId(null);
     setSelectedPolygonId(null);
     setSelectedLineId(null);
+  }
+
+  async function recolorNode(id: number) {
+    if (!selectedMapId || !canEditRef.current) return;
+    const color = drawColorRef.current;
+    const prev = nodesRef.current.find((n) => n.id === id);
+    setNodes((rows) => rows.map((n) => (n.id === id ? { ...n, color } : n)));
+    nodesRef.current = nodesRef.current.map((n) =>
+      n.id === id ? { ...n, color } : n,
+    );
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/nodes`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeId: id, color }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setNodes((rows) => rows.map((n) => (n.id === id ? prev : n)));
+        nodesRef.current = nodesRef.current.map((n) =>
+          n.id === id ? prev : n,
+        );
+      }
+      toast.error("Could not update node color");
+      return;
+    }
+    const data = await res.json();
+    const next = data.node as SimpleNode;
+    setNodes((rows) => rows.map((n) => (n.id === id ? { ...n, ...next } : n)));
+    nodesRef.current = nodesRef.current.map((n) =>
+      n.id === id ? { ...n, ...next } : n,
+    );
+  }
+
+  async function recolorEdge(id: number) {
+    if (!selectedMapId || !canEditRef.current) return;
+    const color = drawColorRef.current;
+    const prev = edgesRef.current.find((e) => e.id === id);
+    setEdges((rows) => rows.map((e) => (e.id === id ? { ...e, color } : e)));
+    edgesRef.current = edgesRef.current.map((e) =>
+      e.id === id ? { ...e, color } : e,
+    );
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/edges`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edgeId: id, color }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setEdges((rows) => rows.map((e) => (e.id === id ? prev : e)));
+        edgesRef.current = edgesRef.current.map((e) =>
+          e.id === id ? prev : e,
+        );
+      }
+      toast.error("Could not update path color");
+      return;
+    }
+    const data = await res.json();
+    const nextColor = data.edge?.color ?? color;
+    setEdges((rows) =>
+      rows.map((e) => (e.id === id ? { ...e, color: nextColor } : e)),
+    );
+    edgesRef.current = edgesRef.current.map((e) =>
+      e.id === id ? { ...e, color: nextColor } : e,
+    );
+  }
+
+  async function recolorPolygon(id: number) {
+    if (!selectedMapId || !canEditRef.current) return;
+    const color = drawColorRef.current;
+    const prev = polygonsRef.current.find((p) => p.id === id);
+    setPolygons((rows) => rows.map((p) => (p.id === id ? { ...p, color } : p)));
+    polygonsRef.current = polygonsRef.current.map((p) =>
+      p.id === id ? { ...p, color } : p,
+    );
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/polygons`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ polygonId: id, color }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setPolygons((rows) => rows.map((p) => (p.id === id ? prev : p)));
+        polygonsRef.current = polygonsRef.current.map((p) =>
+          p.id === id ? prev : p,
+        );
+      }
+      toast.error("Could not update area color");
+      return;
+    }
+    const data = await res.json();
+    setPolygons((rows) =>
+      rows.map((p) => (p.id === id ? (data.polygon as PolygonRow) : p)),
+    );
+    polygonsRef.current = polygonsRef.current.map((p) =>
+      p.id === id ? (data.polygon as PolygonRow) : p,
+    );
   }
 
   const onDrawCreate = useCallback(
@@ -1220,7 +1397,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, polygon: feature }),
+            body: JSON.stringify({
+              name,
+              polygon: feature,
+              color: drawColorRef.current,
+            }),
           },
         );
         if (!res.ok) {
@@ -1313,12 +1494,47 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const mlMap = mapReady ? (mapRef.current?.getMap?.() ?? null) : null;
   const canEdit = Boolean(access?.canEdit);
 
+  const colorPicker = (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-medium">Color</p>
+      <div className="grid grid-cols-4 gap-1.5">
+        {MYMAPS_COLOR_PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-label={`Color ${c}`}
+            title={c}
+            onClick={() => setDrawColor(c)}
+            className={[
+              "h-7 w-full rounded-md border-2",
+              drawColor.toLowerCase() === c.toLowerCase()
+                ? "border-foreground ring-1 ring-foreground/30"
+                : "border-white/80",
+            ].join(" ")}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+      </div>
+      <label className="flex items-center gap-2 text-[11px] text-panel-muted-foreground">
+        <span className="shrink-0">Custom</span>
+        <input
+          type="color"
+          value={isHexColor(drawColor) ? drawColor : MYMAPS_DEFAULT_COLOR}
+          onChange={(e) => setDrawColor(e.target.value)}
+          className="h-7 w-full cursor-pointer rounded border border-border bg-transparent p-0.5"
+          aria-label="Custom color"
+        />
+      </label>
+    </div>
+  );
+
   const oneWayArrows = useMemo(() => {
     const out: Array<{
       id: number;
       lng: number;
       lat: number;
       bearing: number;
+      color: string;
     }> = [];
     for (const e of edges) {
       if (e.biDirectional) continue;
@@ -1330,6 +1546,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         lng: a.lng + (b.lng - a.lng) * 0.72,
         lat: a.lat + (b.lat - a.lat) * 0.72,
         bearing: bearingTo(a.lng, a.lat, b.lng, b.lat),
+        color: e.color || MYMAPS_DEFAULT_COLOR,
       });
     }
     return out;
@@ -1639,6 +1856,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     [
                       ["select", "Select", MousePointer2],
                       ["draw", "Draw", Pencil],
+                      ["color", "Color", Palette],
                       ["text", "Text", Type],
                       ["delete", "Delete", Trash2],
                     ] as const
@@ -1744,6 +1962,17 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                           Draw a path, or click two nodes to connect them.
                         </p>
                       ) : null}
+                      {colorPicker}
+                    </div>
+                  ) : null}
+
+                  {mode === "color" ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] leading-snug text-panel-muted-foreground">
+                        Pick a color, then click a node, path, or area to
+                        recolor it.
+                      </p>
+                      {colorPicker}
                     </div>
                   ) : null}
 
@@ -1868,7 +2097,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         id="mymap-poly-fill"
                         type="fill"
                         paint={{
-                          "fill-color": "#1a5276",
+                          "fill-color": [
+                            "coalesce",
+                            ["get", "color"],
+                            MYMAPS_DEFAULT_COLOR,
+                          ],
                           "fill-opacity": 0.35,
                         }}
                       />
@@ -1876,7 +2109,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         id="mymap-poly-line"
                         type="line"
                         paint={{
-                          "line-color": "#35D5A4",
+                          "line-color": [
+                            "coalesce",
+                            ["get", "color"],
+                            MYMAPS_DEFAULT_COLOR,
+                          ],
                           "line-width": 2,
                         }}
                       />
@@ -1979,9 +2216,12 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                             ? "cursor-grab active:cursor-grabbing"
                             : "",
                           selectedId === n.id
-                            ? "scale-125 bg-brand-cta"
-                            : "bg-[#003c71]",
+                            ? "scale-125 ring-2 ring-white"
+                            : "",
                         ].join(" ")}
+                        style={{
+                          backgroundColor: n.color || MYMAPS_DEFAULT_COLOR,
+                        }}
                         aria-label={`Node ${n.id}`}
                       />
                     </Marker>
@@ -1998,8 +2238,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       pitchAlignment="map"
                     >
                       <div
-                        className="pointer-events-none text-[10px] font-bold leading-none text-[#003c71]"
+                        className="pointer-events-none text-[10px] font-bold leading-none"
                         style={{
+                          color: a.color,
                           textShadow:
                             "0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff",
                         }}
@@ -2262,6 +2503,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       map={mlMap}
                       features={drawFeatures}
                       position="top-right"
+                      activeColor={drawColor}
                       displayControlsDefault={false}
                       controls={{
                         polygon: false,

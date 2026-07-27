@@ -85,7 +85,8 @@ export async function POST(req: Request, { params }: Params) {
       }
     }
 
-    const preparedPolygons: { name: string; polygon: string }[] = [];
+    const preparedPolygons: { name: string; polygon: string; color: string }[] =
+      [];
     for (const p of payload.polygons) {
       const poly = parsePolygon(p.polygon);
       if (!poly) {
@@ -97,10 +98,12 @@ export async function POST(req: Request, { params }: Params) {
       const props = (poly.polyObj.properties ?? {}) as Record<string, unknown>;
       props.name = p.name ?? "";
       props.myMapsId = mapId;
+      props.color = p.color;
       poly.polyObj.properties = props;
       preparedPolygons.push({
         name: p.name ?? "",
         polygon: JSON.stringify(poly.polyObj),
+        color: p.color,
       });
     }
 
@@ -153,6 +156,7 @@ export async function POST(req: Request, { params }: Params) {
             lat: n.lat,
             lng: n.lng,
             name: n.name ?? "",
+            color: n.color,
           })
           .returning();
         if (!inserted) continue;
@@ -200,6 +204,7 @@ export async function POST(req: Request, { params }: Params) {
           direction,
           distance,
           incline: e.incline,
+          color: e.color,
           name: "",
         });
       }
@@ -211,6 +216,7 @@ export async function POST(req: Request, { params }: Params) {
             my_maps_id: mapId,
             name: p.name,
             polygon: p.polygon,
+            color: p.color,
           })
           .returning();
         if (!inserted) continue;

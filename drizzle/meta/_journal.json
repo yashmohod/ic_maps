@@ -64,6 +64,13 @@
       "when": 1782136649250,
       "tag": "0008_drop_route_manager_outage",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782136649251,
+      "tag": "0009_mymaps_element_color",
+      "breakpoints": true
     }
   ]
 }

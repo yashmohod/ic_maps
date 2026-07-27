@@ -1,10 +1,13 @@
 import { z } from "zod";
 
+import { hexColorSchema, MYMAPS_DEFAULT_COLOR } from "@/lib/mymaps-color";
+
 const transferNodeSchema = z.object({
   id: z.number().int().positive(),
   lat: z.number(),
   lng: z.number(),
   name: z.string().max(256).optional().default(""),
+  color: hexColorSchema,
 });
 
 const transferEdgeSchema = z.object({
@@ -12,11 +15,13 @@ const transferEdgeSchema = z.object({
   to: z.number().int().positive(),
   biDirectional: z.boolean().optional().default(true),
   incline: z.number().optional().default(0),
+  color: hexColorSchema,
 });
 
 const transferPolygonSchema = z.object({
   name: z.string().max(256).optional().default(""),
   polygon: z.unknown(),
+  color: hexColorSchema,
 });
 
 const transferLineSchema = z.object({
@@ -61,6 +66,7 @@ export type RemappedEdge = {
   to: number;
   biDirectional: boolean;
   incline: number;
+  color: string;
 };
 
 /** Remap edge endpoints via old→new node id map; drop edges with missing or equal ends. */
@@ -70,6 +76,7 @@ export function remapEdgeEndpoints(
     to: number;
     biDirectional?: boolean;
     incline?: number;
+    color?: string;
   }>,
   idMap: Map<number, number>,
 ): RemappedEdge[] {
@@ -83,6 +90,7 @@ export function remapEdgeEndpoints(
       to,
       biDirectional: e.biDirectional ?? true,
       incline: e.incline ?? 0,
+      color: e.color ?? MYMAPS_DEFAULT_COLOR,
     });
   }
   return out;
@@ -125,14 +133,21 @@ export function toStoredLineGeometry(input: unknown): string | null {
 
 export function buildTransferPayload(input: {
   mapName?: string;
-  nodes: Array<{ id: number; lat: number; lng: number; name?: string }>;
+  nodes: Array<{
+    id: number;
+    lat: number;
+    lng: number;
+    name?: string;
+    color?: string;
+  }>;
   edges: Array<{
     from: number;
     to: number;
     biDirectional?: boolean;
     incline?: number;
+    color?: string;
   }>;
-  polygons: Array<{ name?: string; polygon: string }>;
+  polygons: Array<{ name?: string; polygon: string; color?: string }>;
   lines: Array<{ name?: string; geometry: string }>;
   points: Array<{ lat: number; lng: number; name?: string }>;
   texts: Array<{
@@ -151,16 +166,19 @@ export function buildTransferPayload(input: {
       lat: n.lat,
       lng: n.lng,
       name: n.name ?? "",
+      color: n.color ?? MYMAPS_DEFAULT_COLOR,
     })),
     edges: input.edges.map((e) => ({
       from: e.from,
       to: e.to,
       biDirectional: e.biDirectional ?? true,
       incline: e.incline ?? 0,
+      color: e.color ?? MYMAPS_DEFAULT_COLOR,
     })),
     polygons: input.polygons.map((p) => ({
       name: p.name ?? "",
       polygon: p.polygon,
+      color: p.color ?? MYMAPS_DEFAULT_COLOR,
     })),
     lines: input.lines.map((l) => ({
       name: l.name ?? "",
