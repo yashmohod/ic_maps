@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -11,6 +9,12 @@ import {
   parseReportDateQuery,
   reportCreatedAtConditions,
 } from "@/lib/report-date-query";
+import { savePrivateImage } from "@/lib/private-media";
+import {
+  REPORT_RATE_LIMIT,
+  clientIpFromRequest,
+  takeRateLimit,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -27,35 +31,6 @@ const accessibilityReportTextSchema = z
   .trim()
   .min(10, "Description must be at least 10 characters")
   .max(5000, "Description must be at most 5000 characters");
-
-function extensionFromMime(mime: string): string {
-  switch (mime) {
-    case "image/png":
-      return ".png";
-    case "image/jpeg":
-      return ".jpg";
-    case "image/webp":
-      return ".webp";
-    case "image/gif":
-      return ".gif";
-    default:
-      return ".bin";
-  }
-}
-
-function resolveExtension(file: File): string {
-  const extFromName = path.extname(file.name).toLowerCase();
-  if (
-    extFromName === ".png" ||
-    extFromName === ".jpg" ||
-    extFromName === ".jpeg" ||
-    extFromName === ".webp" ||
-    extFromName === ".gif"
-  ) {
-    return extFromName === ".jpeg" ? ".jpg" : extFromName;
-  }
-  return extensionFromMime(file.type);
-}
 
 export async function GET(req: Request) {
   const { error } = await requireAdmin();
@@ -90,11 +65,38 @@ export async function GET(req: Request) {
     return NextResponse.json({ reports });
   } catch (err: unknown) {
     console.error("[API /api/report/accessibility GET] error", err);
-    return NextResponse.json({ error: "Failed to fetch accessibility reports", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Failed to fetch accessibility reports",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(err instanceof Error ? err.message : String(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
 export async function POST(req: Request) {
+  const limit = takeRateLimit(
+    `report:a11y:${clientIpFromRequest(req)}`,
+    REPORT_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return NextResponse.json(
+      {
+        error: "Too many reports. Try again shortly.",
+        retryAfterMs: limit.retryAfterMs,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)),
+        },
+      },
+    );
+  }
+
   try {
     const formData = await req.formData();
     const textRaw = formData.get("text");
@@ -116,17 +118,26 @@ export async function POST(req: Request) {
     }
 
     if (photo != null && !(photo instanceof File)) {
-      return NextResponse.json({ error: "Invalid photo field" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid photo field" },
+        { status: 400 },
+      );
     }
 
     const file = photo instanceof File && photo.size > 0 ? photo : null;
 
     if (file) {
       if (!ALLOWED_MIME_TYPES.has(file.type)) {
-        return NextResponse.json({ error: "Unsupported file type. Use png/jpg/webp/gif." }, { status: 400 });
+        return NextResponse.json(
+          { error: "Unsupported file type. Use png/jpg/webp/gif." },
+          { status: 400 },
+        );
       }
       if (file.size > MAX_FILE_BYTES) {
-        return NextResponse.json({ error: "File too large. Max size is 10MB." }, { status: 413 });
+        return NextResponse.json(
+          { error: "File too large. Max size is 10MB." },
+          { status: 413 },
+        );
       }
     }
 
@@ -143,29 +154,27 @@ export async function POST(req: Request) {
       .returning({ id: accessibilityReport.id });
 
     if (!inserted) {
-      return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to create report" },
+        { status: 500 },
+      );
     }
 
     let photoPath: string | null = null;
 
     if (file) {
-      const ext = resolveExtension(file);
-      const fileName = `a11y_${inserted.id}_1${ext}`;
-      const relativePath = `/report/${fileName}`;
-      const uploadsDir = path.join(process.cwd(), "public", "report");
-      const savePath = path.join(uploadsDir, fileName);
-
       try {
-        await mkdir(uploadsDir, { recursive: true });
         const buffer = Buffer.from(await file.arrayBuffer());
-        await writeFile(savePath, buffer);
-
+        const { key } = await savePrivateImage({
+          kind: "reports",
+          buffer,
+          baseName: `a11y-${inserted.id}`,
+        });
         await db
           .update(accessibilityReport)
-          .set({ photo_path: relativePath })
+          .set({ photo_path: key })
           .where(eq(accessibilityReport.id, inserted.id));
-
-        photoPath = relativePath;
+        photoPath = key;
       } catch (err: unknown) {
         await db
           .delete(accessibilityReport)
@@ -174,13 +183,35 @@ export async function POST(req: Request) {
           "[API /api/report/accessibility POST] photo save error",
           err,
         );
-        return NextResponse.json({ error: "Failed to save photo", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
+        return NextResponse.json(
+          {
+            error: "Failed to save photo",
+            ...(process.env.NODE_ENV !== "production"
+              ? {
+                  detail: String(
+                    err instanceof Error ? err.message : String(err),
+                  ),
+                }
+              : {}),
+          },
+          { status: 500 },
+        );
       }
     }
 
     return NextResponse.json({ id: inserted.id, photoPath }, { status: 201 });
   } catch (err: unknown) {
     console.error("[API /api/report/accessibility POST] error", err);
-    return NextResponse.json({ error: "Failed to submit accessibility report", ...(process.env.NODE_ENV !== "production" ? { detail: String(err instanceof Error ? err.message : String(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Failed to submit accessibility report",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(err instanceof Error ? err.message : String(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
+  } finally {
+    limit.release();
   }
 }

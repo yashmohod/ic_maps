@@ -35,6 +35,7 @@ import { authClient } from "@/lib/auth-client";
 import { isIthacaEduEmail, IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 import { signInWithMicrosoft } from "@/lib/microsoft-sign-in";
 import { toRouterPath } from "@/lib/base-path";
+import Link from "next/link";
 const formSchema = z
   .object({
     email: z.string().email(),
@@ -242,7 +243,12 @@ export function LoginForm({
                   </Button>
                   <FieldDescription className="text-center">
                     Don&apos;t have an account?{" "}
-                    <a href="/account/signup">Sign up</a>
+                    <Link
+                      href="/account/signup"
+                      className="underline underline-offset-4"
+                    >
+                      Sign up
+                    </Link>
                   </FieldDescription>
                 </Field>
               </FieldGroup>

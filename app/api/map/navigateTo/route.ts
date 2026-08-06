@@ -17,6 +17,11 @@ import {
   buildMultiLegDirections,
   loadDestinationNames,
 } from "@/lib/navigation-instructions";
+import {
+  takeRateLimit,
+  clientIpFromRequest,
+  NAVIGATE_RATE_LIMIT,
+} from "@/lib/rate-limit";
 
 const navConditionsSchema = z.object({
   is_pedestrian: z.boolean().optional().default(true),
@@ -30,7 +35,7 @@ const navConditionsSchema = z.object({
 const navigateToSchema = z
   .object({
     destId: z.coerce.number().int().positive().optional(),
-    viaDestIds: z.array(z.coerce.number().int().positive()).optional(),
+    viaDestIds: z.array(z.coerce.number().int().positive()).max(10).optional(),
     lat: z.coerce.number().min(-90).max(90),
     lng: z.coerce.number().min(-180).max(180),
     navConditions: navConditionsSchema.optional(),
@@ -40,9 +45,29 @@ const navigateToSchema = z
   });
 
 export async function POST(req: Request) {
+  const limit = takeRateLimit(
+    `navigate:${clientIpFromRequest(req)}`,
+    NAVIGATE_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return NextResponse.json(
+      {
+        error: "Too many route requests. Slow down.",
+        retryAfterMs: limit.retryAfterMs,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)),
+        },
+      },
+    );
+  }
+
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = navigateToSchema.safeParse(body);
     if (!parsed.success) {
@@ -85,7 +110,10 @@ export async function POST(req: Request) {
 
     const startNodeId = await closestNode(lat, lng, navConditions);
     if (startNodeId < 0) {
-      return NextResponse.json({ error: "No nearby routing node found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No nearby routing node found" },
+        { status: 404 },
+      );
     }
 
     const path =
@@ -109,7 +137,10 @@ export async function POST(req: Request) {
     const startNode = graph.nodesOutside.get(startNodeId);
 
     if (!startNode) {
-      return NextResponse.json({ error: "Start node not found in graph" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Start node not found in graph" },
+        { status: 500 },
+      );
     }
 
     const metrics =
@@ -136,7 +167,10 @@ export async function POST(req: Request) {
         : await computeRouteMetrics(startNodeId, destIds, navConditions);
 
     if (!metrics) {
-      return NextResponse.json({ error: "Could not compute route metrics" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Could not compute route metrics" },
+        { status: 500 },
+      );
     }
 
     const destinationNames = await loadDestinationNames(destIds);
@@ -184,6 +218,16 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error("[API /api/map/navigateTo POST] error", err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Could not find a route!", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not find a route!",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
+  } finally {
+    limit.release();
   }
 }

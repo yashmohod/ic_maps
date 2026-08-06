@@ -30,6 +30,7 @@ function outdoorNode(id: number, lat: number, lng: number): NodeOutside {
     is_vehicular: false,
     is_elevator: false,
     is_stairs: false,
+    is_ramp: false,
     is_blue_light: false,
     is_dead: false,
     location: { x: lng, y: lat },

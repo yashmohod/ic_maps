@@ -64,6 +64,7 @@ export default function ComboboxSelect<T extends string | number>({
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-label={label ?? placeholder}
             disabled={disabled}
             className={cn("justify-between", widthClassName ?? "w-[260px]")}
           >

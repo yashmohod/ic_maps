@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { parseBoolean, parseId } from "@/lib/utils";
 
 const navModeColumnMap = {
@@ -10,6 +10,7 @@ const navModeColumnMap = {
   isVehicular: "is_vehicular",
   isElevator: "is_elevator",
   isStairs: "is_stairs",
+  isRamp: "is_ramp",
   isBlueLight: "is_blue_light",
   isBluelight: "is_blue_light",
   is_blue_light: "is_blue_light",
@@ -23,19 +24,34 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const id = parseId(body.id);
     if (!id) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const value = parseBoolean(body.value);
-    if (value == null) return NextResponse.json({ error: "Invalid value (must be boolean)" }, { status: 400 });
+    if (value == null)
+      return NextResponse.json(
+        { error: "Invalid value (must be boolean)" },
+        { status: 400 },
+      );
 
-    const navModeRaw = String(body.navMode ?? "").trim() as keyof typeof navModeColumnMap;
+    const navModeRaw = String(
+      body.navMode ?? "",
+    ).trim() as keyof typeof navModeColumnMap;
 
-    console.log(`[API ${ROUTE} POST] called`, { id, value, navMode: body.navMode });
+    console.log(`[API ${ROUTE} POST] called`, {
+      id,
+      value,
+      navMode: body.navMode,
+    });
     const column = navModeColumnMap[navModeRaw];
-    if (!column) return NextResponse.json({ error: "Unsupported navMode" }, { status: 400 });
+    if (!column)
+      return NextResponse.json(
+        { error: "Unsupported navMode" },
+        { status: 400 },
+      );
 
     const result = await db.execute(sql`
       UPDATE node_outside
@@ -48,10 +64,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Feature not found" }, { status: 404 });
     }
 
-    await reloadGraph().catch(console.error);
-    return NextResponse.json({ id, navMode: navModeRaw, value }, { status: 200 });
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
+    return NextResponse.json(
+      { id, navMode: navModeRaw, value },
+      { status: 200 },
+    );
   } catch (err: any) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(err?.message ?? String(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Update failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(err?.message ?? String(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

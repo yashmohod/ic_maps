@@ -7,11 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
-import {
-  CAMPUS_BOUNDS,
-  DEFAULT_CENTER,
-  DEFAULT_ZOOM,
-} from "@/lib/map-constants";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import {
   parseDestinationPolygonCollection,
   type RouteReportFeatureType,
@@ -166,7 +162,6 @@ export function RouteReportOutdoorPreview({
             latitude: initialCenter.lat,
             zoom: DEFAULT_ZOOM,
           }}
-          maxBounds={CAMPUS_BOUNDS}
           mapLib={maplibregl}
           mapStyle={baseStyle as maplibregl.StyleSpecification}
           style={{ width: "100%", height: "100%" }}

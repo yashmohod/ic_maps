@@ -42,3 +42,7 @@ next-env.d.ts
 
 # user-uploaded floorplans (runtime)
 /public/uploads/
+/public/report/
+
+# private uploads (reports + floorplans)
+/storage/private/

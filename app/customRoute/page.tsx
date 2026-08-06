@@ -130,6 +130,7 @@ export default function CustomRoutesPage(): JSX.Element {
     pitch: number;
   }>(defViewState);
   const mapRef = useRef<MapRef | null>(null);
+  const buildingSelectRequestIdRef = useRef(0);
   const [mapReady, setMapReady] = useState(false);
 
   const { isDark, mapStyle } = useMapStyle();
@@ -281,7 +282,7 @@ export default function CustomRoutesPage(): JSX.Element {
   const shareUrl = useMemo(() => {
     if (!shareRoute) return "";
     if (typeof window === "undefined") return "";
-    return `${window.location.origin}/route/${shareRoute.id}`;
+    return `${window.location.origin}${withBasePath(`/route/${shareRoute.id}`)}`;
   }, [shareRoute]);
 
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
@@ -538,6 +539,7 @@ export default function CustomRoutesPage(): JSX.Element {
       return;
     }
 
+    const reqId = ++buildingSelectRequestIdRef.current;
     setPreviewDestId(String(destinationId));
 
     // 1) Polygon + lat/lng from destinations array (already loaded)
@@ -550,8 +552,10 @@ export default function CustomRoutesPage(): JSX.Element {
         const parsed =
           typeof polyStr === "string" ? JSON.parse(polyStr) : polyStr;
         const normalized = normalizeToFeatureCollection(parsed);
+        if (reqId !== buildingSelectRequestIdRef.current) return;
         setCurDestinationPoly(normalized);
       } catch {
+        if (reqId !== buildingSelectRequestIdRef.current) return;
         setCurDestinationPoly(null);
       }
 
@@ -561,9 +565,11 @@ export default function CustomRoutesPage(): JSX.Element {
         Number.isFinite(rawLat) && Number.isFinite(rawLng)
           ? { lat: rawLat - 0.0002, lng: rawLng + 0.00005 }
           : null;
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       setPreviewDestPos(pos);
       if (pos) ensureCenter(pos.lng, pos.lat, 18.5);
     } else {
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       setCurDestinationPoly(null);
       setPreviewDestPos(null);
     }
@@ -576,7 +582,14 @@ export default function CustomRoutesPage(): JSX.Element {
           `/api/destination/outsideNode?id=${encodeURIComponent(destinationId)}`,
         ),
       );
+      if (reqId !== buildingSelectRequestIdRef.current) return;
+      if (!nodeRes.ok) {
+        toast.error("Building nodes did not load!");
+        setBuildingNodes([]);
+        return;
+      }
       const nodeData = await nodeRes.json().catch(() => ({}));
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       const details: Array<{ id: number; lat: number; lng: number }> =
         Array.isArray(nodeData?.nodeDetails) ? nodeData.nodeDetails : [];
       const cleaned: MarkerNode[] = details
@@ -588,11 +601,14 @@ export default function CustomRoutesPage(): JSX.Element {
         .filter((n) => Number.isFinite(n.lng) && Number.isFinite(n.lat));
       setBuildingNodes(cleaned);
     } catch (err) {
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       console.error("Building nodes failed", err);
       toast.error("Building nodes did not load!");
       setBuildingNodes([]);
     } finally {
-      setBuildingNodesPending(false);
+      if (reqId === buildingSelectRequestIdRef.current) {
+        setBuildingNodesPending(false);
+      }
     }
   }
 

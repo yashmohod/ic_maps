@@ -85,11 +85,16 @@ export default function RouteEditor(): JSX.Element {
     () => new Set(),
   );
 
-  type NavModeKey = 0 | 1 | 3 | 4 | 5;
+  type NavModeKey = 0 | 1 | 3 | 4 | 5 | 6;
 
   type MarkerFlagKey = keyof Pick<
     MarkerNode,
-    "isPedestrian" | "isVehicular" | "isElevator" | "isStairs" | "isBlueLight"
+    | "isPedestrian"
+    | "isVehicular"
+    | "isElevator"
+    | "isStairs"
+    | "isRamp"
+    | "isBlueLight"
   >;
 
   type NavModeInfo = { name: string; param: MarkerFlagKey };
@@ -101,6 +106,7 @@ export default function RouteEditor(): JSX.Element {
     1: { name: "Vehicular", param: "isVehicular" },
     3: { name: "Elevator", param: "isElevator" },
     4: { name: "Stairs", param: "isStairs" },
+    6: { name: "Ramp", param: "isRamp" },
     5: { name: "Blue Light", param: "isBlueLight" },
   } satisfies Record<NavModeKey, NavModeInfo>;
   // UI
@@ -115,6 +121,7 @@ export default function RouteEditor(): JSX.Element {
   const [showNodes, setShowNodes] = useState<boolean>(true);
 
   const mapRef = useRef<MapRef | null>(null);
+  const buildingSelectRequestIdRef = useRef(0);
   const modeRef = useRef<EditorMode>(mode);
   const selectedRef = useRef<number | null>(selectedId);
   modeRef.current = mode;
@@ -395,7 +402,9 @@ export default function RouteEditor(): JSX.Element {
         prev.map((m) => ({ ...m, isDead: deadOutside.has(m.id) })),
       );
       toast.success(
-        nextValue ? "Marked as dead map feature." : "Removed from dead map list.",
+        nextValue
+          ? "Marked as dead map feature."
+          : "Removed from dead map list.",
       );
     } catch (err) {
       console.error(err);
@@ -411,19 +420,31 @@ export default function RouteEditor(): JSX.Element {
       toast.error("Could not load the current building");
       return;
     }
+    const reqId = ++buildingSelectRequestIdRef.current;
     setCurrentDestination(curDest);
     try {
-      const req: any = await fetch(
+      const req = await fetch(
         withBasePath(
           `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
         ),
       );
-      const resp = await req.json();
-      const ids: number[] = (resp?.nodes || []).map((id: unknown) =>
-        Number(id),
+      if (reqId !== buildingSelectRequestIdRef.current) return;
+      if (!req.ok) {
+        toast.error("Failed to load building nodes.");
+        return;
+      }
+      const resp = await req.json().catch(() => null);
+      if (reqId !== buildingSelectRequestIdRef.current) return;
+      if (!resp) {
+        toast.error("Failed to load building nodes.");
+        return;
+      }
+      const ids: number[] = (resp?.nodes || []).map((nid: unknown) =>
+        Number(nid),
       );
       setCurDestinationNodes(new Set(ids));
     } catch (err) {
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       console.error(err);
       toast.error("Failed to load building nodes.");
     }
@@ -527,6 +548,7 @@ export default function RouteEditor(): JSX.Element {
               isVehicular: false,
               isStairs: false,
               isElevator: false,
+              isRamp: false,
               isBlueLight: false,
               isDead: false,
             },
@@ -701,12 +723,6 @@ export default function RouteEditor(): JSX.Element {
     return destinations.map((b) => ({ value: b.id, label: b.name }));
   }, [destinations]);
 
-  /* --------------------- Import / Export ----------------------*/
-
-  function exportMapData() {}
-
-  function importMapData() {}
-
   /** ---------------- Render ---------------- */
 
   if (isPending || !allowed) {
@@ -841,7 +857,7 @@ export default function RouteEditor(): JSX.Element {
           <div
             className={`rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
           >
-            <span className="text-sm font-medium">Edge incline (m)</span>
+            <span className="text-sm font-medium">Edge incline (°)</span>
             <Input
               type="number"
               step="0.1"

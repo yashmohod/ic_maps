@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/card";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import { withBasePath } from "@/lib/base-path";
+import { adminMediaHref } from "@/lib/private-media";
 import {
   buildReportDateQueryString,
   DEFAULT_REPORT_DATE_FILTER,
@@ -93,6 +94,11 @@ function formatDate(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleString();
+}
+
+function reportPhotoHref(photoPath: string) {
+  const href = adminMediaHref(photoPath) ?? photoPath;
+  return withBasePath(href);
 }
 
 function previewText(text: string | null | undefined, max = 80) {
@@ -326,7 +332,10 @@ export default function AdminReportsPage() {
     if (!selectedDeadTarget) return;
     setMarkingDead(true);
     try {
-      const lists = await markRouteReportMapFeatureDead(selectedDeadTarget, true);
+      const lists = await markRouteReportMapFeatureDead(
+        selectedDeadTarget,
+        true,
+      );
       if (!lists) {
         toast.error("Could not mark map feature as dead");
         return;
@@ -427,7 +436,7 @@ export default function AdminReportsPage() {
                       <Td>
                         {report.photoPath ? (
                           <Link
-                            href={withBasePath(report.photoPath)}
+                            href={reportPhotoHref(report.photoPath)}
                             target="_blank"
                             className="text-brand-cta font-medium hover:underline"
                           >
@@ -479,7 +488,7 @@ export default function AdminReportsPage() {
                       <Td>
                         {report.photoPath ? (
                           <Link
-                            href={withBasePath(report.photoPath)}
+                            href={reportPhotoHref(report.photoPath)}
                             target="_blank"
                             className="text-brand-cta font-medium hover:underline"
                           >

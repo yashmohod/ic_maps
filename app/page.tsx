@@ -50,7 +50,11 @@ import maplibregl from "maplibre-gl";
 import { Slider } from "@/components/ui/slider";
 import { NavConditions } from "@/lib/navigation";
 import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
-import { makeCircleGeoJSON, bearingTo } from "@/lib/geo";
+import {
+  makeCircleGeoJSON,
+  bearingTo,
+  distanceToPolylineMeters,
+} from "@/lib/geo";
 import {
   surfacePanelClass,
   surfaceSubtleClass,
@@ -215,6 +219,15 @@ export default function NavigationMap(): JSX.Element {
   >(null);
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
   const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
+  const routeRequestIdRef = useRef(0);
+  const buildingSelectRequestIdRef = useRef(0);
+  const offRouteSinceRef = useRef<number | null>(null);
+  const navigatingRef = useRef(false);
+  const trackingRef = useRef(false);
+  navigatingRef.current = navigating;
+  trackingRef.current = tracking;
+  const userPosRef = useRef<UserPos | null>(null);
+  userPosRef.current = userPos;
   const [routeEta, setRouteEta] = useState<{
     distanceMeters: number;
     durationSeconds: number;
@@ -564,6 +577,8 @@ export default function NavigationMap(): JSX.Element {
       return;
     }
 
+    const reqId = ++buildingSelectRequestIdRef.current;
+
     try {
       const curDestination: MapDestination | undefined = destinations.find(
         (cur) => cur.id === id,
@@ -580,14 +595,25 @@ export default function NavigationMap(): JSX.Element {
       } catch {
         toast.error("Building has no boundary data.");
       }
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       setCurBuildingPoly(curDestinationPoly);
 
-      const req: any = await fetch(
+      const req = await fetch(
         withBasePath(
           `/api/destination/outsideNode?id=${encodeURIComponent(id)}`,
         ),
       );
-      const resp = await req.json();
+      if (reqId !== buildingSelectRequestIdRef.current) return;
+      if (!req.ok) {
+        toast.error("Building entrances did not load.");
+        return;
+      }
+      const resp = await req.json().catch(() => null);
+      if (reqId !== buildingSelectRequestIdRef.current) return;
+      if (!resp) {
+        toast.error("Building entrances did not load.");
+        return;
+      }
 
       const bnid = resp?.nodes ?? [];
       const details: Array<{ id: number; lat: number; lng: number }> =
@@ -618,6 +644,7 @@ export default function NavigationMap(): JSX.Element {
 
       setMapStage(MAP_STAGES.BUILDING);
     } catch (err) {
+      if (reqId !== buildingSelectRequestIdRef.current) return;
       console.error("Building lookup failed", err);
       toast.error("Unable to locate that building right now.");
     }
@@ -867,7 +894,8 @@ export default function NavigationMap(): JSX.Element {
       toast.error("Please select a destination before starting route.");
       return PATH_RESET;
     }
-    if (!userPos) {
+    const pos = userPosRef.current;
+    if (!pos) {
       toast.error("Tap Locate Me before looking for a route.");
       return PATH_RESET;
     }
@@ -876,25 +904,28 @@ export default function NavigationMap(): JSX.Element {
       routeDestIds.length > 1
         ? {
             viaDestIds: routeDestIds,
-            lat: userPos.lat,
-            lng: userPos.lng,
+            lat: pos.lat,
+            lng: pos.lng,
             navConditions: curNavConditions,
           }
         : {
             destId: routeDestIds[0],
-            lat: userPos.lat,
-            lng: userPos.lng,
+            lat: pos.lat,
+            lng: pos.lng,
             navConditions: curNavConditions,
           };
 
+    const reqId = ++routeRequestIdRef.current;
     const req = await fetch(withBasePath("/api/map/navigateTo"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    if (reqId !== routeRequestIdRef.current) return PATH_RESET;
     const resp = (await req.json().catch(() => ({}))) as NavigateToResponse & {
       error?: string;
     };
+    if (reqId !== routeRequestIdRef.current) return PATH_RESET;
     if (req.status !== 200) {
       toast.error(resp?.error ?? "Failed to build route.");
       throw new Error("Navigate request failed");
@@ -914,6 +945,7 @@ export default function NavigationMap(): JSX.Element {
     const coords = resp.geometry?.coordinates ?? [];
     routeCoordsRef.current = coords;
     setRouteCoords(coords);
+    offRouteSinceRef.current = null;
     if (
       typeof resp.distanceMeters === "number" &&
       typeof resp.durationSeconds === "number"
@@ -1008,12 +1040,15 @@ export default function NavigationMap(): JSX.Element {
 
     const id = navigator.geolocation.watchPosition(
       (pos) => {
-        const { longitude, latitude, heading } = pos.coords;
-        setUserPos((up) =>
-          up
-            ? { ...up, lng: longitude, lat: latitude, heading }
-            : { lng: longitude, lat: latitude, heading },
-        );
+        const { longitude, latitude, heading, accuracy } = pos.coords;
+        const nextPos = {
+          lng: longitude,
+          lat: latitude,
+          heading,
+          accuracy,
+        };
+        userPosRef.current = nextPos;
+        setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
 
         let brg: number;
         if (typeof heading === "number" && !Number.isNaN(heading))
@@ -1030,6 +1065,31 @@ export default function NavigationMap(): JSX.Element {
           duration: 300,
           zoom: 20,
         });
+
+        const MIN_OFF_ROUTE_M = 25;
+        const OFF_ROUTE_DEBOUNCE_MS = 2500;
+        const coords = routeCoordsRef.current;
+        if (
+          trackingRef.current &&
+          navigatingRef.current &&
+          coords.length >= 2
+        ) {
+          const dist = distanceToPolylineMeters(longitude, latitude, coords);
+          const threshold = Math.max(accuracy ?? 0, MIN_OFF_ROUTE_M);
+          if (dist > threshold) {
+            if (offRouteSinceRef.current == null) {
+              offRouteSinceRef.current = Date.now();
+            } else if (
+              Date.now() - offRouteSinceRef.current >=
+              OFF_ROUTE_DEBOUNCE_MS
+            ) {
+              offRouteSinceRef.current = null;
+              void showRoute();
+            }
+          } else {
+            offRouteSinceRef.current = null;
+          }
+        }
       },
       (err) => {
         toast.error(err.message || "Tracking error");
@@ -1784,7 +1844,6 @@ export default function NavigationMap(): JSX.Element {
               type="fill-extrusion"
               source={vectorSourceId}
               source-layer="building"
-              minzoom={15}
               paint={{
                 "fill-extrusion-color": isDark ? "#2b3647" : "#dfdbd7",
                 "fill-extrusion-height": [

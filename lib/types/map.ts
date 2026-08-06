@@ -18,6 +18,7 @@ export type MarkerNode = {
   isVehicular: boolean;
   isStairs: boolean;
   isElevator: boolean;
+  isRamp: boolean;
   isDead: boolean;
 };
 

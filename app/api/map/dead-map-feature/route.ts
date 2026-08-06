@@ -7,7 +7,7 @@ import {
   setInsideNodeDead,
   setOutsideNodeDead,
 } from "@/lib/dead-map-features";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { parseBoolean, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/map/dead-map-feature";
@@ -65,7 +65,10 @@ export async function POST(req: Request) {
       await setInsideNodeDead(nodeId, isDead);
     }
 
-    await reloadGraph().catch(console.error);
+    {
+      const __reloadErr = await reloadGraphOr503();
+      if (__reloadErr) return __reloadErr;
+    }
     const lists = await listDeadMapFeatures();
     return NextResponse.json(lists);
   } catch (err: unknown) {

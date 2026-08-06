@@ -69,7 +69,11 @@ export async function GET(req: Request) {
 
   try {
     const mapId = parseId(new URL(req.url).searchParams.get("mapId"));
-    if (!mapId) return NextResponse.json({ error: "Missing or invalid mapId" }, { status: 400 });
+    if (!mapId)
+      return NextResponse.json(
+        { error: "Missing or invalid mapId" },
+        { status: 400 },
+      );
 
     const gate = await requireMapOwner(mapId, session!.user.id);
     if ("error" in gate) return gate.error;
@@ -88,7 +92,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ collaborators: rows }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
-    return NextResponse.json({ error: "Could not fetch collaborators", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not fetch collaborators",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -98,7 +110,8 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = postSchema.safeParse(body);
     if (!parsed.success) {
@@ -114,18 +127,26 @@ export async function POST(req: Request) {
     const { access } = gate;
 
     const target = await resolveUserId({ collaboratorId, email });
-    // Avoid email enumeration: same response whether user exists or not.
     if (!target) {
       return NextResponse.json(
-        { ok: true, message: "If that user exists, they were invited." },
-        { status: 200 },
+        {
+          error: "No account found for that email",
+          code: "USER_NOT_FOUND",
+        },
+        { status: 404 },
       );
     }
     if (target.id === session!.user.id) {
-      return NextResponse.json({ error: "Cannot add yourself as a collaborator" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Cannot add yourself as a collaborator" },
+        { status: 400 },
+      );
     }
     if (target.id === access.map.owner_id) {
-      return NextResponse.json({ error: "Owner is already the map owner" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Owner is already the map owner" },
+        { status: 400 },
+      );
     }
 
     await db
@@ -156,7 +177,15 @@ export async function POST(req: Request) {
     );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
-    return NextResponse.json({ error: "Could not add collaborator", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not add collaborator",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -166,7 +195,8 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
@@ -192,7 +222,10 @@ export async function PUT(req: Request) {
       .returning();
 
     if (result.length === 0) {
-      return NextResponse.json({ error: "Collaborator not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Collaborator not found" },
+        { status: 404 },
+      );
     }
 
     return NextResponse.json(
@@ -201,7 +234,15 @@ export async function PUT(req: Request) {
     );
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
-    return NextResponse.json({ error: "Could not update collaborator", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not update collaborator",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -214,7 +255,10 @@ export async function DELETE(req: Request) {
     const mapId = parseId(searchParams.get("mapId"));
     const collaboratorId = searchParams.get("collaboratorId");
     if (!mapId || !collaboratorId) {
-      return NextResponse.json({ error: "Missing or invalid mapId/collaboratorId" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing or invalid mapId/collaboratorId" },
+        { status: 400 },
+      );
     }
 
     const gate = await requireMapReadable(mapId, session!.user.id);
@@ -223,7 +267,10 @@ export async function DELETE(req: Request) {
 
     const isSelf = collaboratorId === session!.user.id;
     if (!access.isOwner && !isSelf) {
-      return NextResponse.json({ error: "Only the owner can remove collaborators" }, { status: 403 });
+      return NextResponse.json(
+        { error: "Only the owner can remove collaborators" },
+        { status: 403 },
+      );
     }
 
     const result = await db
@@ -237,12 +284,23 @@ export async function DELETE(req: Request) {
       .returning();
 
     if (result.length === 0) {
-      return NextResponse.json({ error: "Collaborator not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Collaborator not found" },
+        { status: 404 },
+      );
     }
 
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
-    return NextResponse.json({ error: "Could not remove collaborator", ...(process.env.NODE_ENV !== "production" ? { detail: String(getErrorDetail(err)) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not remove collaborator",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(getErrorDetail(err)) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

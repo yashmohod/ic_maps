@@ -3,7 +3,7 @@ import { parseId } from "@/lib/utils";
 import { db, pool } from "@/db";
 import { sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth-guards";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 
 const ROUTE = "/api/destination/outsideNode";
 
@@ -34,7 +34,8 @@ export async function POST(req: Request) {
       await client.query("COMMIT");
       const row = result.rows[0];
       if (!row?.id) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
-      await reloadGraph().catch(console.error);
+      const __reloadErr = await reloadGraphOr503();
+      if (__reloadErr) return __reloadErr;
       return NextResponse.json({ id: Number(row.id) }, { status: 200 });
     } catch (txErr: unknown) {
       await client.query("ROLLBACK").catch(() => {});
@@ -94,7 +95,8 @@ export async function DELETE(req: Request) {
       client.release();
     }
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

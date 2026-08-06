@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { isNonEmptyString, isValidLatLng, parseId, parsePolygon } from "@/lib/utils";
 
 const ROUTE = "/api/destination";
@@ -178,7 +178,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Destination not found" }, { status: 404 });
     }
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({}, { status: 200 });
   } catch (err: any) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

@@ -1,40 +1,17 @@
 import { NextResponse } from "next/server";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
-import { randomUUID } from "crypto";
 import { requireAdmin } from "@/lib/auth-guards";
 import { parsePositiveInt } from "@/lib/utils";
+import { privateMediaApiPath, savePrivateImage } from "@/lib/private-media";
 
 export const runtime = "nodejs";
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   "image/png",
   "image/jpeg",
   "image/webp",
   "image/gif",
 ]);
-
-function extensionFromMime(mime: string): string {
-  switch (mime) {
-    case "image/png":
-      return ".png";
-    case "image/jpeg":
-      return ".jpg";
-    case "image/webp":
-      return ".webp";
-    case "image/gif":
-      return ".gif";
-    default:
-      return ".bin";
-  }
-}
-
-function sanitizeBaseFileName(fileName: string): string {
-  const rawBase = path.basename(fileName, path.extname(fileName));
-  const safe = rawBase.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return safe.length > 0 ? safe.slice(0, 50) : "floorplan";
-}
 
 export async function POST(req: Request) {
   const { error } = await requireAdmin();
@@ -81,51 +58,30 @@ export async function POST(req: Request) {
       );
     }
 
-    const uploadsDir = path.join(
-      process.cwd(),
-      "public",
-      "uploads",
-      "floorplans",
-      destinationId ? `destination-${destinationId}` : "",
-    );
-    await mkdir(uploadsDir, { recursive: true });
-
-    const extFromName = path.extname(file.name).toLowerCase();
-    const ext =
-      extFromName === ".png" ||
-      extFromName === ".jpg" ||
-      extFromName === ".jpeg" ||
-      extFromName === ".webp" ||
-      extFromName === ".gif"
-        ? extFromName
-        : extensionFromMime(file.type);
-    const base = sanitizeBaseFileName(file.name);
-    const fileName = `${Date.now()}-${base}-${randomUUID().slice(0, 8)}${ext}`;
-
     const buffer = Buffer.from(await file.arrayBuffer());
-    const savePath = path.join(uploadsDir, fileName);
-    await writeFile(savePath, buffer);
-
-    const relativeDir = destinationId
-      ? `/uploads/floorplans/destination-${destinationId}`
-      : "/uploads/floorplans";
+    const { key } = await savePrivateImage({
+      kind: "floorplans",
+      buffer,
+      subdir: destinationId ? `destination-${destinationId}` : undefined,
+      baseName: file.name,
+    });
 
     return NextResponse.json(
       {
-        url: `${relativeDir}/${fileName}`,
-        fileName,
+        url: privateMediaApiPath(key),
+        key,
+        fileName: key.split("/").pop(),
         destinationId,
       },
       { status: 201 },
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[API /api/destination/floorplan POST] error", err);
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       {
         error: "Upload failed",
-        ...(process.env.NODE_ENV !== "production"
-          ? { detail: err?.message ?? String(err) }
-          : {}),
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
       },
       { status: 500 },
     );

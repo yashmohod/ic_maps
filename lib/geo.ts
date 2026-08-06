@@ -31,8 +31,11 @@ export function heuristic(
   lat2: number,
   lng2: number,
 ): number {
-  const deg = Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lng1 - lng2, 2));
-  return deg * METERS_PER_DEGREE_LAT;
+  // ~111 km/° lat; ~82 km/° lng near Ithaca (~42°N) so east–west isn't overestimated
+  const METERS_PER_DEGREE_LNG = 82_000;
+  const dLatM = (lat1 - lat2) * METERS_PER_DEGREE_LAT;
+  const dLngM = (lng1 - lng2) * METERS_PER_DEGREE_LNG;
+  return Math.sqrt(dLatM * dLatM + dLngM * dLngM);
 }
 
 function toRad(deg: number) {
@@ -62,6 +65,37 @@ export function bearingTo(
     Math.cos(φ1) * Math.sin(φ2) -
     Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
   return normBearing(toDeg(Math.atan2(y, x)));
+}
+
+/** Min distance from a point to a polyline ([lng, lat][]), meters. */
+export function distanceToPolylineMeters(
+  lng: number,
+  lat: number,
+  coords: Array<[number, number]>,
+): number {
+  if (coords.length === 0) return Infinity;
+  if (coords.length === 1) {
+    const [x, y] = coords[0]!;
+    return calcDistance(lat, lng, y, x);
+  }
+  let best = Infinity;
+  for (let i = 1; i < coords.length; i++) {
+    const [ax, ay] = coords[i - 1]!;
+    const [bx, by] = coords[i]!;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    let dist: number;
+    if (lenSq === 0) {
+      dist = calcDistance(lat, lng, ay, ax);
+    } else {
+      let t = ((lng - ax) * dx + (lat - ay) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      dist = calcDistance(lat, lng, ay + t * dy, ax + t * dx);
+    }
+    if (dist < best) best = dist;
+  }
+  return best;
 }
 
 export function makeCircleGeoJSON(

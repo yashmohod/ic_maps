@@ -36,6 +36,7 @@ import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import { Spinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
 import { mapPageClass } from "@/lib/panel-classes";
 
 import type { ViewStateLite } from "@/lib/types/map";
@@ -112,6 +113,7 @@ export default function BuildingEditor(): JSX.Element {
 
   const [mlMap, setMlMap] = useState<MlMap | null>(null);
   const [buildings, setBuildings] = useState<BuildingRow[]>([]);
+  const [importingOsmBuildings, setImportingOsmBuildings] = useState(false);
   const [polys, setPolys] = useState<
     Array<Feature<Polygon, GeoJsonProperties>>
   >([]);
@@ -216,6 +218,54 @@ export default function BuildingEditor(): JSX.Element {
   useEffect(() => {
     loadDestinations();
   }, []);
+
+  async function importOsmBuildings() {
+    if (importingOsmBuildings) return;
+    const previewRes = await fetch(withBasePath("/api/map/import-osm"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dryRun: true, mode: "buildings" }),
+    });
+    if (!previewRes.ok) {
+      const err = await previewRes.json().catch(() => ({}));
+      toast.error(err.error ?? "OSM buildings preview failed");
+      return;
+    }
+    const preview = await previewRes.json();
+    const ok = window.confirm(
+      `Import named Ithaca College building footprints from OpenStreetMap?\n\n` +
+        `Named campus buildings: ${preview.osmBuildings ?? 0}\n` +
+        `New destinations: ${preview.buildingsToInsert ?? 0}\n\n` +
+        `Only features inside the Ithaca College campus outline are included.\n` +
+        `Existing destinations with the same name are skipped.`,
+    );
+    if (!ok) return;
+
+    setImportingOsmBuildings(true);
+    try {
+      const req = await fetch(withBasePath("/api/map/import-osm"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: false, mode: "buildings" }),
+      });
+      if (!req.ok) {
+        const err = await req.json().catch(() => ({}));
+        toast.error(err.error ?? "OSM buildings import failed");
+        return;
+      }
+      const result = await req.json();
+      toast.success(
+        `Imported ${result.insertedBuildings ?? 0} buildings` +
+          ` (${result.osmBuildings ?? 0} named in OSM)`,
+      );
+      await loadDestinations();
+    } catch (err) {
+      console.error(err);
+      toast.error("OSM buildings import failed");
+    } finally {
+      setImportingOsmBuildings(false);
+    }
+  }
 
   /** Handlers */
   const onLoad = useCallback(() => {
@@ -453,6 +503,22 @@ export default function BuildingEditor(): JSX.Element {
       <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
+        <Button
+          type="button"
+          className="h-12 bg-brand-cta text-brand-cta-foreground shadow-xl backdrop-blur hover:bg-brand-cta/90"
+          disabled={importingOsmBuildings}
+          onClick={() => void importOsmBuildings()}
+          title="Import named campus buildings from OpenStreetMap"
+        >
+          {importingOsmBuildings ? (
+            <>
+              <Spinner className="size-4" />
+              Importing…
+            </>
+          ) : (
+            "Import OSM Buildings"
+          )}
+        </Button>
       </div>
 
       <EditPanel

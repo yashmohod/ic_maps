@@ -35,7 +35,11 @@ import {
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import type { NavConditions } from "@/lib/navigation";
-import { bearingTo, makeCircleGeoJSON } from "@/lib/geo";
+import {
+  bearingTo,
+  distanceToPolylineMeters,
+  makeCircleGeoJSON,
+} from "@/lib/geo";
 import {
   surfaceSubtleClass,
   borderMutedClass,
@@ -143,7 +147,9 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     setRouteLoadPending(true);
     try {
       const res = await fetch(
-        `/api/shareableroute?id=${encodeURIComponent(routeIdRaw)}`,
+        withBasePath(
+          `/api/shareableroute?id=${encodeURIComponent(routeIdRaw)}`,
+        ),
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -259,6 +265,10 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
   const watchIdRef = useRef<number | null>(null);
   const pendingRouteStartRef = useRef(false);
+  const routeRequestIdRef = useRef(0);
+  const offRouteSinceRef = useRef<number | null>(null);
+  const routePendingRef = useRef(false);
+  const userPosRef = useRef<UserPos | null>(null);
   const routeStartNodeRef = useRef<{
     id: number;
     lat: number;
@@ -267,6 +277,10 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   const sheetCollapsed = sheetPosition >= effectiveSheetPeek * 0.92;
   const navigating = routeCoords.length >= 2;
+  const navigatingRef = useRef(navigating);
+  navigatingRef.current = navigating;
+  routePendingRef.current = routePending;
+  userPosRef.current = userPos;
 
   const navProgress = useNavigationProgress(
     routeSteps,
@@ -449,12 +463,15 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
     const id = navigator.geolocation.watchPosition(
       (pos) => {
-        const { longitude, latitude, heading } = pos.coords;
-        setUserPos((up) =>
-          up
-            ? { ...up, lng: longitude, lat: latitude, heading }
-            : { lng: longitude, lat: latitude, heading },
-        );
+        const { longitude, latitude, heading, accuracy } = pos.coords;
+        const nextPos = {
+          lng: longitude,
+          lat: latitude,
+          heading,
+          accuracy,
+        };
+        userPosRef.current = nextPos;
+        setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
 
         let brg: number;
         if (typeof heading === "number" && !Number.isNaN(heading)) {
@@ -471,6 +488,28 @@ export default function ShareRouteNavigatePage(): JSX.Element {
           duration: 300,
           zoom: 20,
         });
+
+        // Off-route recalc: GPS ticks stay local unless we leave the polyline.
+        const MIN_OFF_ROUTE_M = 25;
+        const OFF_ROUTE_DEBOUNCE_MS = 2500;
+        const coords = routeCoordsRef.current;
+        if (navigatingRef.current && coords.length >= 2) {
+          const dist = distanceToPolylineMeters(longitude, latitude, coords);
+          const threshold = Math.max(accuracy ?? 0, MIN_OFF_ROUTE_M);
+          if (dist > threshold) {
+            if (offRouteSinceRef.current == null) {
+              offRouteSinceRef.current = Date.now();
+            } else if (
+              Date.now() - offRouteSinceRef.current >=
+              OFF_ROUTE_DEBOUNCE_MS
+            ) {
+              offRouteSinceRef.current = null;
+              void refreshRoute({ lat: latitude, lng: longitude });
+            }
+          } else {
+            offRouteSinceRef.current = null;
+          }
+        }
       },
       (err) => {
         toast.error(err.message || "Tracking error");
@@ -562,19 +601,27 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     !!routeInfo?.destinationId &&
     (!showParkingOptions || selectedParkingId != null);
 
-  async function refreshRoute() {
-    if (!routeIdRaw || !userPos || !routeInfo?.destinationId || routePending)
+  async function refreshRoute(overridePos?: { lat: number; lng: number }) {
+    const pos = overridePos ?? userPosRef.current;
+    if (
+      !routeIdRaw ||
+      !pos ||
+      !routeInfo?.destinationId ||
+      routePendingRef.current
+    )
       return;
     if (showParkingOptions && selectedParkingId == null) {
       toast.error("Select a parking lot first.");
       return;
     }
 
+    const reqId = ++routeRequestIdRef.current;
     setRoutePending(true);
+    routePendingRef.current = true;
     try {
       const body: Record<string, unknown> = {
-        lat: userPos.lat,
-        lng: userPos.lng,
+        lat: pos.lat,
+        lng: pos.lng,
         navConditions: curNavConditions,
       };
 
@@ -589,11 +636,14 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (reqId !== routeRequestIdRef.current) return;
+
       const data = (await res
         .json()
         .catch(() => ({}))) as NavigateToResponse & {
         error?: string;
       };
+      if (reqId !== routeRequestIdRef.current) return;
 
       if (!res.ok || !Array.isArray(data.path) || data.path.length === 0) {
         setRouteCoords([]);
@@ -610,6 +660,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       const coords = data.geometry?.coordinates ?? [];
       setRouteCoords(coords);
       routeCoordsRef.current = coords;
+      offRouteSinceRef.current = null;
       if (data.startNode) {
         routeStartNodeRef.current = data.startNode;
       }
@@ -644,6 +695,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         setParkingPos(null);
       }
     } catch (e) {
+      if (reqId !== routeRequestIdRef.current) return;
       console.error(e);
       setRouteCoords([]);
       routeCoordsRef.current = [];
@@ -653,7 +705,10 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       setDestPos(null);
       toast.error("Failed to load route.");
     } finally {
-      setRoutePending(false);
+      if (reqId === routeRequestIdRef.current) {
+        setRoutePending(false);
+        routePendingRef.current = false;
+      }
     }
   }
 
@@ -672,13 +727,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     if (!canNavigate) return;
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    routeInfo?.destinationId,
-    selectedParkingId,
-    userPos?.lat,
-    userPos?.lng,
-    curNavConditions,
-  ]);
+  }, [routeInfo?.destinationId, selectedParkingId, curNavConditions]);
 
   useEffect(() => {
     if (!pendingRouteStartRef.current) return;

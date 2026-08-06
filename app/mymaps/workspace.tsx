@@ -639,42 +639,94 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
   }
 
+  function parseInviteEmails(raw: string): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const part of raw.split(/[,;\n]+/)) {
+      const email = part.trim().toLowerCase();
+      if (!email || seen.has(email)) continue;
+      seen.add(email);
+      out.push(email);
+    }
+    return out;
+  }
+
   async function addCollaborator() {
     if (inviteMapId == null) return;
-    const email = inviteEmail.trim();
-    if (!email) {
-      toast.error("Enter a user email");
+    const emails = parseInviteEmails(inviteEmail);
+    if (emails.length === 0) {
+      toast.error("Enter at least one email");
       return;
     }
     setInvitePending(true);
     try {
-      const res = await fetch(withBasePath("/api/mymaps/maps/collaborator"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mapId: inviteMapId,
-          email,
-          role: inviteRole,
-        }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast.error(data?.error ?? "Could not add collaborator");
-        return;
+      let added = 0;
+      let missing = 0;
+      let otherErrors = 0;
+      for (const email of emails) {
+        const res = await fetch(withBasePath("/api/mymaps/maps/collaborator"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mapId: inviteMapId,
+            email,
+            role: inviteRole,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.collaborator) {
+          added += 1;
+          continue;
+        }
+        if (res.status === 404 || data?.code === "USER_NOT_FOUND") {
+          missing += 1;
+          toast.error(`No account found for ${email}`);
+          continue;
+        }
+        otherErrors += 1;
+        toast.error(data?.error ?? `Could not add ${email}`);
       }
-      if (data?.collaborator) {
-        toast.success("Collaborator added");
-        setInviteEmail("");
-        await openInvite(inviteMapId);
-      } else {
-        toast.message(
-          data?.message ?? "If that user exists, they were invited.",
+      if (added > 0) {
+        toast.success(
+          added === 1 ? "Collaborator added" : `${added} collaborators added`,
         );
         setInviteEmail("");
+        await openInvite(inviteMapId);
+      } else if (missing > 0 && otherErrors === 0) {
+        // keep the email field so they can fix typos
       }
     } finally {
       setInvitePending(false);
     }
+  }
+
+  async function updateCollaboratorRole(
+    collaboratorId: string,
+    role: "viewer" | "editor",
+  ) {
+    if (inviteMapId == null) return;
+    const prev = collaborators;
+    setCollaborators((rows) =>
+      rows.map((c) =>
+        c.collaborator_id === collaboratorId ? { ...c, role } : c,
+      ),
+    );
+    const res = await fetch(withBasePath("/api/mymaps/maps/collaborator"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mapId: inviteMapId,
+        collaboratorId,
+        role,
+      }),
+    });
+    if (!res.ok) {
+      setCollaborators(prev);
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error ?? "Could not update permission");
+      return;
+    }
+    toast.success("Permission updated");
   }
 
   async function removeCollaborator(collaboratorId: string) {
@@ -2547,33 +2599,56 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           <div
             className={`w-full max-w-md rounded-2xl border p-4 shadow-lg ${borderMutedClass} ${surfacePanelClass}`}
           >
-            <h3 className="text-base font-semibold">Collaborators</h3>
+            <h3 className="text-base font-semibold">Share map</h3>
             <p className="mt-1 text-xs text-panel-muted-foreground">
-              Invite an existing user by email. Viewers can read; editors can
-              edit the map.
+              Add people by account email. Each person can be a viewer or
+              editor. You can invite several emails at once (comma-separated).
             </p>
-            <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto">
+            <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto">
               {collaborators.length === 0 ? (
                 <li className="text-sm text-panel-muted-foreground">
-                  No collaborators yet.
+                  Not shared with anyone yet.
                 </li>
               ) : (
                 collaborators.map((c) => (
                   <li
                     key={c.collaborator_id}
-                    className="flex items-center justify-between gap-2 text-sm"
+                    className="flex flex-col gap-2 rounded-lg border border-border/60 p-2 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <span>
-                      {c.name} ({c.email}) · {c.role}
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void removeCollaborator(c.collaborator_id)}
-                    >
-                      Remove
-                    </Button>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">
+                        {c.name || c.email}
+                      </div>
+                      <div className="truncate text-xs text-panel-muted-foreground">
+                        {c.email}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <select
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                        value={c.role === "editor" ? "editor" : "viewer"}
+                        aria-label={`Permission for ${c.email}`}
+                        onChange={(e) =>
+                          void updateCollaboratorRole(
+                            c.collaborator_id,
+                            e.target.value as "viewer" | "editor",
+                          )
+                        }
+                      >
+                        <option value="viewer">Viewer</option>
+                        <option value="editor">Editor</option>
+                      </select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          void removeCollaborator(c.collaborator_id)
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </div>
                   </li>
                 ))
               )}
@@ -2582,12 +2657,14 @@ export default function MyMapsWorkspacePage(): JSX.Element {
               <Input
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="user@example.com"
-                type="email"
+                placeholder="user@ithaca.edu, other@ithaca.edu"
+                type="text"
+                aria-label="Collaborator emails"
               />
               <select
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 value={inviteRole}
+                aria-label="Permission for new collaborators"
                 onChange={(e) =>
                   setInviteRole(e.target.value as "viewer" | "editor")
                 }

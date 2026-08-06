@@ -15,6 +15,7 @@ export async function GET() {
       is_vehicular: boolean;
       is_elevator: boolean;
       is_stairs: boolean;
+      is_ramp: boolean;
       is_dead: boolean;
     }>`
     SELECT
@@ -26,6 +27,7 @@ export async function GET() {
       is_vehicular,
       is_elevator,
       is_stairs,
+      is_ramp,
       is_dead
     FROM node_outside;
   `);
@@ -40,6 +42,7 @@ export async function GET() {
         isVehicular: Boolean(n.is_vehicular),
         isElevator: Boolean(n.is_elevator),
         isStairs: Boolean(n.is_stairs),
+        isRamp: Boolean(n.is_ramp),
         isDead: Boolean(n.is_dead),
       };
     });
@@ -78,6 +81,14 @@ export async function GET() {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Could not fetch nodes", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not fetch nodes",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

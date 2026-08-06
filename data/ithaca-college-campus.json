@@ -1,0 +1,23 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Ithaca College",
+    "note": "Approximate campus outline for OSM import filtering (main campus, athletics, College Circle). Excludes Danby Rd city parcels / Bella Vista."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-76.5031, 42.4104],
+        [-76.488, 42.4104],
+        [-76.488, 42.4289],
+        [-76.5036, 42.4289],
+        [-76.5036, 42.4202],
+        [-76.5004, 42.4202],
+        [-76.5004, 42.4164],
+        [-76.5031, 42.4164],
+        [-76.5031, 42.4104]
+      ]
+    ]
+  }
+}

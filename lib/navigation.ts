@@ -21,6 +21,8 @@ import {
   endNodeFromPath,
   nextNodeFromEdge,
   through_building_bfs_with_cost,
+  encodeThroughBuildingHop,
+  isThroughBuildingHop,
   type Graph,
   type NavConditions,
 } from "@/lib/navigation-graph";
@@ -43,7 +45,8 @@ export async function closestNode(
     .execute(
       sql<{ id: number }>`
         SELECT id FROM node_outside
-        WHERE (${is_pedestrian} AND is_pedestrian = true) OR (${is_vehicular} AND is_vehicular = true)
+        WHERE is_dead = false
+          AND ((${is_pedestrian} AND is_pedestrian = true) OR (${is_vehicular} AND is_vehicular = true))
         ORDER BY location <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326), id
         LIMIT 1
       `,
@@ -57,6 +60,8 @@ export async function closestNode(
 type GraphStore = {
   graph: Graph | null;
   loading: Promise<Graph> | null;
+  /** Bumped on every load/reload; only matching gen may commit to store.graph */
+  generation: number;
 };
 
 declare global {
@@ -66,6 +71,7 @@ declare global {
 const store: GraphStore = globalThis.__graphStore ?? {
   graph: null,
   loading: null,
+  generation: 0,
 };
 
 if (process.env.NODE_ENV !== "production") globalThis.__graphStore = store;
@@ -101,14 +107,17 @@ export async function getGraph(): Promise<Graph> {
   if (store.graph) return store.graph;
 
   if (!store.loading) {
+    const gen = ++store.generation;
     store.loading = loadGraphFromDb()
       .then((g) => {
-        store.graph = g;
-        store.loading = null;
-        return g;
+        if (gen === store.generation) {
+          store.graph = g;
+        }
+        if (store.loading) store.loading = null;
+        return store.graph ?? g;
       })
       .catch((e) => {
-        store.loading = null;
+        if (gen === store.generation) store.loading = null;
         throw e;
       });
   }
@@ -118,13 +127,32 @@ export async function getGraph(): Promise<Graph> {
 
 /**
  * Mutate by REBUILDING (safe + easy).
- * You can do incremental updates too, but rebuild keeps correctness simple.
+ * Generation counter prevents an older in-flight getGraph load from overwriting.
  */
 export async function reloadGraph(): Promise<Graph> {
-  const g = await loadGraphFromDb();
-  store.graph = g;
+  const gen = ++store.generation;
   store.loading = null;
-  return g;
+  const g = await loadGraphFromDb();
+  if (gen === store.generation) {
+    store.graph = g;
+  }
+  return store.graph ?? g;
+}
+
+/** Retry reload a few times; throws if all attempts fail. */
+export async function reloadGraphReliable(attempts = 3): Promise<Graph> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await reloadGraph();
+    } catch (err) {
+      lastErr = err;
+      console.error(`[reloadGraphReliable] attempt ${i + 1} failed`, err);
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(String(lastErr ?? "reloadGraph failed"));
 }
 
 export async function navigate(
@@ -183,6 +211,9 @@ export async function navigate(
     )?.edgeId;
     if (edgeId != null) {
       path.push(edgeId);
+    } else {
+      // Through-building hop: no outdoor edge between parent (nxt) and child (curP)
+      path.push(encodeThroughBuildingHop(nxt, curP));
     }
     curP = nxt;
   }
@@ -219,6 +250,23 @@ function pathDistanceMeters(
   let currentNodeId = startNodeId;
 
   for (const edgeId of path) {
+    if (isThroughBuildingHop(edgeId)) {
+      const nextId = nextNodeFromEdge(graph, currentNodeId, edgeId);
+      if (nextId == null) continue;
+      const fromNode = graph.nodesOutside.get(currentNodeId);
+      const toNode = graph.nodesOutside.get(nextId);
+      if (fromNode && toNode) {
+        total += calcDistance(
+          fromNode.lat,
+          fromNode.lng,
+          toNode.lat,
+          toNode.lng,
+        );
+      }
+      currentNodeId = nextId;
+      continue;
+    }
+
     const neighbors = graph.adjOutside.get(currentNodeId);
     const edge = neighbors?.find((n) => n.edgeId === edgeId);
     if (!edge) {

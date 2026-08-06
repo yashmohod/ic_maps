@@ -1,13 +1,27 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAdmin } from "@/lib/auth-guards";
+import { getSession, requireAdmin } from "@/lib/auth-guards";
 import { stripBasePath } from "@/lib/base-path";
 import { setInsideNodeDead } from "@/lib/dead-map-features";
-import { reloadGraph } from "@/lib/navigation";
+import { isDevModeEnabled } from "@/lib/dev-mode";
+import { adminMediaHref, toPrivateMediaKey } from "@/lib/private-media";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { isFiniteNumber, parseId } from "@/lib/utils";
 
 const ROUTE = "/api/destination/floorplan/nodes";
+
+function normalizeStoredImageUrl(raw: unknown): string | null {
+  if (raw == null) return null;
+  const stripped = stripBasePath(String(raw));
+  const key = toPrivateMediaKey(stripped);
+  return key ?? stripped;
+}
+
+function exposeImageUrl(stored: unknown, isAdmin: boolean): string | null {
+  if (!isAdmin || stored == null) return null;
+  return adminMediaHref(String(stored));
+}
 
 export async function GET(req: Request) {
   try {
@@ -15,7 +29,16 @@ export async function GET(req: Request) {
     const destinationId = searchParams.get("destinationId");
     console.log(`[API ${ROUTE} GET] called`, { destinationId });
     const did = parseId(destinationId);
-    if (!did) return NextResponse.json({ error: "Invalid destinationId" }, { status: 400 });
+    if (!did)
+      return NextResponse.json(
+        { error: "Invalid destinationId" },
+        { status: 400 },
+      );
+
+    const session = await getSession();
+    const isAdmin =
+      isDevModeEnabled() ||
+      Boolean((session?.user as { isAdmin?: boolean } | undefined)?.isAdmin);
 
     const result = await db.execute(sql`
       SELECT id, node_outside_id AS "nodeOutsideId", parent_node_inside_id AS "parentNodeInsideId",
@@ -44,7 +67,7 @@ export async function GET(req: Request) {
       isRamp: Boolean(row.isRamp),
       isGroup: Boolean(row.isGroup),
       isDead: Boolean(row.isDead),
-      imageUrl: row.imageUrl ?? null,
+      imageUrl: exposeImageUrl(row.imageUrl, isAdmin),
       incline: row.incline != null ? Number(row.incline) : null,
       width: row.width != null ? Number(row.width) : null,
       height: row.height != null ? Number(row.height) : null,
@@ -54,7 +77,15 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} GET] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Could not fetch nodes", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Could not fetch nodes",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -64,7 +95,8 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const {
       destinationId,
@@ -100,7 +132,11 @@ export async function POST(req: Request) {
     });
 
     const did = parseId(destinationId);
-    if (!did) return NextResponse.json({ error: "Invalid destinationId" }, { status: 400 });
+    if (!did)
+      return NextResponse.json(
+        { error: "Invalid destinationId" },
+        { status: 400 },
+      );
     if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
       return NextResponse.json({ error: "Invalid x or y" }, { status: 400 });
     }
@@ -134,7 +170,7 @@ export async function POST(req: Request) {
         ${Boolean(isStairs)},
         ${Boolean(isRamp)},
         ${Boolean(isGroup)},
-        ${imageUrl != null ? stripBasePath(String(imageUrl)) : null},
+        ${imageUrl != null ? normalizeStoredImageUrl(imageUrl) : null},
         ${incline != null && isFiniteNumber(incline) ? (incline as number) : null},
         ${widthVal},
         ${heightVal},
@@ -148,9 +184,11 @@ export async function POST(req: Request) {
     `);
 
     const row = result.rows[0];
-    if (!row?.id) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+    if (!row?.id)
+      return NextResponse.json({ error: "Insert failed" }, { status: 500 });
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json(
       {
         id: row.id,
@@ -168,7 +206,7 @@ export async function POST(req: Request) {
         isStairs: Boolean(row.isStairs),
         isRamp: Boolean(row.isRamp),
         isGroup: Boolean(row.isGroup),
-        imageUrl: row.imageUrl ?? null,
+        imageUrl: exposeImageUrl(row.imageUrl, true),
         incline: row.incline != null ? Number(row.incline) : null,
         width: row.width != null ? Number(row.width) : null,
         height: row.height != null ? Number(row.height) : null,
@@ -178,7 +216,15 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Insert failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Insert failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -188,7 +234,8 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const {
       id,
@@ -224,7 +271,8 @@ export async function PUT(req: Request) {
     });
 
     const nid = parseId(id);
-    if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    if (!nid)
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     if (typeof isDead === "boolean") {
       await setInsideNodeDead(nid, isDead);
@@ -249,9 +297,7 @@ export async function PUT(req: Request) {
     if (typeof isGroup === "boolean") setParts.push(sql`is_group = ${isGroup}`);
     if (imageUrl !== undefined) {
       const storedImageUrl =
-        imageUrl === null
-          ? null
-          : stripBasePath(String(imageUrl));
+        imageUrl === null ? null : normalizeStoredImageUrl(imageUrl);
       setParts.push(sql`image_url = ${storedImageUrl}`);
     }
     if (incline !== undefined) {
@@ -283,7 +329,8 @@ export async function PUT(req: Request) {
 
     if (setParts.length === 0) {
       if (typeof isDead === "boolean") {
-        await reloadGraph().catch(console.error);
+        const __reloadErr = await reloadGraphOr503();
+        if (__reloadErr) return __reloadErr;
         return NextResponse.json({}, { status: 200 });
       }
       return NextResponse.json({}, { status: 200 });
@@ -292,14 +339,24 @@ export async function PUT(req: Request) {
     const result = await db.execute(
       sql`UPDATE node_inside SET ${sql.join(setParts, sql`, `)} WHERE id = ${nid} RETURNING id`,
     );
-    if (result.rows.length === 0) return NextResponse.json({ error: "Node not found" }, { status: 404 });
+    if (result.rows.length === 0)
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} PUT] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Update failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -309,12 +366,14 @@ export async function DELETE(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { id } = body as { id: unknown };
     console.log(`[API ${ROUTE} DELETE] called`, { id });
     const nid = parseId(id);
-    if (!nid) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    if (!nid)
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     await db.execute(
       sql`DELETE FROM edge_inside WHERE node_a_id = ${nid} OR node_b_id = ${nid}`,
@@ -323,13 +382,23 @@ export async function DELETE(req: Request) {
       sql`DELETE FROM node_inside WHERE id = ${nid} RETURNING id`,
     );
 
-    if (result.rows.length === 0) return NextResponse.json({ error: "Node not found" }, { status: 404 });
+    if (result.rows.length === 0)
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Delete failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Delete failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

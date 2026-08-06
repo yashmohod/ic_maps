@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { calcDistance } from "@/lib/geo";
 import { parseId } from "@/lib/utils";
 
@@ -75,7 +75,8 @@ export async function POST(req: Request) {
     }
     const ff = direction ? a : b;
     const tt = direction ? b : a;
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({ id: inserted.id, a:ff, b:tt }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
@@ -112,7 +113,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Edge not found" }, { status: 404 });
     }
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

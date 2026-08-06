@@ -215,21 +215,17 @@ export function MapBottomSheet({
     setIsDraggingSheet(true);
     sheetStartYRef.current = clientY;
     sheetStartPosRef.current = positionRef.current;
-  }
 
-  useEffect(() => {
-    function handleMove(e: PointerEvent | TouchEvent) {
+    function handleMove(ev: PointerEvent | TouchEvent) {
       if (!sheetDragActiveRef.current) return;
-
-      const anyE = e as PointerEvent & TouchEvent;
-      const clientY =
-        anyE.touches && anyE.touches[0]
-          ? anyE.touches[0].clientY
-          : anyE.clientY;
-
-      const deltaY = clientY - sheetStartYRef.current;
+      const moveE = ev as PointerEvent & TouchEvent;
+      const y =
+        moveE.touches && moveE.touches[0]
+          ? moveE.touches[0].clientY
+          : moveE.clientY;
+      const deltaY = y - sheetStartYRef.current;
       if (Math.abs(deltaY) > 6) sheetDidDragRef.current = true;
-
+      if (ev.cancelable && Math.abs(deltaY) > 6) ev.preventDefault();
       const h = sheetRef.current?.offsetHeight ?? window.innerHeight;
       const nextPos = clamp(sheetStartPosRef.current + deltaY / h, 0, 1);
       applySheetPositionRef.current(nextPos);
@@ -240,6 +236,12 @@ export function MapBottomSheet({
       sheetDragActiveRef.current = false;
       setIsDraggingSheet(false);
       applySheetPositionRef.current((current) => snapToNearest(current));
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleEnd);
+      window.removeEventListener("touchcancel", handleEnd);
     }
 
     window.addEventListener("pointermove", handleMove);
@@ -248,16 +250,7 @@ export function MapBottomSheet({
     window.addEventListener("touchmove", handleMove, { passive: false });
     window.addEventListener("touchend", handleEnd);
     window.addEventListener("touchcancel", handleEnd);
-
-    return () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      window.removeEventListener("pointercancel", handleEnd);
-      window.removeEventListener("touchmove", handleMove);
-      window.removeEventListener("touchend", handleEnd);
-      window.removeEventListener("touchcancel", handleEnd);
-    };
-  }, []);
+  }
 
   if (hidden) return null;
 

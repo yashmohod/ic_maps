@@ -30,6 +30,7 @@ import Image from "next/image";
 import { withBasePath } from "@/lib/base-path";
 import { Spinner } from "@/components/ui/spinner";
 import { useState } from "react";
+import Link from "next/link";
 
 const formSchema = z
   .object({
@@ -62,6 +63,7 @@ export function SignupForm({
 }: React.ComponentProps<"div">) {
   const router = useRouter();
   const [microsoftLoading, setMicrosoftLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -86,25 +88,39 @@ export function SignupForm({
       return;
     }
 
-    const { email, password, name } = values;
+    if (loading) return;
+    setLoading(true);
+    try {
+      const { email, password, name } = values;
 
-    const { data, error } = await authClient.signUp.email({
-      email,
-      password,
-      name,
-      // optional if your setup supports it:
-      // callbackURL: "/",
-    });
+      const { error } = await authClient.signUp.email({
+        email,
+        password,
+        name,
+      });
 
-    if (error) {
-      toast.error(error.message ?? "Failed to create account");
-      return;
+      if (error) {
+        const msg = (error.message ?? "").toLowerCase();
+        if (
+          msg.includes("exist") ||
+          msg.includes("already") ||
+          msg.includes("unique")
+        ) {
+          toast.error(
+            "An account with this email already exists. Sign in instead.",
+          );
+        } else {
+          toast.error(error.message ?? "Failed to create account");
+        }
+        return;
+      }
+
+      toast.success("Account created!");
+      router.replace("/");
+      router.refresh();
+    } finally {
+      setLoading(false);
     }
-
-    // If your Better Auth config has autoSignIn on signup (default), you’re now logged in.
-    toast.success("Account created!");
-    router.replace("/");
-    router.refresh(); // ensures server components read the new cookie
   }
 
   async function handleMicrosoftSignIn() {
@@ -287,16 +303,28 @@ export function SignupForm({
                 <Field>
                   <Button
                     type="submit"
-                    disabled={microsoftLoading}
+                    disabled={loading || microsoftLoading}
+                    aria-busy={loading}
                     className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
                   >
+                    {loading ? (
+                      <>
+                        <Spinner />
+                        <span className="sr-only">Loading</span>
+                      </>
+                    ) : null}
                     {requiresMicrosoftSso
                       ? "Continue with Microsoft"
                       : "Create Account"}
                   </Button>
                   <FieldDescription className="text-center">
                     Already have an account?{" "}
-                    <a href="/account/login">Sign in</a>
+                    <Link
+                      href="/account/login"
+                      className="underline underline-offset-4"
+                    >
+                      Sign in
+                    </Link>
                   </FieldDescription>
                 </Field>
               </FieldGroup>

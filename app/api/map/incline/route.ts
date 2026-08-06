@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { isFiniteNumber, parseId } from "@/lib/utils";
 
 /**
  * POST /api/map/incline
  * Body: { id: number, incline: number }
- * Updates the incline (meters) for an edge_outside by id.
+ * Updates the incline (degrees) for an edge_outside by id.
  */
 const ROUTE = "/api/map/incline";
 export async function POST(req: Request) {
@@ -17,16 +17,21 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!body)
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
     const { id, incline } = body as { id: unknown; incline: unknown };
     console.log(`[API ${ROUTE} POST] called`, { id, incline });
 
     const edgeId = parseId(id);
-    if (!edgeId) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    if (!edgeId)
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     if (!isFiniteNumber(incline)) {
-      return NextResponse.json({ error: "Invalid incline: must be a number" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid incline: must be a number" },
+        { status: 400 },
+      );
     }
 
     const result = await db.execute(sql`
@@ -41,7 +46,8 @@ export async function POST(req: Request) {
     }
 
     const row = result.rows[0] as { id: number; incline: number };
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json(
       { id: row.id, incline: row.incline },
       { status: 200 },
@@ -49,6 +55,14 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Update failed", ...(process.env.NODE_ENV !== "production" ? { detail: String(message) } : {}) }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Update failed",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: String(message) }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

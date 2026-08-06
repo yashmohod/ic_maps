@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
-import { reloadGraph } from "@/lib/navigation";
+import { reloadGraphOr503 } from "@/lib/reload-graph-response";
 import { parseId } from "@/lib/utils";
 
 const ROUTE = "/api/destination/floorplan/edges";
@@ -98,7 +98,8 @@ export async function POST(req: Request) {
     const row = result.rows[0];
     if (!row?.id) return NextResponse.json({ error: "Insert/update edge failed" }, { status: 500 });
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({ id: row.id }, { status: 201 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} POST] error`, err);
@@ -124,7 +125,8 @@ export async function DELETE(req: Request) {
 
     if (result.rows.length === 0) return NextResponse.json({ error: "Edge not found" }, { status: 404 });
 
-    await reloadGraph().catch(console.error);
+    const __reloadErr = await reloadGraphOr503();
+    if (__reloadErr) return __reloadErr;
     return NextResponse.json({}, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API ${ROUTE} DELETE] error`, err);

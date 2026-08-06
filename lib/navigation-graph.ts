@@ -5,6 +5,7 @@ import type {
   NodeInside,
   NodeOutside,
 } from "@/db/schema";
+import { calcDistance } from "@/lib/geo";
 
 export type NavConditions = {
   is_pedestrian: boolean;
@@ -68,11 +69,19 @@ export function buildGraph(
   };
 
   for (const e of edge_outside) {
-    const from = e.node_a_id;
-    const to = e.node_b_id;
+    const a = e.node_a_id;
+    const b = e.node_b_id;
     const distance = e.distance ?? 0;
-    pushOutside(from, to, distance, e.id, e.incline);
-    if (e.bi_directional) pushOutside(to, from, distance, e.id, e.incline);
+    if (e.bi_directional) {
+      pushOutside(a, b, distance, e.id, e.incline);
+      pushOutside(b, a, distance, e.id, e.incline);
+    } else if (e.direction) {
+      // direction true => a -> b
+      pushOutside(a, b, distance, e.id, e.incline);
+    } else {
+      // direction false => b -> a
+      pushOutside(b, a, distance, e.id, e.incline);
+    }
   }
 
   const pushInside = (from: number, to: number, edgeId: number) => {
@@ -82,10 +91,16 @@ export function buildGraph(
   };
 
   for (const e of _edge_inside) {
-    const from = e.node_a_id;
-    const to = e.node_b_id;
-    pushInside(from, to, e.id);
-    if (e.bi_directional) pushInside(to, from, e.id);
+    const a = e.node_a_id;
+    const b = e.node_b_id;
+    if (e.bi_directional) {
+      pushInside(a, b, e.id);
+      pushInside(b, a, e.id);
+    } else if (e.direction) {
+      pushInside(a, b, e.id);
+    } else {
+      pushInside(b, a, e.id);
+    }
   }
 
   const buildingNodeOutside = new Map<number, number>();
@@ -114,6 +129,12 @@ export function nextNodeFromEdge(
   currentNodeId: number,
   edgeId: number,
 ): number | null {
+  const through = decodeThroughBuildingHop(edgeId);
+  if (through) {
+    if (currentNodeId === through.from) return through.to;
+    return null;
+  }
+
   const forward = graph.adjOutside.get(currentNodeId);
   const fwd = forward?.find((e) => e.edgeId === edgeId);
   if (fwd) return fwd.to;
@@ -125,6 +146,24 @@ export function nextNodeFromEdge(
     if (rev) return nodeId;
   }
   return null;
+}
+
+/** Synthetic negative edge id for outdoor entry→exit through-building hop. */
+export function encodeThroughBuildingHop(from: number, to: number): number {
+  // ids fit in 20 bits for campus-scale serial PKs
+  return -((from << 20) | (to & 0xfffff));
+}
+
+export function decodeThroughBuildingHop(
+  edgeId: number,
+): { from: number; to: number } | null {
+  if (edgeId >= 0) return null;
+  const packed = -edgeId;
+  return { from: packed >>> 20, to: packed & 0xfffff };
+}
+
+export function isThroughBuildingHop(edgeId: number): boolean {
+  return edgeId < 0;
 }
 
 export function endNodeFromPath(
@@ -240,10 +279,15 @@ export function through_building_bfs_with_cost(
   nav: NavConditions,
 ): Array<{ exitOutsideId: number; indoorCost: number }> {
   const { exits } = through_building_bfs(graph, buildingEntranceOutside, nav);
-  return [...exits.entries()].map(([exitOutsideId, indoorCost]) => ({
-    exitOutsideId,
-    indoorCost,
-  }));
+  const entry = graph.nodesOutside.get(buildingEntranceOutside);
+  return [...exits.keys()].map((exitOutsideId) => {
+    const exit = graph.nodesOutside.get(exitOutsideId);
+    const indoorCost =
+      entry && exit
+        ? calcDistance(entry.lat, entry.lng, exit.lat, exit.lng)
+        : 1;
+    return { exitOutsideId, indoorCost };
+  });
 }
 
 /** Reconstruct indoor node ids from entrance outdoor node to exit outdoor node. */

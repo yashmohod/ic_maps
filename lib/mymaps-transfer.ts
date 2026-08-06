@@ -46,12 +46,12 @@ export const myMapsTransferSchema = z.object({
   version: z.literal(1),
   exportedAt: z.string().optional(),
   mapName: z.string().optional(),
-  nodes: z.array(transferNodeSchema).default([]),
-  edges: z.array(transferEdgeSchema).default([]),
-  polygons: z.array(transferPolygonSchema).default([]),
-  lines: z.array(transferLineSchema).default([]),
-  points: z.array(transferPointSchema).default([]),
-  texts: z.array(transferTextSchema).default([]),
+  nodes: z.array(transferNodeSchema).max(5000).default([]),
+  edges: z.array(transferEdgeSchema).max(10000).default([]),
+  polygons: z.array(transferPolygonSchema).max(2000).default([]),
+  lines: z.array(transferLineSchema).max(2000).default([]),
+  points: z.array(transferPointSchema).max(5000).default([]),
+  texts: z.array(transferTextSchema).max(2000).default([]),
 });
 
 export type MyMapsTransfer = z.infer<typeof myMapsTransferSchema>;
