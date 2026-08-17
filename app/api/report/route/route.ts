@@ -182,6 +182,23 @@ export async function POST(req: Request) {
     );
     if (!destCheck.ok) return NextResponse.json({ error: destCheck.error }, { status: 400 });
 
+    if (data.locationType === "parking_lot") {
+      const [inserted] = await db
+        .insert(routeReport)
+        .values({
+          text: data.text,
+          location_type: data.locationType,
+          destination_id: data.destinationId,
+          pin_lat: data.pinLat,
+          pin_lng: data.pinLng,
+          user_id: userId,
+        })
+        .returning({ id: routeReport.id });
+
+      if (!inserted) return NextResponse.json({ error: "Failed to create report" }, { status: 500 });
+      return NextResponse.json({ id: inserted.id }, { status: 201 });
+    }
+
     if (data.featureType === "entrance") {
       const valid = await verifyOutsideNode(
         data.destinationId,

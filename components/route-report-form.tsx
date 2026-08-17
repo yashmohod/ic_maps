@@ -123,7 +123,7 @@ export function RouteReportForm({
   );
 
   useEffect(() => {
-    if (!destinationId || !featureType) {
+    if (!destinationId || !featureType || locationType !== "building") {
       setEntrances([]);
       setInsideNodes([]);
       return;
@@ -184,7 +184,7 @@ export function RouteReportForm({
     return () => {
       cancelled = true;
     };
-  }, [destinationId, featureType]);
+  }, [destinationId, featureType, locationType]);
 
   const filteredInsideNodes = useMemo(() => {
     if (
@@ -281,7 +281,11 @@ export function RouteReportForm({
     if (descriptionRequired && text.trim().length < 10) return false;
     if (pinRequired && !pin) return false;
 
-    if (locationType === "building" || locationType === "parking_lot") {
+    if (locationType === "parking_lot") {
+      if (!destinationId || !pin) return false;
+    }
+
+    if (locationType === "building") {
       if (!destinationId || !featureType) return false;
       if (hasEmptyFeatureList) return false;
       if (featureType === "entrance" && !selectedOutsideNodeId) return false;
@@ -420,7 +424,7 @@ export function RouteReportForm({
               </div>
             )}
 
-            {destinationId != null && (
+            {locationType === "building" && destinationId != null && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Feature type</label>
                 <ComboboxSelect
@@ -433,7 +437,9 @@ export function RouteReportForm({
               </div>
             )}
 
-            {featureType === "entrance" && destinationId != null && (
+            {locationType === "building" &&
+              featureType === "entrance" &&
+              destinationId != null && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Entrance</label>
                 {featureDataLoading ? (
@@ -457,9 +463,10 @@ export function RouteReportForm({
               </div>
             )}
 
-            {(featureType === "elevator" ||
-              featureType === "ramp" ||
-              featureType === "stairs") &&
+            {locationType === "building" &&
+              (featureType === "elevator" ||
+                featureType === "ramp" ||
+                featureType === "stairs") &&
               destinationId != null && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium">

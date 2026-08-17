@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   // reactStrictMode: false,
   basePath: "/ic_maps",
   skipTrailingSlashRedirect: true,
-  output: "standalone",
   // next/image optimizer does not resolve basePath in the url= param; serve public files directly
   images: {
     unoptimized: true,

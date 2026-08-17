@@ -298,7 +298,7 @@ export async function POST(req: Request) {
         const pointWkt = `POINT(${n.lng} ${n.lat})`;
         const result = await client.query<{ id: number }>(
           `INSERT INTO node_outside
-             (lat, lng, location, is_pedestrian, is_vehicular, is_stairs, is_ramp)
+             (lat, lng, location, is_pedestrian, is_vehicular, is_stairs, incline)
            VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7)
            RETURNING id`,
           [
@@ -308,7 +308,7 @@ export async function POST(req: Request) {
             n.isPedestrian,
             n.isVehicular,
             n.isStairs,
-            n.isRamp,
+            n.inclineDegrees,
           ],
         );
         const id = result.rows[0]?.id;
@@ -326,9 +326,15 @@ export async function POST(req: Request) {
              is_pedestrian = is_pedestrian OR $2,
              is_vehicular = is_vehicular OR $3,
              is_stairs = is_stairs OR $4,
-             is_ramp = is_ramp OR $5
+             incline = GREATEST(incline, $5)
            WHERE id = $1`,
-          [dbId, n.isPedestrian, n.isVehicular, n.isStairs, n.isRamp],
+          [
+            dbId,
+            n.isPedestrian,
+            n.isVehicular,
+            n.isStairs,
+            n.inclineDegrees,
+          ],
         );
       }
 
@@ -353,8 +359,8 @@ export async function POST(req: Request) {
 
         const result = await client.query<{ id: number }>(
           `INSERT INTO edge_outside
-             (node_a_id, node_b_id, bi_directional, direction, distance, incline)
-           VALUES ($1, $2, $3, $4, $5, $6)
+             (node_a_id, node_b_id, bi_directional, direction, distance)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT ON CONSTRAINT edge_outside_pair_unique DO NOTHING
            RETURNING id`,
           [
@@ -363,7 +369,6 @@ export async function POST(req: Request) {
             pair.bi_directional,
             pair.direction,
             distance,
-            e.inclineDegrees,
           ],
         );
         if (result.rows[0]?.id != null) {

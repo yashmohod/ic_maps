@@ -125,6 +125,7 @@ async function insertDestinations(
         ...b.feature.properties,
         name: b.name,
         isParkingLot: b.isParkingLot,
+        destId: undefined as number | undefined,
       },
     };
     const result = await client.query<{ id: number }>(
@@ -242,7 +243,7 @@ async function insertWalkGraph(
     const pointWkt = `POINT(${n.lng} ${n.lat})`;
     const result = await client.query<{ id: number }>(
       `INSERT INTO node_outside
-         (lat, lng, location, is_pedestrian, is_vehicular, is_stairs, is_ramp)
+         (lat, lng, location, is_pedestrian, is_vehicular, is_stairs, incline)
        VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7)
        RETURNING id`,
       [
@@ -252,7 +253,7 @@ async function insertWalkGraph(
         n.isPedestrian,
         n.isVehicular,
         n.isStairs,
-        n.isRamp,
+        n.inclineDegrees,
       ],
     );
     const id = result.rows[0]!.id;
@@ -268,9 +269,9 @@ async function insertWalkGraph(
          is_pedestrian = is_pedestrian OR $2,
          is_vehicular = is_vehicular OR $3,
          is_stairs = is_stairs OR $4,
-         is_ramp = is_ramp OR $5
+         incline = GREATEST(incline, $5)
        WHERE id = $1`,
-      [dbId, n.isPedestrian, n.isVehicular, n.isStairs, n.isRamp],
+      [dbId, n.isPedestrian, n.isVehicular, n.isStairs, n.inclineDegrees],
     );
   }
 
@@ -287,8 +288,8 @@ async function insertWalkGraph(
     const distance = calcDistance(na.lat, na.lng, nb.lat, nb.lng);
     const result = await client.query<{ id: number }>(
       `INSERT INTO edge_outside
-         (node_a_id, node_b_id, bi_directional, direction, distance, incline)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (node_a_id, node_b_id, bi_directional, direction, distance)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT ON CONSTRAINT edge_outside_pair_unique DO NOTHING
        RETURNING id`,
       [
@@ -297,7 +298,6 @@ async function insertWalkGraph(
         pair.bi_directional,
         pair.direction,
         distance,
-        e.inclineDegrees,
       ],
     );
     if (result.rows[0]?.id != null) {
@@ -374,13 +374,13 @@ async function main() {
     bbox: importBbox,
     campusRing,
   });
-  const inclinedEdges = graph.edges.filter((e) => e.inclineDegrees > 0).length;
+  const inclinedNodes = graph.nodes.filter((n) => n.inclineDegrees > 0).length;
 
   console.log({
     mode: "full",
     osmNodes: graph.nodes.length,
     osmEdges: graph.edges.length,
-    inclinedEdges,
+    inclinedNodes,
     buildings: buildingCount,
     parkingLots: parkingCount,
     entrances: entrances.length,

@@ -142,7 +142,6 @@ export async function GET(req: Request) {
         bi_directional: boolean;
         direction: boolean;
         distance: number;
-        incline: number;
       }>`
         SELECT
           id,
@@ -150,8 +149,7 @@ export async function GET(req: Request) {
           node_b_id,
           bi_directional,
           direction,
-          distance,
-          incline
+          distance
         FROM edge_outside
         WHERE id = ${nid};
       `);
@@ -166,7 +164,6 @@ export async function GET(req: Request) {
           biDirectional: row.bi_directional,
           direction: row.direction,
           distance: row.distance,
-          incline: row.incline,
         },
       }, { status: 200 });
     }
@@ -178,7 +175,6 @@ export async function GET(req: Request) {
       bi_directional: boolean;
       direction: boolean;
       distance: number;
-      incline: number;
     }>`
       SELECT
         id,
@@ -186,8 +182,7 @@ export async function GET(req: Request) {
         node_b_id,
         bi_directional,
         direction,
-        distance,
-        incline
+        distance
       FROM edge_outside;
     `);
 
@@ -197,7 +192,6 @@ export async function GET(req: Request) {
         from: curedge.direction ? curedge.node_a_id : curedge.node_b_id,
         to: curedge.direction ? curedge.node_b_id : curedge.node_a_id,
         biDirectional: curedge.bi_directional,
-        incline: curedge.incline,
       };
     });
 

@@ -30,9 +30,9 @@ function outdoorNode(id: number, lat: number, lng: number): NodeOutside {
     is_vehicular: false,
     is_elevator: false,
     is_stairs: false,
-    is_ramp: false,
     is_blue_light: false,
     is_dead: false,
+    incline: 0,
     location: { x: lng, y: lat },
   };
 }
@@ -51,7 +51,6 @@ describe("edgePathToNodeIds", () => {
         bi_directional: true,
         direction: true,
         distance: 50,
-        incline: 0,
       },
     ];
     const graph = buildGraph([], [], outside, edges, []);
@@ -75,7 +74,6 @@ describe("indoor shortcut detection", () => {
         bi_directional: true,
         direction: true,
         distance: 30,
-        incline: 0,
       },
       {
         id: 2,
@@ -84,7 +82,6 @@ describe("indoor shortcut detection", () => {
         bi_directional: true,
         direction: true,
         distance: 30,
-        incline: 0,
       },
     ];
     const inside: NodeInside[] = [

@@ -60,11 +60,11 @@ const pinSchema = z.object({
   pinLng: z.number().min(-180).max(180),
 });
 
-function campusLocationSchema(locationType: "building" | "parking_lot") {
+function buildingLocationSchema() {
   return z.discriminatedUnion("featureType", [
     z
       .object({
-        locationType: z.literal(locationType),
+        locationType: z.literal("building"),
         destinationId: z.number().int().positive(),
         featureType: z.literal("entrance"),
         nodeOutsideId: z.number().int().positive(),
@@ -73,7 +73,7 @@ function campusLocationSchema(locationType: "building" | "parking_lot") {
       .strict(),
     z
       .object({
-        locationType: z.literal(locationType),
+        locationType: z.literal("building"),
         destinationId: z.number().int().positive(),
         featureType: z.enum(["elevator", "ramp", "stairs"]),
         nodeInsideId: z.number().int().positive(),
@@ -82,7 +82,7 @@ function campusLocationSchema(locationType: "building" | "parking_lot") {
       .strict(),
     z
       .object({
-        locationType: z.literal(locationType),
+        locationType: z.literal("building"),
         destinationId: z.number().int().positive(),
         featureType: z.literal("other"),
         text: requiredTextSchema,
@@ -93,6 +93,16 @@ function campusLocationSchema(locationType: "building" | "parking_lot") {
   ]);
 }
 
+const parkingLotLocationSchema = z
+  .object({
+    locationType: z.literal("parking_lot"),
+    destinationId: z.number().int().positive(),
+    text: requiredTextSchema,
+    pinLat: z.number().min(-90).max(90),
+    pinLng: z.number().min(-180).max(180),
+  })
+  .strict();
+
 export const routeReportPayloadSchema = z.union([
   z
     .object({
@@ -102,8 +112,8 @@ export const routeReportPayloadSchema = z.union([
       pinLng: z.number().min(-180).max(180),
     })
     .strict(),
-  campusLocationSchema("building"),
-  campusLocationSchema("parking_lot"),
+  buildingLocationSchema(),
+  parkingLotLocationSchema,
 ]);
 
 export type RouteReportPayload = z.infer<typeof routeReportPayloadSchema>;
@@ -188,6 +198,7 @@ export function requiresDescription(
   featureType: RouteReportFeatureType | null,
 ): boolean {
   if (locationType === "other") return true;
+  if (locationType === "parking_lot") return true;
   if (featureType === "other") return true;
   return false;
 }
@@ -197,6 +208,7 @@ export function requiresPin(
   featureType: RouteReportFeatureType | null,
 ): boolean {
   if (locationType === "other") return true;
+  if (locationType === "parking_lot") return true;
   if (featureType === "other") return true;
   return false;
 }
@@ -206,6 +218,7 @@ export function showsMap(
   featureType: RouteReportFeatureType | null,
 ): boolean {
   if (locationType === "other") return true;
+  if (locationType === "parking_lot") return true;
   if (featureType === "entrance" || featureType === "other") return true;
   return false;
 }
@@ -302,7 +315,21 @@ export function buildRouteReportPayload(input: {
     return parsed.success ? parsed.data : null;
   }
 
-  if (!input.destinationId || !input.featureType) return null;
+  if (!input.destinationId) return null;
+
+  if (input.locationType === "parking_lot") {
+    if (!input.pin) return null;
+    const parsed = routeReportPayloadSchema.safeParse({
+      locationType: "parking_lot",
+      destinationId: input.destinationId,
+      text: trimmedText,
+      pinLat: input.pin.lat,
+      pinLng: input.pin.lng,
+    });
+    return parsed.success ? parsed.data : null;
+  }
+
+  if (!input.featureType) return null;
 
   if (input.featureType === "entrance") {
     if (!input.selectedOutsideNodeId) return null;

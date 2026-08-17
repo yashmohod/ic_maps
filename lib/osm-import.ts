@@ -72,7 +72,8 @@ export type OsmGraphNode = {
   isPedestrian: boolean;
   isVehicular: boolean;
   isStairs: boolean;
-  isRamp: boolean;
+  /** Absolute slope angle in degrees (0 if unknown / untagged). */
+  inclineDegrees: number;
 };
 
 export type OsmGraphEdge = {
@@ -80,7 +81,7 @@ export type OsmGraphEdge = {
   osmA: number;
   osmB: number;
   biDirectional: boolean;
-  /** Absolute slope angle in degrees (0 if unknown / untagged). */
+  /** Absolute slope angle in degrees (0 if unknown / untagged). Used while densifying; stamped onto nodes. */
   inclineDegrees: number;
 };
 
@@ -230,9 +231,9 @@ out body qt;
 }
 
 /**
- * Parse OSM incline tag → absolute degrees for edge_outside.incline.
- * Supports `5%`, `5°`, bare numbers (treated as degrees). up/down/yes → 0
- * (boolean presence only; no numeric slope).
+ * Parse OSM incline tag → absolute degrees for node_outside.incline.
+ * Supports `5%` (percent grade), `5°`, bare numbers (treated as degrees).
+ * up/down/yes → 0 (boolean presence only; no numeric slope).
  */
 export function parseOsmInclineDegrees(raw: string | undefined): number {
   if (!raw) return 0;
@@ -474,9 +475,9 @@ export function parseOsmBuildingEntrances(
 function flagsForHighway(highway: string, tags: Record<string, string>) {
   const isStairs =
     highway === "steps" || tags.footway === "steps" || tags.stairs === "yes";
-  // OSM ramps are sparse; accept explicit ramp tags / names only (not bare incline=).
+  // Accessibility / named ramps (numeric incline stamped separately when tagged).
   const name = tags.name ?? "";
-  const isRamp =
+  const isRampWay =
     !isStairs &&
     (tags.ramp === "yes" ||
       tags["ramp:wheelchair"] === "yes" ||
@@ -489,9 +490,9 @@ function flagsForHighway(highway: string, tags: Record<string, string>) {
     (PEDESTRIAN_HIGHWAYS.has(highway) ||
       ROAD_HIGHWAYS.has(highway) ||
       isStairs ||
-      isRamp);
+      isRampWay);
   const isVehicular = ROAD_HIGHWAYS.has(highway) && tags.motor_vehicle !== "no";
-  return { isPedestrian, isVehicular, isStairs, isRamp };
+  return { isPedestrian, isVehicular, isStairs };
 }
 
 /**
@@ -575,7 +576,7 @@ export function densifyOsmGraph(
         isPedestrian: a.isPedestrian || b.isPedestrian,
         isVehicular: a.isVehicular || b.isVehicular,
         isStairs: a.isStairs || b.isStairs,
-        isRamp: a.isRamp || b.isRamp,
+        inclineDegrees: Math.max(a.inclineDegrees, b.inclineDegrees, e.inclineDegrees),
       };
       nodes.push(mid);
       nodeById.set(mid.osmId, mid);
@@ -638,7 +639,7 @@ export function parseOsmWalkGraph(
       isPedestrian: boolean;
       isVehicular: boolean;
       isStairs: boolean;
-      isRamp: boolean;
+      inclineDegrees: number;
     }
   >();
   const edgeByKey = new Map<string, OsmGraphEdge>();
@@ -649,7 +650,7 @@ export function parseOsmWalkGraph(
       isPedestrian: boolean;
       isVehicular: boolean;
       isStairs: boolean;
-      isRamp: boolean;
+      inclineDegrees: number;
     },
   ) => {
     const prev = flagByOsm.get(osmId);
@@ -660,7 +661,7 @@ export function parseOsmWalkGraph(
     prev.isPedestrian ||= next.isPedestrian;
     prev.isVehicular ||= next.isVehicular;
     prev.isStairs ||= next.isStairs;
-    prev.isRamp ||= next.isRamp;
+    prev.inclineDegrees = Math.max(prev.inclineDegrees, next.inclineDegrees);
   };
 
   for (const el of osm.elements) {
@@ -671,14 +672,14 @@ export function parseOsmWalkGraph(
     const flags = flagsForHighway(highway, tags);
     if (!flags.isPedestrian && !flags.isVehicular) continue;
 
+    const inclineDegrees = parseOsmInclineDegrees(tags.incline);
     const wayNodes = el.nodes ?? [];
     for (const osmId of wayNodes) {
       if (!nodeById.has(osmId)) continue;
-      touchFlags(osmId, flags);
+      touchFlags(osmId, { ...flags, inclineDegrees });
     }
 
     const oneway = onewayAlongWay(tags);
-    const inclineDegrees = parseOsmInclineDegrees(tags.incline);
     for (let i = 0; i < wayNodes.length - 1; i++) {
       const a = wayNodes[i]!;
       const b = wayNodes[i + 1]!;
@@ -717,7 +718,7 @@ export function parseOsmWalkGraph(
       isPedestrian: flags.isPedestrian,
       isVehicular: flags.isVehicular,
       isStairs: flags.isStairs,
-      isRamp: flags.isRamp,
+      inclineDegrees: flags.inclineDegrees,
     });
   }
 

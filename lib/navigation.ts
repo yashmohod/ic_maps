@@ -525,7 +525,7 @@ async function aStar(
         if (
           (navConditions.is_avoid_stairs ? !neighborNode.is_stairs : true) &&
           (navConditions.is_incline_limit
-            ? neighbor.incline <= navConditions.max_incline
+            ? (neighborNode.incline ?? 0) <= navConditions.max_incline
             : true)
         ) {
           check = true;

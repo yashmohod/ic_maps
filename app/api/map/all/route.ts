@@ -15,8 +15,8 @@ export async function GET() {
       is_vehicular: boolean;
       is_elevator: boolean;
       is_stairs: boolean;
-      is_ramp: boolean;
       is_dead: boolean;
+      incline: number;
     }>`
     SELECT
       id,
@@ -27,8 +27,8 @@ export async function GET() {
       is_vehicular,
       is_elevator,
       is_stairs,
-      is_ramp,
-      is_dead
+      is_dead,
+      incline
     FROM node_outside;
   `);
 
@@ -42,8 +42,8 @@ export async function GET() {
         isVehicular: Boolean(n.is_vehicular),
         isElevator: Boolean(n.is_elevator),
         isStairs: Boolean(n.is_stairs),
-        isRamp: Boolean(n.is_ramp),
         isDead: Boolean(n.is_dead),
+        incline: Number(n.incline ?? 0),
       };
     });
 
@@ -53,15 +53,13 @@ export async function GET() {
       node_b_id: number;
       bi_directional: boolean;
       direction: boolean;
-      incline: number;
     }>`
     SELECT
       id,
       node_a_id,
       node_b_id,
       bi_directional,
-      direction,
-      incline
+      direction
     FROM edge_outside;
   `);
 
@@ -73,7 +71,6 @@ export async function GET() {
         from: Number(a),
         to: Number(b),
         biDirectional: Boolean(curedge.bi_directional),
-        incline: Number(curedge.incline),
       };
     });
 

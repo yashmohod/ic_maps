@@ -8,7 +8,7 @@ import { isFiniteNumber, parseId } from "@/lib/utils";
 /**
  * POST /api/map/incline
  * Body: { id: number, incline: number }
- * Updates the incline (degrees) for an edge_outside by id.
+ * Updates the incline (degrees) for a node_outside by id.
  */
 const ROUTE = "/api/map/incline";
 export async function POST(req: Request) {
@@ -23,8 +23,8 @@ export async function POST(req: Request) {
     const { id, incline } = body as { id: unknown; incline: unknown };
     console.log(`[API ${ROUTE} POST] called`, { id, incline });
 
-    const edgeId = parseId(id);
-    if (!edgeId)
+    const nodeId = parseId(id);
+    if (!nodeId)
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     if (!isFiniteNumber(incline)) {
@@ -35,14 +35,14 @@ export async function POST(req: Request) {
     }
 
     const result = await db.execute(sql`
-      UPDATE edge_outside
+      UPDATE node_outside
       SET incline = ${incline as number}
-      WHERE id = ${edgeId}
+      WHERE id = ${nodeId}
       RETURNING id, incline;
     `);
 
     if (result.rows.length === 0) {
-      return NextResponse.json({ error: "Edge not found" }, { status: 404 });
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
     const row = result.rows[0] as { id: number; incline: number };

@@ -18,8 +18,9 @@ export type MarkerNode = {
   isVehicular: boolean;
   isStairs: boolean;
   isElevator: boolean;
-  isRamp: boolean;
   isDead: boolean;
+  /** Degrees; >0 treated as ramp/slope for incline-limit routing. */
+  incline: number;
 };
 
 /** Simplified marker used in consumer pages that only need position */
@@ -34,7 +35,8 @@ export type EdgeIndexEntry = {
   from: number;
   to: number;
   biDirectional: boolean;
-  incline: number;
+  /** MyMaps-only; outdoor campus edges do not store incline. */
+  incline?: number;
   color?: string;
 };
 

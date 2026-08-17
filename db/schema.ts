@@ -214,9 +214,10 @@ export const nodeOutside = pgTable(
     is_vehicular: boolean("is_vehicular").notNull().default(false),
     is_elevator: boolean("is_elevator").notNull().default(false),
     is_stairs: boolean("is_stairs").notNull().default(false),
-    is_ramp: boolean("is_ramp").notNull().default(false),
     is_blue_light: boolean("is_blue_light").notNull().default(false),
     is_dead: boolean("is_dead").notNull().default(false),
+    /** Slope angle in degrees; >0 means ramp/slope for incline-limit routing. */
+    incline: doublePrecision("incline").notNull().default(0),
 
     // PostGIS point: x = lng, y = lat
     location: geometry("location", {
@@ -247,7 +248,6 @@ export const edgeOutside = pgTable(
     bi_directional: boolean("bi_directional").notNull().default(true),
     direction: boolean("direction").notNull().default(true), // true a -> b; false b -> a
     distance: doublePrecision("distance").notNull(), // meters
-    incline: doublePrecision("incline").notNull().default(0), // degrees (ADA-style slope angle)
   },
   (t) => [
     unique("edge_outside_pair_unique").on(t.node_a_id, t.node_b_id),

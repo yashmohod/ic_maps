@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/card";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import { withBasePath } from "@/lib/base-path";
-import { adminMediaHref } from "@/lib/private-media";
+import { adminMediaHref } from "@/lib/private-media-client";
 import {
   buildReportDateQueryString,
   DEFAULT_REPORT_DATE_FILTER,

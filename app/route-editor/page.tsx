@@ -85,7 +85,7 @@ export default function RouteEditor(): JSX.Element {
     () => new Set(),
   );
 
-  type NavModeKey = 0 | 1 | 3 | 4 | 5 | 6;
+  type NavModeKey = 0 | 1 | 3 | 4 | 5;
 
   type MarkerFlagKey = keyof Pick<
     MarkerNode,
@@ -93,7 +93,6 @@ export default function RouteEditor(): JSX.Element {
     | "isVehicular"
     | "isElevator"
     | "isStairs"
-    | "isRamp"
     | "isBlueLight"
   >;
 
@@ -106,7 +105,6 @@ export default function RouteEditor(): JSX.Element {
     1: { name: "Vehicular", param: "isVehicular" },
     3: { name: "Elevator", param: "isElevator" },
     4: { name: "Stairs", param: "isStairs" },
-    6: { name: "Ramp", param: "isRamp" },
     5: { name: "Blue Light", param: "isBlueLight" },
   } satisfies Record<NavModeKey, NavModeInfo>;
   // UI
@@ -259,7 +257,6 @@ export default function RouteEditor(): JSX.Element {
             from: resp?.a ?? "",
             to: resp?.b ?? "",
             biDirectional: biDirectionalEdges,
-            incline: 0,
           },
         ]);
       } else {
@@ -315,13 +312,13 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
-  async function setEdgeIncline(edgeId: number, incline: number) {
+  async function setNodeIncline(nodeId: number, incline: number) {
     try {
       const req = await fetch(withBasePath("/api/map/incline"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: edgeId,
+          id: nodeId,
           incline,
         }),
       });
@@ -329,10 +326,8 @@ export default function RouteEditor(): JSX.Element {
         toast.error("Could not update incline.");
         return;
       }
-      setEdgeIndex((list) =>
-        list.map((e) =>
-          e.id === edgeId ? { ...e, id: e.id ?? edgeId, incline } : e,
-        ),
+      setMarkers((list) =>
+        list.map((m) => (m.id === nodeId ? { ...m, incline } : m)),
       );
       toast.success("Incline updated.");
     } catch (err) {
@@ -548,9 +543,9 @@ export default function RouteEditor(): JSX.Element {
               isVehicular: false,
               isStairs: false,
               isElevator: false,
-              isRamp: false,
               isBlueLight: false,
               isDead: false,
+              incline: 0,
             },
           ]);
         else {
@@ -679,17 +674,12 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
-  // Selected edge for toolbox (support both id and key from API)
-  const selectedEdge =
-    selectedEdgeId === null
-      ? null
-      : edgeIndex.find((e) => e.id === selectedEdgeId);
-
+  // Selected edge id used for delete clicks on the edge layer
   useEffect(() => {
-    if (selectedEdgeId === null) return;
-    const edge = edgeIndex.find((e) => e.id === selectedEdgeId);
-    setInclineInput(String(edge?.incline ?? 0));
-  }, [selectedEdgeId, edgeIndex]);
+    if (selectedId === null) return;
+    const node = markers.find((m) => m.id === selectedId);
+    setInclineInput(String(node?.incline ?? 0));
+  }, [selectedId, markers]);
 
   useEffect(() => {
     void getAllFeature();
@@ -853,16 +843,16 @@ export default function RouteEditor(): JSX.Element {
           </div>
         )}
 
-        {mode === "select" && selectedEdgeId !== null && (
+        {mode === "select" && selectedId !== null && (
           <div
             className={`rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
           >
-            <span className="text-sm font-medium">Edge incline (°)</span>
+            <span className="text-sm font-medium">Node incline (°)</span>
             <Input
               type="number"
               step="0.1"
-              min="-100"
-              max="100"
+              min="0"
+              max="90"
               value={inclineInput}
               onChange={(e) => setInclineInput(e.target.value)}
               className="w-24 h-8"
@@ -877,7 +867,7 @@ export default function RouteEditor(): JSX.Element {
                   toast.error("Enter a valid number.");
                   return;
                 }
-                void setEdgeIncline(selectedEdgeId, value);
+                void setNodeIncline(selectedId, value);
               }}
             >
               Set incline
@@ -885,7 +875,7 @@ export default function RouteEditor(): JSX.Element {
             <button
               type="button"
               className="text-sm text-muted-foreground hover:text-foreground"
-              onClick={() => setSelectedEdgeId(null)}
+              onClick={() => setSelectedId(null)}
               aria-label="Close"
             >
               Close

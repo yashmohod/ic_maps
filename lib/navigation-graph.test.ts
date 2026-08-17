@@ -22,9 +22,9 @@ function outside(
     is_vehicular: false,
     is_elevator: false,
     is_stairs: false,
-    is_ramp: false,
     is_blue_light: false,
     is_dead: false,
+    incline: 0,
     location: { x: lng, y: lat },
     ...extra,
   } as NodeOutside;
@@ -41,7 +41,6 @@ describe("buildGraph one-way edges", () => {
         bi_directional: false,
         direction: false, // b -> a
         distance: 100,
-        incline: 0,
       },
     ];
     const g = buildGraph([], [], nodes, edges, [], 1);

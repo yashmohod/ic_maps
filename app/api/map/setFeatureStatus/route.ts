@@ -10,7 +10,6 @@ const navModeColumnMap = {
   isVehicular: "is_vehicular",
   isElevator: "is_elevator",
   isStairs: "is_stairs",
-  isRamp: "is_ramp",
   isBlueLight: "is_blue_light",
   isBluelight: "is_blue_light",
   is_blue_light: "is_blue_light",

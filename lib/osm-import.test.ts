@@ -52,10 +52,10 @@ describe("parseOsmWalkGraph", () => {
     const n3 = g.nodes.find((n) => n.osmId === 3)!;
     expect(n3.isStairs).toBe(true);
     expect(n3.isPedestrian).toBe(true);
-    expect(n3.isRamp).toBe(false);
+    expect(n3.inclineDegrees).toBe(0);
   });
 
-  it("tags explicit ramp ways as ramps, not stairs", () => {
+  it("tags explicit ramp ways as pedestrian (incline 0 without numeric tag)", () => {
     const g = parseOsmWalkGraph(
       {
         elements: [
@@ -72,7 +72,7 @@ describe("parseOsmWalkGraph", () => {
       { maxEdgeMeters: 1000 },
     );
     const n1 = g.nodes.find((n) => n.osmId === 1)!;
-    expect(n1.isRamp).toBe(true);
+    expect(n1.inclineDegrees).toBe(0);
     expect(n1.isStairs).toBe(false);
     expect(n1.isPedestrian).toBe(true);
   });
@@ -122,7 +122,7 @@ describe("densifyOsmGraph", () => {
             isPedestrian: true,
             isVehicular: false,
             isStairs: false,
-            isRamp: false,
+            inclineDegrees: 0,
           },
           {
             osmId: 2,
@@ -131,7 +131,7 @@ describe("densifyOsmGraph", () => {
             isPedestrian: true,
             isVehicular: false,
             isStairs: false,
-            isRamp: false,
+            inclineDegrees: 0,
           },
         ],
         edges: [{ osmA: 1, osmB: 2, biDirectional: true, inclineDegrees: 0 }],
@@ -192,7 +192,7 @@ describe("onewayAlongWay / parseOsmWalkGraph direction", () => {
     });
   });
 
-  it("parses numeric incline into degrees and marks ramp nodes", () => {
+  it("parses numeric incline into degrees on nodes and edges", () => {
     const g = parseOsmWalkGraph(
       {
         elements: [
@@ -210,7 +210,9 @@ describe("onewayAlongWay / parseOsmWalkGraph direction", () => {
     );
     expect(g.edges[0]!.inclineDegrees).toBeGreaterThan(4);
     expect(g.edges[0]!.inclineDegrees).toBeLessThan(6);
-    expect(g.nodes.every((n) => n.isRamp)).toBe(true);
+    expect(g.nodes.every((n) => n.inclineDegrees > 4 && n.inclineDegrees < 6)).toBe(
+      true,
+    );
   });
 
   it("opens both ways when opposite one-ways share a segment", () => {

@@ -196,7 +196,7 @@ export async function GET(req: Request) {
         is_vehicular: boolean;
         is_elevator: boolean;
         is_stairs: boolean;
-        is_ramp: boolean;
+        incline: number;
         location: unknown;
       }>`
         SELECT
@@ -208,7 +208,7 @@ export async function GET(req: Request) {
           is_vehicular,
           is_elevator,
           is_stairs,
-          is_ramp,
+          incline,
           location
         FROM node_outside
         WHERE id = ${nid};
@@ -228,7 +228,7 @@ export async function GET(req: Request) {
             isVehicular: row.is_vehicular,
             isElevator: row.is_elevator,
             isStairs: row.is_stairs,
-            isRamp: row.is_ramp,
+            incline: Number(row.incline ?? 0),
             location: row.location,
           },
         },
@@ -245,7 +245,7 @@ export async function GET(req: Request) {
       is_vehicular: boolean;
       is_elevator: boolean;
       is_stairs: boolean;
-      is_ramp: boolean;
+      incline: number;
       location: unknown;
     }>`
       SELECT
@@ -257,7 +257,7 @@ export async function GET(req: Request) {
         is_vehicular,
         is_elevator,
         is_stairs,
-        is_ramp,
+        incline,
         location
       FROM node_outside;
     `);
@@ -271,7 +271,7 @@ export async function GET(req: Request) {
       isVehicular: row.is_vehicular,
       isElevator: row.is_elevator,
       isStairs: row.is_stairs,
-      isRamp: row.is_ramp,
+      incline: Number(row.incline ?? 0),
       location: row.location,
     }));
 

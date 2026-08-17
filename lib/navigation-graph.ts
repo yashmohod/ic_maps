@@ -25,7 +25,7 @@ export type Graph = {
   >;
   adjOutside: Map<
     number,
-    Array<{ to: number; distance: number; edgeId: number; incline: number }>
+    Array<{ to: number; distance: number; edgeId: number }>
   >;
   /** destination_id -> one representative node_outside_id (for reference) */
   buildingNodeOutside: Map<number, number>;
@@ -54,17 +54,16 @@ export function buildGraph(
   >();
   const adjOutside = new Map<
     number,
-    Array<{ to: number; distance: number; edgeId: number; incline: number }>
+    Array<{ to: number; distance: number; edgeId: number }>
   >();
   const pushOutside = (
     from: number,
     to: number,
     distance: number,
     edgeId: number,
-    incline: number,
   ) => {
     const arr = adjOutside.get(from) ?? [];
-    arr.push({ to, distance, edgeId, incline });
+    arr.push({ to, distance, edgeId });
     adjOutside.set(from, arr);
   };
 
@@ -73,14 +72,14 @@ export function buildGraph(
     const b = e.node_b_id;
     const distance = e.distance ?? 0;
     if (e.bi_directional) {
-      pushOutside(a, b, distance, e.id, e.incline);
-      pushOutside(b, a, distance, e.id, e.incline);
+      pushOutside(a, b, distance, e.id);
+      pushOutside(b, a, distance, e.id);
     } else if (e.direction) {
       // direction true => a -> b
-      pushOutside(a, b, distance, e.id, e.incline);
+      pushOutside(a, b, distance, e.id);
     } else {
       // direction false => b -> a
-      pushOutside(b, a, distance, e.id, e.incline);
+      pushOutside(b, a, distance, e.id);
     }
   }
 
