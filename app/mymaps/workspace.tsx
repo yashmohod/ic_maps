@@ -32,7 +32,6 @@ import {
   Source,
   Layer,
   type MapRef,
-  type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import maplibregl, {
   type LineLayerSpecification,
@@ -95,7 +94,7 @@ import {
   surfacePanelClass,
   surfaceSubtleClass,
 } from "@/lib/panel-classes";
-import type { EdgeIndexEntry, ViewStateLite } from "@/lib/types/map";
+import type { EdgeIndexEntry } from "@/lib/types/map";
 
 type OwnedMap = {
   id: number;
@@ -206,11 +205,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
 
-  const [viewState, setViewState] = useState<ViewStateLite>({
+  const initialViewState = {
     longitude: DEFAULT_CENTER.lng,
     latitude: DEFAULT_CENTER.lat,
     zoom: DEFAULT_ZOOM,
-  });
+  };
   const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
@@ -2114,11 +2113,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                 <ReactMap
                   key={`mymap-${selectedMapId}`}
                   ref={mapRef}
-                  {...viewState}
+                  initialViewState={initialViewState}
                   style={{ width: "100%", height: "100%" }}
-                  onMove={(e: ViewStateChangeEvent) =>
-                    setViewState((prev) => ({ ...prev, ...e.viewState }))
-                  }
                   mapLib={maplibregl}
                   mapStyle={baseStyle as never}
                   onLoad={() => setMapReady(true)}

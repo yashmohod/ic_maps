@@ -26,6 +26,7 @@ type Props = {
   setCurrentBuilding: Dispatch<SetStateAction<BuildingRow>>;
   submitName: () => void;
   onChangeIsParkingLot: (v: boolean) => void;
+  onDeleteBuilding: () => void;
 };
 
 function EditPanel({
@@ -33,6 +34,7 @@ function EditPanel({
   setCurrentBuilding,
   submitName,
   onChangeIsParkingLot,
+  onDeleteBuilding,
 }: Props): JSX.Element {
   return (
     <div
@@ -66,6 +68,17 @@ function EditPanel({
           Submit
         </Button>
       </div>
+
+      {currentBuilding.id >= 0 && (
+        <Button
+          type="button"
+          variant="destructive"
+          className={`w-full ${touchTargetClass}`}
+          onClick={onDeleteBuilding}
+        >
+          Delete destination
+        </Button>
+      )}
 
       {currentBuilding.id >= 0 && (
         <Button

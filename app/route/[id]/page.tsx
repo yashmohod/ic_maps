@@ -6,7 +6,6 @@ import {
   Map as ReactMap,
   Marker,
   type MapRef,
-  type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { toast } from "sonner";
@@ -51,7 +50,6 @@ import {
 import type {
   LngLat,
   UserPos,
-  SimpleMarkerNode,
   GeoJSONFeatureCollection,
   NavigateToResponse,
   RouteLegMetrics,
@@ -63,7 +61,6 @@ import {
 } from "@/lib/distance-display";
 import { useNavigationProgress } from "@/hooks/use-navigation-progress";
 
-import NavModeMap from "@/components/NavModeMap";
 import ComboboxSelect from "@/components/ComboboxSelect";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
@@ -72,13 +69,6 @@ import { RoutePathLayer } from "@/components/RoutePathLayer";
 import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
 import type { NavStep } from "@/lib/navigation-types";
 import { useDistanceUnits } from "@/hooks/use-distance-units";
-
-type MarkerNode = SimpleMarkerNode;
-type RouteEdgeEntry = {
-  id: string;
-  from: string | number;
-  to: string | number;
-};
 
 const MAX_INCLINE = 45;
 const SHARE_SHEET_PEEK = 0.7;
@@ -99,15 +89,13 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     [],
   );
 
-  const [viewState, setViewState] = useState<{
-    longitude: number;
-    latitude: number;
-    zoom: number;
-    bearing: number;
-    pitch: number;
-  }>(defViewState);
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const pendingCenterRef = useRef<{
+    lng: number;
+    lat: number;
+    zoom: number;
+  } | null>(null);
 
   const { isDark, mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
@@ -186,7 +174,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       } else {
         setSelectedParkingId(null);
       }
-      void prefetchGraph();
     } catch (e) {
       console.error(e);
       toast.error("Failed to load route.");
@@ -194,37 +181,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     } finally {
       setRouteLoadPending(false);
     }
-  }
-
-  const graphPrefetchRef = useRef<Promise<void> | null>(null);
-  const [markers, setMarkers] = useState<MarkerNode[]>([]);
-  const [edgeIndex, setEdgeIndex] = useState<RouteEdgeEntry[]>([]);
-
-  async function prefetchGraph() {
-    if (markers.length > 0) return;
-    if (graphPrefetchRef.current) return graphPrefetchRef.current;
-    graphPrefetchRef.current = (async () => {
-      try {
-        const res = await fetch(withBasePath("/api/map/all"));
-        if (res.status !== 200) return;
-        const data = await res.json();
-        setMarkers(data.nodes ?? []);
-        setEdgeIndex(
-          (data.edges ?? []).map(
-            (e: { id: number; from: number; to: number }) => ({
-              id: String(e.id),
-              from: e.from,
-              to: e.to,
-            }),
-          ),
-        );
-      } catch (e) {
-        console.error(e);
-      } finally {
-        graphPrefetchRef.current = null;
-      }
-    })();
-    return graphPrefetchRef.current;
   }
 
   const navModeOptions = useMemo(
@@ -291,18 +247,11 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   function ensureCenter(lng: number, lat: number, minZoom = 16) {
     const map = mapRef.current?.getMap?.();
-    const zoom = Math.max(viewState.zoom ?? 0, minZoom);
+    const zoom = Math.max(map?.getZoom?.() ?? DEFAULT_ZOOM, minZoom);
     if (map && mapReady) {
       map.flyTo({ center: [lng, lat], zoom, essential: true });
     } else {
-      setViewState((vs) => ({
-        ...vs,
-        longitude: lng,
-        latitude: lat,
-        zoom,
-        bearing: 0,
-        pitch: 0,
-      }));
+      pendingCenterRef.current = { lng, lat, zoom };
     }
   }
 
@@ -384,14 +333,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       duration,
       essential: true,
     });
-    setViewState((v) => ({
-      ...v,
-      longitude: lng,
-      latitude: lat,
-      zoom,
-      bearing: bearingDeg ?? 0,
-      pitch,
-    }));
   }
 
   function showCampusOverview() {
@@ -411,11 +352,19 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       watchIdRef.current = null;
     }
     setTracking(false);
+    const map = mapRef.current?.getMap?.();
     if (routeCoordsRef.current.length >= 2) {
       fitToUserAndRoute(routeCoordsRef.current);
-      setViewState((v) => ({ ...v, bearing: 0, pitch: 0 }));
+      map?.easeTo({ bearing: 0, pitch: 0, duration: 400, essential: true });
     } else {
-      setViewState(defViewState);
+      map?.flyTo({
+        center: [defViewState.longitude, defViewState.latitude],
+        zoom: defViewState.zoom,
+        bearing: 0,
+        pitch: 0,
+        duration: 900,
+        essential: true,
+      });
     }
   }
 
@@ -751,11 +700,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     };
   }, []);
 
-  const emptyPath = useMemo(
-    () => ({ path: new Set<number>(), firstNodeId: -1, lastNodeId: -1 }),
-    [],
-  );
-
   return (
     <div className="relative h-[100dvh] w-full bg-background text-foreground">
       <div className="absolute left-3 top-3 z-40 flex items-center gap-2">
@@ -771,22 +715,23 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         ) : (
           <ReactMap
             ref={mapRef}
-            {...viewState}
-            onMove={(e: ViewStateChangeEvent) =>
-              setViewState((prev) => ({ ...prev, ...e.viewState }))
-            }
+            initialViewState={defViewState}
             mapLib={maplibregl}
             mapStyle={baseStyle as any}
-            onLoad={() => setMapReady(true)}
+            onLoad={() => {
+              setMapReady(true);
+              const map = mapRef.current?.getMap?.();
+              const pending = pendingCenterRef.current;
+              if (pending && map) {
+                pendingCenterRef.current = null;
+                map.flyTo({
+                  center: [pending.lng, pending.lat],
+                  zoom: pending.zoom,
+                  essential: true,
+                });
+              }
+            }}
           >
-            <NavModeMap
-              path={emptyPath}
-              curNavConditions={curNavConditions}
-              markers={markers}
-              edgeIndex={edgeIndex}
-              showBaseGraph={edgeIndex.length > 0 && routeCoords.length > 0}
-            />
-
             {accuracyGeoJSON && (
               <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
@@ -990,7 +935,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               Parking lot
             </p>
             <p className="mt-1 text-xs text-panel-muted-foreground">
-              Drive to parking, then walk to the destination.
+              Drive via the selected parking lot to the destination.
             </p>
             <div className="mt-2">
               <ComboboxSelect

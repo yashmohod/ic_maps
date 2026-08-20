@@ -111,7 +111,8 @@ function fallbackStyles(activeColor = "#35D5A4") {
 }
 
 function getId(f: any): string {
-  return String(f?.id ?? f?.properties?.id ?? "");
+  const raw = f?.id ?? f?.properties?.destId ?? f?.properties?.id;
+  return raw == null || raw === "" ? "" : String(raw);
 }
 
 function normalizeFeatures(features: Feature[]): Feature[] {
@@ -223,13 +224,19 @@ export default function DrawControl({
       if (id) incomingById.set(id, f as any);
     }
 
-    // delete missing (but not currently selected)
-    for (const [id] of existingById) {
-      if (!incomingById.has(id) && !selectedIds.includes(id)) {
-        try {
-          draw.delete(id);
-        } catch {}
-      }
+    // delete missing. Keep selected drafts (no destId yet) so in-progress
+    // creates aren't wiped by a polys sync.
+    for (const [id, existing] of existingById) {
+      if (incomingById.has(id)) continue;
+      const destId = Number(
+        (existing as any)?.properties?.destId ?? existing.id,
+      );
+      const isDraft =
+        selectedIds.includes(id) && !(Number.isFinite(destId) && destId > 0);
+      if (isDraft) continue;
+      try {
+        draw.delete(id);
+      } catch {}
     }
 
     // add/update

@@ -5,7 +5,6 @@ import {
   closestNode,
   navigate,
   navigateMulti,
-  navigateMultiWithPedestrianFinalLeg,
   getGraph,
   pathToRouteGeometry,
   endNodeFromPath,
@@ -119,13 +118,7 @@ export async function POST(req: Request) {
     const path =
       destIds.length === 1
         ? await navigate(startNodeId, destIds[0]!, navConditions)
-        : destIds.length > 1 && navConditions.is_vehicular
-          ? await navigateMultiWithPedestrianFinalLeg(
-              startNodeId,
-              destIds,
-              navConditions,
-            )
-          : await navigateMulti(startNodeId, destIds, navConditions);
+        : await navigateMulti(startNodeId, destIds, navConditions);
 
     if (path === null) {
       return NextResponse.json({ error: "No route found" }, { status: 404 });

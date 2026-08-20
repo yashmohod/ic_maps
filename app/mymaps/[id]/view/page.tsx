@@ -10,7 +10,6 @@ import {
   Marker,
   Source,
   Layer,
-  type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import maplibregl, { type LineLayerSpecification } from "maplibre-gl";
 import type {
@@ -37,7 +36,6 @@ import {
   safeAreaTopClass,
   surfacePanelClass,
 } from "@/lib/panel-classes";
-import type { ViewStateLite } from "@/lib/types/map";
 
 type SimpleNode = {
   id: number;
@@ -79,11 +77,11 @@ export default function MyMapPublicViewPage(): JSX.Element {
       ? Number(rawId)
       : null;
 
-  const [viewState, setViewState] = useState<ViewStateLite>({
+  const initialViewState = {
     longitude: DEFAULT_CENTER.lng,
     latitude: DEFAULT_CENTER.lat,
     zoom: DEFAULT_ZOOM,
-  });
+  };
   const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
@@ -310,10 +308,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
           </div>
         ) : (
           <ReactMap
-            {...viewState}
-            onMove={(e: ViewStateChangeEvent) =>
-              setViewState((prev) => ({ ...prev, ...e.viewState }))
-            }
+            initialViewState={initialViewState}
             mapLib={maplibregl}
             mapStyle={baseStyle as never}
           >

@@ -10,7 +10,6 @@ import {
   Source,
   Layer,
   type MapRef,
-  type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { toast } from "sonner";
@@ -122,16 +121,15 @@ export default function CustomRoutesPage(): JSX.Element {
     useEffectiveSession();
   const { isIcUser } = useIsIcUser();
   const canUseCustomRoutes = isIcUser || devMode;
-  const [viewState, setViewState] = useState<{
-    longitude: number;
-    latitude: number;
-    zoom: number;
-    bearing: number;
-    pitch: number;
-  }>(defViewState);
   const mapRef = useRef<MapRef | null>(null);
   const buildingSelectRequestIdRef = useRef(0);
   const [mapReady, setMapReady] = useState(false);
+  const pendingCenterRef = useRef<{
+    lng: number;
+    lat: number;
+    zoom: number;
+    pitch: number;
+  } | null>(null);
 
   const { isDark, mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
@@ -149,14 +147,7 @@ export default function CustomRoutesPage(): JSX.Element {
         essential: true,
       });
     } else {
-      setViewState((v) => ({
-        ...v,
-        longitude: lng,
-        latitude: lat,
-        zoom,
-        bearing: 0,
-        pitch: 42,
-      }));
+      pendingCenterRef.current = { lng, lat, zoom, pitch: 42 };
     }
   }
 
@@ -1232,13 +1223,24 @@ export default function CustomRoutesPage(): JSX.Element {
         ) : (
           <ReactMap
             ref={mapRef}
-            {...viewState}
-            onMove={(e: ViewStateChangeEvent) =>
-              setViewState((prev) => ({ ...prev, ...e.viewState }))
-            }
+            initialViewState={defViewState}
             mapLib={maplibregl}
             mapStyle={baseStyle as any}
-            onLoad={() => setMapReady(true)}
+            onLoad={() => {
+              setMapReady(true);
+              const map = mapRef.current?.getMap?.();
+              const pending = pendingCenterRef.current;
+              if (pending && map) {
+                pendingCenterRef.current = null;
+                map.flyTo({
+                  center: [pending.lng, pending.lat],
+                  zoom: pending.zoom,
+                  pitch: pending.pitch,
+                  bearing: 0,
+                  essential: true,
+                });
+              }
+            }}
           >
             {/* Building nodes */}
             {buildingNodesFC && (

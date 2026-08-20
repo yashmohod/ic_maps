@@ -37,6 +37,14 @@ import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { useRequireAdmin } from "@/hooks/use-require-admin";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { mapPageClass } from "@/lib/panel-classes";
 
 import type { ViewStateLite } from "@/lib/types/map";
@@ -53,6 +61,7 @@ type MapSectionProps = {
   mapStyle: StyleSpecification;
   onMapClick: (e: MapMouseEvent) => void;
   onLoad: () => void;
+  onReady?: (draw: unknown) => void;
   onCreate: (e: DrawEvent, draw?: unknown) => void;
   onUpdate: (e: DrawEvent, draw?: unknown) => void;
   onDelete: (e: DrawEvent, draw?: unknown) => void;
@@ -70,6 +79,7 @@ const MapSection = React.memo(function MapSection({
   mapStyle,
   onMapClick,
   onLoad,
+  onReady,
   onCreate,
   onUpdate,
   onDelete,
@@ -92,16 +102,46 @@ const MapSection = React.memo(function MapSection({
         polys={polys}
         position="top-right"
         displayControlsDefault={false}
-        controls={{ polygon: true, trash: true }}
+        controls={{ polygon: true, trash: false }}
         onCreate={onCreate}
         onUpdate={onUpdate}
         onDelete={onDelete}
         onSelectionChange={onSelectionChange}
         onModeChange={onModeChange}
+        onReady={onReady}
       />
     </ReactMap>
   );
 });
+
+const emptyBuilding = (): BuildingRow => ({
+  id: -1,
+  name: "",
+  lat: -1,
+  lng: -1,
+  polygon: "",
+  isParkingLot: false,
+  openTime: "00:00:00",
+  closeTime: "23:59:59",
+});
+
+function featureWithDestId(
+  feature: Feature<Polygon, GeoJsonProperties>,
+  destId: number,
+  extraProps?: GeoJsonProperties,
+): Feature<Polygon, GeoJsonProperties> {
+  const id = String(destId);
+  return {
+    ...feature,
+    id,
+    properties: {
+      ...(feature.properties ?? {}),
+      ...extraProps,
+      destId,
+      id,
+    },
+  };
+}
 
 /** ---------------- Main Component ---------------- */
 
@@ -109,6 +149,10 @@ export default function BuildingEditor(): JSX.Element {
   const { isPending, allowed } = useRequireAdmin();
   const mapRef = useRef<MapRef | null>(null);
   const buildingsRef = useRef<BuildingRow[]>([]);
+  const drawRef = useRef<{
+    delete: (id: string) => void;
+    changeMode: (mode: string) => void;
+  } | null>(null);
   const { isDark, mapStyle } = useMapStyle();
 
   const [mlMap, setMlMap] = useState<MlMap | null>(null);
@@ -118,16 +162,9 @@ export default function BuildingEditor(): JSX.Element {
     Array<Feature<Polygon, GeoJsonProperties>>
   >([]);
 
-  const [currentBuilding, setCurrentBuilding] = useState<BuildingRow>({
-    id: -1,
-    name: "",
-    lat: -1,
-    lng: -1,
-    polygon: "", // JSON string of a GeoJSON Feature
-    isParkingLot: false,
-    openTime: "00:00:00",
-    closeTime: "23:59:59",
-  });
+  const [currentBuilding, setCurrentBuilding] = useState<BuildingRow>(emptyBuilding);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
 
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
   const canRenderMap = !!baseStyle;
@@ -164,7 +201,7 @@ export default function BuildingEditor(): JSX.Element {
                 Polygon,
                 GeoJsonProperties
               >;
-              return polyJ;
+              return featureWithDestId(polyJ, b.id, { name: b.name });
             } catch {
               return null;
             }
@@ -273,18 +310,59 @@ export default function BuildingEditor(): JSX.Element {
     if (map) setMlMap(map as unknown as MlMap);
   }, []);
 
-  const onMapClick = useCallback((_e: MapMouseEvent) => {
-    setCurrentBuilding({
-      id: -1,
-      name: "",
-      lat: -1,
-      lng: -1,
-      polygon: "", // JSON string of a GeoJSON Feature
-      isParkingLot: false,
-      openTime: "00:00:00",
-      closeTime: "23:59:59",
-    });
+  const onDrawReady = useCallback((draw: unknown) => {
+    drawRef.current = (draw as typeof drawRef.current) ?? null;
   }, []);
+
+  const onMapClick = useCallback((_e: MapMouseEvent) => {
+    setDeleteOpen(false);
+    setCurrentBuilding(emptyBuilding());
+  }, []);
+
+  const dropDestinationLocally = useCallback((destId: number) => {
+    buildingsRef.current = buildingsRef.current.filter((b) => b.id !== destId);
+    setBuildings(buildingsRef.current);
+    setPolys((prev) =>
+      prev.filter((p) => Number(p.properties?.destId ?? p.id) !== destId),
+    );
+    setCurrentBuilding((prev) =>
+      prev.id === destId ? emptyBuilding() : prev,
+    );
+    const draw = drawRef.current;
+    try {
+      draw?.changeMode?.("simple_select");
+      draw?.delete?.(String(destId));
+    } catch {
+      /* draw may already have dropped it */
+    }
+  }, []);
+
+  const confirmDeleteDestination = useCallback(async () => {
+    const destId = currentBuilding.id;
+    if (destId < 0 || deletePending) return;
+    const label = currentBuilding.name.trim() || `#${destId}`;
+    setDeletePending(true);
+    try {
+      const resp = await fetch(withBasePath("/api/destination"), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: destId }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        toast.error(data?.error ?? "Could not delete destination");
+        return;
+      }
+        dropDestinationLocally(destId);
+        setDeleteOpen(false);
+        toast.success(`Deleted ${label}`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not delete destination");
+    } finally {
+      setDeletePending(false);
+    }
+  }, [currentBuilding.id, currentBuilding.name, deletePending, dropDestinationLocally]);
 
   const onCreate = useCallback(async (e: DrawEvent, draw?: any) => {
     const feature = e.features?.[0] as
@@ -325,12 +403,14 @@ export default function BuildingEditor(): JSX.Element {
         return;
       }
 
-      draw?.setFeatureProperty?.(drawId, "destId", Number(resp.id));
-      draw?.setFeatureProperty?.(drawId, "name", name);
-      const normalizedFeature = {
-        ...(feature as any),
-        properties: { destId: resp.id, name: name },
-      } as Feature<Polygon, GeoJsonProperties>;
+      const destId = Number(resp.id);
+      const normalizedFeature = featureWithDestId(feature, destId, { name });
+      try {
+        draw?.delete?.(drawId);
+        draw?.add?.(normalizedFeature);
+      } catch {
+        /* Draw id swap is best-effort; polys is the source of truth */
+      }
       const polygon = JSON.stringify(normalizedFeature);
 
       setPolys((p) => [...p, normalizedFeature]);
@@ -384,14 +464,19 @@ export default function BuildingEditor(): JSX.Element {
     lat /= ring.length - 1;
     lng /= ring.length - 1;
 
-    const polygon = JSON.stringify(feature);
+    const destId = Number(feature?.properties?.destId);
+    const stamped =
+      Number.isFinite(destId) && destId > 0
+        ? featureWithDestId(feature, destId)
+        : feature;
+    const polygon = JSON.stringify(stamped);
 
     try {
       const req: any = await fetch(withBasePath("/api/destination"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: feature?.properties?.destId,
+          id: destId,
           name: feature?.properties?.name,
           polygon,
           lat,
@@ -402,22 +487,19 @@ export default function BuildingEditor(): JSX.Element {
       if (resp) {
         setPolys((old) =>
           old.map((p) =>
-            Number(p.properties?.destId) === feature?.properties?.destId
-              ? feature
-              : p,
+            Number(p.properties?.destId) === destId ? stamped : p,
           ),
         );
         setCurrentBuilding((prev) => {
           return {
             ...prev,
-            id: Number(feature?.properties?.destId),
+            id: destId,
             name: feature?.properties?.name,
             lat,
             lng,
             polygon,
           };
         });
-        const destId = Number(feature?.properties?.destId);
         setBuildings((prev) => {
           const next = prev.map((b) =>
             b.id === destId
@@ -442,8 +524,16 @@ export default function BuildingEditor(): JSX.Element {
     }
   }, []);
 
-  const onDelete = useCallback(async (_e: DrawEvent, _draw?: any) => {
-    // Building delete not implemented yet.
+  const onDelete = useCallback((e: DrawEvent, draw?: any) => {
+    for (const feature of e.features ?? []) {
+      const destId = Number(feature.properties?.destId ?? feature.id);
+      if (!buildingsRef.current.some((b) => b.id === destId)) continue;
+      try {
+        draw?.add?.(feature);
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
 
   const onSelectionChange = useCallback((e: DrawEvent, draw?: any) => {
@@ -526,6 +616,7 @@ export default function BuildingEditor(): JSX.Element {
         setCurrentBuilding={setCurrentBuilding}
         submitName={buildingInfoSave}
         onChangeIsParkingLot={onChangeIsParkingLot}
+        onDeleteBuilding={() => setDeleteOpen(true)}
       />
 
       <div className="w-full h-full">
@@ -542,6 +633,7 @@ export default function BuildingEditor(): JSX.Element {
             mapStyle={baseStyle as StyleSpecification}
             onMapClick={onMapClick}
             onLoad={onLoad}
+            onReady={onDrawReady}
             onCreate={onCreate}
             onUpdate={onUpdate}
             onDelete={onDelete}
@@ -550,6 +642,56 @@ export default function BuildingEditor(): JSX.Element {
           />
         )}
       </div>
+
+      <Dialog
+        open={deleteOpen && currentBuilding.id >= 0}
+        onOpenChange={(open) => {
+          if (!open && !deletePending) setDeleteOpen(false);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete destination</DialogTitle>
+            <DialogDescription>
+              This will permanently remove{" "}
+              {currentBuilding.name.trim() ? (
+                <span className="font-medium text-foreground">
+                  {currentBuilding.name.trim()}
+                </span>
+              ) : (
+                "this destination"
+              )}
+              , its indoor floor plan, and linked favorites / trip stops. This
+              action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deletePending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deletePending}
+              onClick={() => void confirmDeleteDestination()}
+            >
+              {deletePending ? (
+                <>
+                  <Spinner className="size-4" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete destination"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

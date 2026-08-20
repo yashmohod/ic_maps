@@ -325,8 +325,6 @@ export async function computeRouteMetrics(
   }
 
   const graph = await getGraph();
-  const usePedestrianFinalLeg =
-    navConditions.is_vehicular && destIds.length > 1;
 
   if (destIds.length === 1) {
     const segment = await navigate(startNodeId, destIds[0]!, navConditions);
@@ -354,17 +352,16 @@ export async function computeRouteMetrics(
   let totalDistance = 0;
   let totalDuration = 0;
 
-  for (let i = 0; i < destIds.length; i++) {
-    const destId = destIds[i]!;
-    const legNav =
-      usePedestrianFinalLeg && i === destIds.length - 1
-        ? pedestrianNavConditions(navConditions)
-        : navConditions;
-
-    const segment = await navigate(currentStart, destId, legNav);
+  for (const destId of destIds) {
+    const segment = await navigate(currentStart, destId, navConditions);
     if (!segment) return null;
 
-    const legMetrics = computePathMetrics(graph, currentStart, segment, legNav);
+    const legMetrics = computePathMetrics(
+      graph,
+      currentStart,
+      segment,
+      navConditions,
+    );
     legs.push({
       destinationId: destId,
       distanceMeters: legMetrics.distanceMeters,
@@ -420,54 +417,6 @@ export async function navigateMulti(
     const graph = await getGraph();
     currentStart = endNodeFromPath(graph, currentStart, segment);
   }
-
-  return fullPath;
-}
-
-/** Vehicular legs for all but the last destination; final leg uses pedestrian routing. */
-export function pedestrianNavConditions(base: NavConditions): NavConditions {
-  return {
-    ...base,
-    is_pedestrian: true,
-    is_vehicular: false,
-    is_through_building: true,
-  };
-}
-
-export async function navigateMultiWithPedestrianFinalLeg(
-  startOutdoorNodeId: number,
-  destIds: number[],
-  vehicularConditions: NavConditions,
-): Promise<number[] | null> {
-  if (destIds.length === 0) return [];
-  if (destIds.length === 1) {
-    return navigate(startOutdoorNodeId, destIds[0]!, vehicularConditions);
-  }
-
-  const vehicularLegDests = destIds.slice(0, -1);
-  const finalDestId = destIds[destIds.length - 1]!;
-
-  let currentStart = startOutdoorNodeId;
-  const fullPath: number[] = [];
-
-  const vehPath = await navigateMulti(
-    currentStart,
-    vehicularLegDests,
-    vehicularConditions,
-  );
-  if (vehPath === null) return null;
-  fullPath.push(...vehPath);
-
-  const graph = await getGraph();
-  currentStart = endNodeFromPath(graph, currentStart, vehPath);
-
-  const pedPath = await navigate(
-    currentStart,
-    finalDestId,
-    pedestrianNavConditions(vehicularConditions),
-  );
-  if (pedPath === null) return null;
-  fullPath.push(...pedPath);
 
   return fullPath;
 }

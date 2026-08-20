@@ -356,26 +356,15 @@ export async function buildMultiLegDirections(
   for (let i = 0; i < destIds.length; i++) {
     const destId = destIds[i]!;
     const destName = names.get(destId) ?? "destination";
-    const legNav =
-      navConditions.is_vehicular &&
-      i === destIds.length - 1 &&
-      destIds.length > 1
-        ? {
-            ...navConditions,
-            is_pedestrian: true,
-            is_vehicular: false,
-            is_through_building: true,
-          }
-        : navConditions;
 
-    const edgePath = await getLegPath(legStart, destId, legNav);
+    const edgePath = await getLegPath(legStart, destId, navConditions);
     if (!edgePath) continue;
 
     const legSteps = buildRouteDirections(
       graph,
       edgePath,
       legStart,
-      legNav,
+      navConditions,
       names,
       { finalDestinationName: destName },
     );

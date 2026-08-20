@@ -49,6 +49,11 @@ import type {
 } from "@/lib/types/map";
 
 type Destination = MapDestination;
+
+const DEST_PED_COLOR = "#f97316";
+const DEST_VEH_COLOR = "#ef4444";
+const DEST_NONE_COLOR = "#94a3b8";
+
 /** ---------------- Component ---------------- */
 
 export default function RouteEditor(): JSX.Element {
@@ -129,6 +134,28 @@ export default function RouteEditor(): JSX.Element {
 
   const findMarker = (id: number) => markers.find((m) => m.id === id) ?? null;
 
+  function flyToDestination(dest: Destination) {
+    if (!Number.isFinite(dest.lng) || !Number.isFinite(dest.lat)) return;
+    const map = mapRef.current?.getMap?.();
+    if (map) {
+      map.flyTo({
+        center: [dest.lng, dest.lat],
+        zoom: 18.5,
+        pitch: 42,
+        bearing: 0,
+        duration: 900,
+        essential: true,
+      });
+      return;
+    }
+    setViewState((vs) => ({
+      ...vs,
+      longitude: dest.lng,
+      latitude: dest.lat,
+      zoom: 18.5,
+    }));
+  }
+
   /** ---------------- GeoJSON (Edges) ---------------- */
 
   const edgesGeoJSON = useMemo<
@@ -158,6 +185,9 @@ export default function RouteEditor(): JSX.Element {
           to: e.to,
           ada: nmc,
           bidir: Boolean(e.biDirectional),
+          ped: Boolean(a.isPedestrian && b.isPedestrian),
+          veh: Boolean(a.isVehicular && b.isVehicular),
+          destView: mode === "destination",
         },
         geometry: {
           type: "LineString",
@@ -188,6 +218,7 @@ export default function RouteEditor(): JSX.Element {
       id: "graph-edges",
       type: "line",
       source: "edges",
+      filter: ["!", ["to-boolean", ["get", "destView"]]],
       layout: {
         "line-cap": "round",
         "line-join": "round",
@@ -203,6 +234,76 @@ export default function RouteEditor(): JSX.Element {
           "#2BB89A",
         ],
         "line-opacity": 0.95,
+      },
+    }),
+    [],
+  );
+
+  const destVehLayer = useMemo<LineLayerSpecification>(
+    () => ({
+      id: "graph-edges-veh",
+      type: "line",
+      source: "edges",
+      filter: [
+        "all",
+        ["to-boolean", ["get", "destView"]],
+        ["to-boolean", ["get", "veh"]],
+      ],
+      layout: {
+        "line-cap": "round",
+        "line-join": "round",
+      },
+      paint: {
+        "line-width": ["case", ["to-boolean", ["get", "ped"]], 8, 5],
+        "line-color": DEST_VEH_COLOR,
+        "line-opacity": 0.95,
+      },
+    }),
+    [],
+  );
+
+  const destPedLayer = useMemo<LineLayerSpecification>(
+    () => ({
+      id: "graph-edges-ped",
+      type: "line",
+      source: "edges",
+      filter: [
+        "all",
+        ["to-boolean", ["get", "destView"]],
+        ["to-boolean", ["get", "ped"]],
+      ],
+      layout: {
+        "line-cap": "round",
+        "line-join": "round",
+      },
+      paint: {
+        "line-width": 5,
+        "line-color": DEST_PED_COLOR,
+        "line-opacity": 0.95,
+      },
+    }),
+    [],
+  );
+
+  const destNeitherLayer = useMemo<LineLayerSpecification>(
+    () => ({
+      id: "graph-edges-neither",
+      type: "line",
+      source: "edges",
+      filter: [
+        "all",
+        ["to-boolean", ["get", "destView"]],
+        ["!", ["to-boolean", ["get", "ped"]]],
+        ["!", ["to-boolean", ["get", "veh"]]],
+      ],
+      layout: {
+        "line-cap": "round",
+        "line-join": "round",
+      },
+      paint: {
+        "line-width": 4,
+        "line-color": DEST_NONE_COLOR,
+        "line-opacity": 0.7,
       },
     }),
     [],
@@ -417,6 +518,7 @@ export default function RouteEditor(): JSX.Element {
     }
     const reqId = ++buildingSelectRequestIdRef.current;
     setCurrentDestination(curDest);
+    flyToDestination(curDest);
     try {
       const req = await fetch(
         withBasePath(
@@ -930,6 +1032,34 @@ export default function RouteEditor(): JSX.Element {
             >
               Clear all
             </button>
+            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <span
+                  className="inline-block h-2 w-4 rounded-sm"
+                  style={{ backgroundColor: DEST_PED_COLOR }}
+                />
+                Pedestrian
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="inline-block h-2 w-4 rounded-sm"
+                  style={{ backgroundColor: DEST_VEH_COLOR }}
+                />
+                Vehicular
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="relative inline-block h-2 w-4 rounded-sm"
+                  style={{ backgroundColor: DEST_VEH_COLOR }}
+                >
+                  <span
+                    className="absolute inset-y-0 left-1 right-1"
+                    style={{ backgroundColor: DEST_PED_COLOR }}
+                  />
+                </span>
+                Both
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -960,6 +1090,9 @@ export default function RouteEditor(): JSX.Element {
           >
             <Source id="edges" type="geojson" data={edgesGeoJSON}>
               <Layer {...(lineLayer as any)} />
+              <Layer {...(destNeitherLayer as any)} />
+              <Layer {...(destVehLayer as any)} />
+              <Layer {...(destPedLayer as any)} />
               <Layer {...(oneWayArrows as any)} />
             </Source>
 
@@ -981,6 +1114,23 @@ export default function RouteEditor(): JSX.Element {
                       ? "bg-destructive/70"
                       : "bg-brand";
 
+              const destNavRing =
+                mode !== "destination"
+                  ? ""
+                  : m.isPedestrian && m.isVehicular
+                    ? "ring-[3px] ring-[#f97316] ring-offset-2 ring-offset-[#ef4444]"
+                    : m.isPedestrian
+                      ? "ring-[3px] ring-[#f97316]"
+                      : m.isVehicular
+                        ? "ring-[3px] ring-[#ef4444]"
+                        : "";
+
+              const modes = [
+                m.isPedestrian ? "pedestrian" : null,
+                m.isVehicular ? "vehicular" : null,
+              ].filter(Boolean);
+              const modeLabel = modes.length ? modes.join(" + ") : "no nav mode";
+
               return (
                 <Marker
                   key={m.id}
@@ -994,7 +1144,7 @@ export default function RouteEditor(): JSX.Element {
                     onClick={(e) => handleMarkerClick(e, m.id)}
                     onContextMenu={(e) => e.preventDefault()}
                     aria-label={`marker-${m.id}`}
-                    className={`rounded-full border-2 shadow ${colorClass} border-white`}
+                    className={`rounded-full border-2 shadow ${colorClass} border-white ${destNavRing}`}
                     style={{
                       width: 16,
                       height: 16,
@@ -1003,7 +1153,7 @@ export default function RouteEditor(): JSX.Element {
                       opacity: showNodes ? 1 : 0,
                       pointerEvents: showNodes ? "auto" : "none",
                     }}
-                    title={`${m.id} (${m.lng.toFixed(5)}, ${m.lat.toFixed(5)})`}
+                    title={`${m.id} · ${modeLabel} (${m.lng.toFixed(5)}, ${m.lat.toFixed(5)})`}
                   />
                 </Marker>
               );

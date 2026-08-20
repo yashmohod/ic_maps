@@ -8,7 +8,6 @@ import {
   Layer,
   Marker,
   type MapRef,
-  type ViewStateChangeEvent,
 } from "@vis.gl/react-maplibre";
 import { toast } from "sonner";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -21,7 +20,6 @@ import {
 } from "@/lib/map-constants";
 import { EditorToolsMenu } from "@/components/EditorToolsMenu";
 import ProfileOptions from "@/components/profileOptions";
-import NavModeMap from "@/components/NavModeMap";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
@@ -74,8 +72,6 @@ import {
 import type {
   LngLat,
   UserPos,
-  MarkerNode,
-  EdgeIndexEntry,
   GeoJSONFeatureCollection,
   MapDestination,
   NavigateToResponse,
@@ -168,14 +164,6 @@ export default function NavigationMap(): JSX.Element {
     startNode?: { id: number; lat: number; lng: number };
   };
 
-  const [viewState, setViewState] = useState<{
-    longitude: number;
-    latitude: number;
-    zoom: number;
-    bearing: number;
-    pitch: number;
-  }>(defViewState);
-
   const [[swLng, swLat], [neLng, neLat]] = CAMPUS_BOUNDS;
 
   const [selectedDest, setSelectedDest] = useState<number>(0);
@@ -189,8 +177,6 @@ export default function NavigationMap(): JSX.Element {
   const [navigating, setNavigating] = useState<boolean>(false);
   const [mapReady, setMapReady] = useState<boolean>(false);
 
-  const [markers, setMarkers] = useState<MarkerNode[]>([]);
-  const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
   const PATH_RESET: Path = { path: new Set(), lastNodeId: -1, firstNodeId: -1 };
   const [path, setPath] = useState<Path>(PATH_RESET);
   const [lastGeoMsg, setLastGeoMsg] = useState<string>("");
@@ -234,7 +220,11 @@ export default function NavigationMap(): JSX.Element {
     legs: RouteLegMetrics[];
   } | null>(null);
   const [routeSteps, setRouteSteps] = useState<NavStep[]>([]);
-  const graphPrefetchRef = useRef<Promise<void> | null>(null);
+  const pendingCenterRef = useRef<{
+    lng: number;
+    lat: number;
+    zoom: number;
+  } | null>(null);
   const { units: distanceUnits } = useDistanceUnits();
 
   const navProgress = useNavigationProgress(
@@ -304,27 +294,6 @@ export default function NavigationMap(): JSX.Element {
     return destinations.find((b) => `${b.id}` === `${selectedDest}`) ?? null;
   }, [destinations, selectedDest]);
 
-  async function prefetchGraph() {
-    if (edgeIndex.length > 0) return;
-    if (graphPrefetchRef.current) return graphPrefetchRef.current;
-
-    graphPrefetchRef.current = (async () => {
-      try {
-        const req = await fetch(withBasePath("/api/map/all"));
-        if (req.status !== 200) return;
-        const data = await req.json();
-        setMarkers(data.nodes as MarkerNode[]);
-        setEdgeIndex(data.edges as EdgeIndexEntry[]);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        graphPrefetchRef.current = null;
-      }
-    })();
-
-    return graphPrefetchRef.current;
-  }
-
   const { isDark, mapStyle } = useMapStyle();
 
   const { realSession, error, isSignedIn, devMode } = useEffectiveSession();
@@ -387,19 +356,12 @@ export default function NavigationMap(): JSX.Element {
 
   function ensureCenter(lng: number, lat: number, minZoom = 13) {
     const map = mapRef.current?.getMap?.();
-    const zoom = Math.max(viewState.zoom ?? 0, minZoom);
+    const zoom = Math.max(map?.getZoom?.() ?? DEFAULT_ZOOM, minZoom);
 
     if (map && mapReady) {
       map.flyTo({ center: [lng, lat], zoom, essential: true });
     } else {
-      setViewState((vs) => ({
-        ...vs,
-        longitude: lng,
-        latitude: lat,
-        zoom,
-        bearing: 0,
-        pitch: 0,
-      }));
+      pendingCenterRef.current = { lng, lat, zoom };
     }
   }
 
@@ -621,8 +583,6 @@ export default function NavigationMap(): JSX.Element {
       setBuildingNodes(new Set(bnid));
       setBuildingMarkers(details);
 
-      void prefetchGraph();
-
       setDestPos({
         lat: curDestination.lat - 0.0002,
         lng: curDestination.lng + 0.00005,
@@ -817,22 +777,6 @@ export default function NavigationMap(): JSX.Element {
 
   /** -------- Route utilities (typed) -------- */
 
-  function makeLookups(
-    markersLocal: MarkerNode[],
-    edgeIndexLocal: EdgeIndexEntry[],
-  ) {
-    const nodesById = new Map<string, { lng: number; lat: number }>(
-      markersLocal.map((m) => [String(m.id), { lng: m.lng, lat: m.lat }]),
-    );
-    const edgesByKey = new Map<string, { from: string; to: string }>(
-      edgeIndexLocal.map((e) => [
-        String(e.id),
-        { from: String(e.from), to: String(e.to) },
-      ]),
-    );
-    return { nodesById, edgesByKey };
-  }
-
   const buildingNodesFC = useMemo<GeoJSONFeatureCollection | null>(() => {
     if (!buildingMarkers.length) return null;
     return {
@@ -870,14 +814,6 @@ export default function NavigationMap(): JSX.Element {
       duration,
       essential: true,
     });
-    setViewState((v) => ({
-      ...v,
-      longitude: lng,
-      latitude: lat,
-      zoom,
-      bearing: bearingDeg ?? 0,
-      pitch,
-    }));
   }
 
   /** -------- Route actions -------- */
@@ -1007,7 +943,6 @@ export default function NavigationMap(): JSX.Element {
 
     const firstNode =
       path.startNode ??
-      markers.find((cur) => cur.id === path.firstNodeId) ??
       buildingMarkers.find((cur) => cur.id === path.firstNodeId) ??
       (routeCoordsRef.current[1]
         ? {
@@ -1108,7 +1043,15 @@ export default function NavigationMap(): JSX.Element {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
-    setViewState(defViewState);
+    const map = mapRef.current?.getMap?.();
+    map?.flyTo({
+      center: [defViewState.longitude, defViewState.latitude],
+      zoom: defViewState.zoom,
+      bearing: 0,
+      pitch: 0,
+      duration: 900,
+      essential: true,
+    });
     routeCoordsRef.current = [];
 
     setPath(PATH_RESET);
@@ -1825,10 +1768,7 @@ export default function NavigationMap(): JSX.Element {
         ) : (
           <ReactMap
             ref={mapRef}
-            {...viewState}
-            onMove={(e: ViewStateChangeEvent) =>
-              setViewState((prev) => ({ ...prev, ...e.viewState }))
-            }
+            initialViewState={defViewState}
             mapLib={maplibregl}
             mapStyle={baseStyle as any}
             onLoad={() => {
@@ -1837,6 +1777,15 @@ export default function NavigationMap(): JSX.Element {
               map?.on("error", (e: any) => {
                 console.error("[maplibre error]", e?.error ?? e);
               });
+              const pending = pendingCenterRef.current;
+              if (pending && map) {
+                pendingCenterRef.current = null;
+                map.flyTo({
+                  center: [pending.lng, pending.lat],
+                  zoom: pending.zoom,
+                  essential: true,
+                });
+              }
             }}
           >
             <Layer
@@ -1890,16 +1839,6 @@ export default function NavigationMap(): JSX.Element {
                 />
               </Source>
             )}
-
-            {/* KEY forces remount so NavModeMap reloads graph cleanly per mode */}
-            <NavModeMap
-              path={path}
-              curNavConditions={curNavConditions}
-              markers={markers}
-              edgeIndex={edgeIndex}
-              setEdgeIndex={setEdgeIndex}
-              showBaseGraph={edgeIndex.length > 0 && navigating}
-            />
 
             {routeCoords.length >= 2 && (
               <RoutePathLayer coordinates={routeCoords} />
