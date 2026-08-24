@@ -64,6 +64,8 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import {
   featureCentroid,
@@ -212,7 +214,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   };
   const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
   const mapRef = useRef<MapRef | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [clientReady, setClientReady] = useState(false);
@@ -1866,6 +1869,17 @@ export default function MyMapsWorkspacePage(): JSX.Element {
               <div
                 className={`flex shrink-0 items-center gap-1 rounded-2xl border p-1 ${borderMutedClass} ${surfacePanelClass}`}
               >
+                <BasemapToggle
+                  basemap={basemap}
+                  onChange={(next) => {
+                    const map = mapRef.current?.getMap?.();
+                    setBasemap(next);
+                    if (!map) return;
+                    setMapReady(false);
+                    map.once("style.load", () => setMapReady(true));
+                  }}
+                  className="h-9 w-9"
+                />
                 <Button
                   type="button"
                   size="sm"
@@ -2116,7 +2130,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   initialViewState={initialViewState}
                   style={{ width: "100%", height: "100%" }}
                   mapLib={maplibregl}
-                  mapStyle={baseStyle as never}
+                  mapStyle={resolvedMapStyle as never}
                   onLoad={() => setMapReady(true)}
                   interactiveLayerIds={[
                     "mymap-edges-bidir",

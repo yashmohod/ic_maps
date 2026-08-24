@@ -26,6 +26,8 @@ import { Slider } from "@/components/ui/slider";
 
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import {
   CAMPUS_BOUNDS,
   DEFAULT_CENTER,
@@ -38,6 +40,7 @@ import {
   bearingTo,
   distanceToPolylineMeters,
   makeCircleGeoJSON,
+  shouldPublishGpsUi,
 } from "@/lib/geo";
 import {
   surfaceSubtleClass,
@@ -99,7 +102,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   const { isDark, mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
 
   type RouteInfo = {
     name: string;
@@ -208,6 +212,12 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     useState(SHARE_SHEET_PEEK);
   const [routePending, setRoutePending] = useState(false);
   const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
+  const [routeOutdoorSegments, setRouteOutdoorSegments] = useState<
+    Array<Array<[number, number]>>
+  >([]);
+  const [routePortals, setRoutePortals] = useState<
+    Array<{ entry: [number, number]; exit: [number, number] }>
+  >([]);
   const [routeEta, setRouteEta] = useState<{
     distanceMeters: number;
     durationSeconds: number;
@@ -225,6 +235,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const offRouteSinceRef = useRef<number | null>(null);
   const routePendingRef = useRef(false);
   const userPosRef = useRef<UserPos | null>(null);
+  const lastGpsUiAtRef = useRef(0);
   const routeStartNodeRef = useRef<{
     id: number;
     lat: number;
@@ -266,12 +277,24 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
 
     setLocating(true);
+    const applyFix = (longitude: number, latitude: number, accuracy?: number) => {
+      setUserPos({ lng: longitude, lat: latitude, accuracy });
+      ensureCenter(longitude, latitude, 16);
+      setLocating(false);
+    };
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { longitude, latitude, accuracy } = position.coords;
-        setUserPos({ lng: longitude, lat: latitude, accuracy });
-        ensureCenter(longitude, latitude, 16);
-        setLocating(false);
+        applyFix(longitude, latitude, accuracy);
+      },
+      () => {},
+      { enableHighAccuracy: false, timeout: 1500, maximumAge: 60_000 },
+    );
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { longitude, latitude, accuracy } = position.coords;
+        applyFix(longitude, latitude, accuracy);
       },
       () => {
         toast.error("Could not get your location.");
@@ -420,23 +443,26 @@ export default function ShareRouteNavigatePage(): JSX.Element {
           accuracy,
         };
         userPosRef.current = nextPos;
-        setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
+        if (shouldPublishGpsUi(lastGpsUiAtRef.current)) {
+          lastGpsUiAtRef.current = Date.now();
+          setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
 
-        let brg: number;
-        if (typeof heading === "number" && !Number.isNaN(heading)) {
-          brg = heading;
-        } else if (routeCoordsRef.current.length >= 2) {
-          const [nx, ny] = routeCoordsRef.current[1];
-          brg = bearingTo(longitude, latitude, nx, ny);
-        } else {
-          brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
+          let brg: number;
+          if (typeof heading === "number" && !Number.isNaN(heading)) {
+            brg = heading;
+          } else if (routeCoordsRef.current.length >= 2) {
+            const [nx, ny] = routeCoordsRef.current[1];
+            brg = bearingTo(longitude, latitude, nx, ny);
+          } else {
+            brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
+          }
+
+          aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
+            pitch: 60,
+            duration: 300,
+            zoom: 20,
+          });
         }
-
-        aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
-          pitch: 60,
-          duration: 300,
-          zoom: 20,
-        });
 
         // Off-route recalc: GPS ticks stay local unless we leave the polyline.
         const MIN_OFF_ROUTE_M = 25;
@@ -596,6 +622,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
       if (!res.ok || !Array.isArray(data.path) || data.path.length === 0) {
         setRouteCoords([]);
+        setRouteOutdoorSegments([]);
+        setRoutePortals([]);
         routeCoordsRef.current = [];
         routeStartNodeRef.current = null;
         setRouteEta(null);
@@ -608,6 +636,16 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
       const coords = data.geometry?.coordinates ?? [];
       setRouteCoords(coords);
+      setRouteOutdoorSegments(
+        Array.isArray(data.geometry?.outdoorSegments)
+          ? data.geometry.outdoorSegments
+          : coords.length >= 2
+            ? [coords]
+            : [],
+      );
+      setRoutePortals(
+        Array.isArray(data.geometry?.portals) ? data.geometry.portals : [],
+      );
       routeCoordsRef.current = coords;
       offRouteSinceRef.current = null;
       if (data.startNode) {
@@ -647,6 +685,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       if (reqId !== routeRequestIdRef.current) return;
       console.error(e);
       setRouteCoords([]);
+      setRouteOutdoorSegments([]);
+      setRoutePortals([]);
       routeCoordsRef.current = [];
       routeStartNodeRef.current = null;
       setRouteEta(null);
@@ -705,6 +745,11 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       <div className="absolute left-3 top-3 z-40 flex items-center gap-2">
         <HomeLogoLink className="h-11 min-h-[44px] px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-11 min-h-[44px] w-11 shadow-xl backdrop-blur" />
+        <BasemapToggle
+          basemap={basemap}
+          onChange={setBasemap}
+          className="h-11 min-h-[44px] w-11 shadow-xl backdrop-blur"
+        />
       </div>
 
       <div className="h-full w-full">
@@ -717,7 +762,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             ref={mapRef}
             initialViewState={defViewState}
             mapLib={maplibregl}
-            mapStyle={baseStyle as any}
+            mapStyle={resolvedMapStyle as any}
             onLoad={() => {
               setMapReady(true);
               const map = mapRef.current?.getMap?.();
@@ -736,8 +781,15 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
 
-            {routeCoords.length >= 2 && (
-              <RoutePathLayer coordinates={routeCoords} id="share-route" />
+            {(routeOutdoorSegments.length > 0 ||
+              routePortals.length > 0 ||
+              routeCoords.length >= 2) && (
+              <RoutePathLayer
+                coordinates={routeCoords}
+                segments={routeOutdoorSegments}
+                portals={routePortals}
+                id="share-route"
+              />
             )}
 
             {parkingPos && (

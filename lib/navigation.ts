@@ -26,6 +26,7 @@ import {
   type Graph,
   type NavConditions,
 } from "@/lib/navigation-graph";
+import { pathToRouteDrawModel } from "@/lib/navigation-route-model";
 import type { RouteLegMetrics } from "@/lib/types/map";
 
 export type { Graph, NavConditions } from "@/lib/navigation-graph";
@@ -221,17 +222,6 @@ export async function navigate(
   return path;
 }
 
-function dedupeCoords(coords: [number, number][]): [number, number][] {
-  if (coords.length <= 1) return coords;
-  const out: [number, number][] = [coords[0]];
-  for (let i = 1; i < coords.length; i++) {
-    const prev = out[out.length - 1];
-    const cur = coords[i];
-    if (prev[0] !== cur[0] || prev[1] !== cur[1]) out.push(cur);
-  }
-  return out;
-}
-
 export type RouteMetrics = {
   distanceMeters: number;
   durationSeconds: number;
@@ -383,21 +373,8 @@ export function pathToRouteGeometry(
   graph: Graph,
   path: number[],
   startNodeId: number,
-): { type: "LineString"; coordinates: [number, number][] } {
-  const coords: [number, number][] = [];
-  const startNode = graph.nodesOutside.get(startNodeId);
-  if (startNode) coords.push([startNode.lng, startNode.lat]);
-
-  let currentNodeId = startNodeId;
-  for (const edgeId of path) {
-    const nextId = nextNodeFromEdge(graph, currentNodeId, edgeId);
-    if (nextId == null) continue;
-    const nextNode = graph.nodesOutside.get(nextId);
-    if (nextNode) coords.push([nextNode.lng, nextNode.lat]);
-    currentNodeId = nextId;
-  }
-
-  return { type: "LineString", coordinates: dedupeCoords(coords) };
+) {
+  return pathToRouteDrawModel(graph, path, startNodeId);
 }
 
 export async function navigateMulti(
@@ -457,8 +434,7 @@ async function aStar(
       return pathTree;
     }
 
-    const neighbors = graph.adjOutside.get(cur.id);
-    if (!neighbors) continue;
+    const neighbors = graph.adjOutside.get(cur.id) ?? [];
 
     for (const neighbor of neighbors) {
       const neighborNode = graph.nodesOutside.get(neighbor.to);
@@ -509,7 +485,6 @@ async function aStar(
         cur.id,
         navConditions,
       );
-      if (!possibleBuildingExits) continue;
       for (const { exitOutsideId, indoorCost } of possibleBuildingExits) {
         const exitNode = graph.nodesOutside.get(exitOutsideId);
         if (!exitNode) continue;

@@ -1,5 +1,5 @@
 import type { Graph } from "@/lib/navigation-graph";
-import { nextNodeFromEdge } from "@/lib/navigation-graph";
+import { isThroughBuildingHop, nextNodeFromEdge } from "@/lib/navigation-graph";
 
 type OutdoorEdgeRun = {
   kind: "outdoor";
@@ -95,6 +95,21 @@ export function edgePathToSegments(
   };
 
   for (const edgeId of edgePath) {
+    if (isThroughBuildingHop(edgeId)) {
+      const hopTo = nextNodeFromEdge(graph, current, edgeId);
+      if (hopTo == null) continue;
+      flushOutdoor();
+      segments.push({
+        kind: "indoor",
+        entranceOutdoorId: current,
+        exitOutdoorId: hopTo,
+      });
+      current = hopTo;
+      runNodes = [current];
+      runEdges = [];
+      continue;
+    }
+
     const next = nextNodeFromEdge(graph, current, edgeId);
     if (next != null) {
       runEdges.push(edgeId);
@@ -152,4 +167,93 @@ export function edgePathToSegments(
 
   flushOutdoor();
   return segments;
+}
+
+function dedupeCoords(coords: [number, number][]): [number, number][] {
+  if (coords.length <= 1) return coords;
+  const out: [number, number][] = [coords[0]!];
+  for (let i = 1; i < coords.length; i++) {
+    const prev = out[out.length - 1]!;
+    const cur = coords[i]!;
+    if (prev[0] !== cur[0] || prev[1] !== cur[1]) out.push(cur);
+  }
+  return out;
+}
+
+export type ThroughBuildingPortal = {
+  entry: [number, number];
+  exit: [number, number];
+};
+
+/** Outdoor draw segments + portal nodes; continuous coords keep GPS on-route through buildings. */
+export type RouteDrawModel = {
+  type: "LineString";
+  coordinates: [number, number][];
+  outdoorSegments: [number, number][][];
+  portals: ThroughBuildingPortal[];
+};
+
+export function pathToRouteDrawModel(
+  graph: Graph,
+  edgePath: number[],
+  startNodeId: number,
+): RouteDrawModel {
+  const continuous: [number, number][] = [];
+  const outdoorSegments: [number, number][][] = [];
+  const portals: ThroughBuildingPortal[] = [];
+  let run: [number, number][] = [];
+
+  const appendRun = (lng: number, lat: number) => {
+    const last = run[run.length - 1];
+    if (!last || last[0] !== lng || last[1] !== lat) run.push([lng, lat]);
+  };
+
+  const flushRun = () => {
+    if (run.length >= 2) outdoorSegments.push(run);
+    run = [];
+  };
+
+  const startNode = graph.nodesOutside.get(startNodeId);
+  if (startNode) {
+    continuous.push([startNode.lng, startNode.lat]);
+    appendRun(startNode.lng, startNode.lat);
+  }
+
+  let currentNodeId = startNodeId;
+  for (const edgeId of edgePath) {
+    const nextId = nextNodeFromEdge(graph, currentNodeId, edgeId);
+    if (nextId == null) continue;
+    const nextNode = graph.nodesOutside.get(nextId);
+    if (!nextNode) {
+      currentNodeId = nextId;
+      continue;
+    }
+
+    if (isThroughBuildingHop(edgeId)) {
+      const entryNode = graph.nodesOutside.get(currentNodeId);
+      flushRun();
+      if (entryNode) {
+        portals.push({
+          entry: [entryNode.lng, entryNode.lat],
+          exit: [nextNode.lng, nextNode.lat],
+        });
+      }
+      continuous.push([nextNode.lng, nextNode.lat]);
+      run = [[nextNode.lng, nextNode.lat]];
+      currentNodeId = nextId;
+      continue;
+    }
+
+    continuous.push([nextNode.lng, nextNode.lat]);
+    appendRun(nextNode.lng, nextNode.lat);
+    currentNodeId = nextId;
+  }
+  flushRun();
+
+  return {
+    type: "LineString",
+    coordinates: dedupeCoords(continuous),
+    outdoorSegments,
+    portals,
+  };
 }

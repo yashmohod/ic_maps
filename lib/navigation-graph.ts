@@ -29,7 +29,7 @@ export type Graph = {
   >;
   /** destination_id -> one representative node_outside_id (for reference) */
   buildingNodeOutside: Map<number, number>;
-  /** Outdoor node IDs with at least one live indoor door marked is_entry. Triggers through-building. */
+  /** Outdoor node IDs with a live indoor door linked (`node_outside_id`). Triggers through-building. */
   buildingEntranceNodeIds: Set<number>;
   version: number;
 };
@@ -108,7 +108,7 @@ export function buildGraph(
     buildingNodeOutside.set(cur.destination_id, cur.node_outside_id);
   }
   for (const n of _node_inside) {
-    if (n.node_outside_id != null && n.is_entry && !n.is_dead) {
+    if (n.node_outside_id != null && !n.is_dead) {
       buildingEntranceNodeIds.add(n.node_outside_id);
     }
   }
@@ -148,9 +148,11 @@ export function nextNodeFromEdge(
 }
 
 /** Synthetic negative edge id for outdoor entry→exit through-building hop. */
+const HOP_ID_STRIDE = 0x100000; // 2^20; campus serial ids stay well below this
+
 export function encodeThroughBuildingHop(from: number, to: number): number {
-  // ids fit in 20 bits for campus-scale serial PKs
-  return -((from << 20) | (to & 0xfffff));
+  // Number multiply, not `<<` — JS bit shifts are 32-bit and drop ids ≥ 2048.
+  return -(from * HOP_ID_STRIDE + (to % HOP_ID_STRIDE));
 }
 
 export function decodeThroughBuildingHop(
@@ -158,7 +160,10 @@ export function decodeThroughBuildingHop(
 ): { from: number; to: number } | null {
   if (edgeId >= 0) return null;
   const packed = -edgeId;
-  return { from: packed >>> 20, to: packed & 0xfffff };
+  return {
+    from: Math.floor(packed / HOP_ID_STRIDE),
+    to: packed % HOP_ID_STRIDE,
+  };
 }
 
 export function isThroughBuildingHop(edgeId: number): boolean {
@@ -190,11 +195,7 @@ function through_building_bfs(
 } {
   const entryStarts: NodeInside[] = [];
   for (const [, node] of graph.nodesInside) {
-    if (
-      node.node_outside_id === buildingEntranceOutside &&
-      node.is_entry &&
-      !node.is_dead
-    ) {
+    if (node.node_outside_id === buildingEntranceOutside && !node.is_dead) {
       entryStarts.push(node);
     }
   }
@@ -248,7 +249,6 @@ function through_building_bfs(
       queue.push(nextId);
 
       if (
-        nextNode.is_exit &&
         !nextNode.is_dead &&
         nextNode.node_outside_id != null &&
         nextNode.node_outside_id !== buildingEntranceOutside

@@ -67,7 +67,7 @@ export type MapDestination = {
   name: string;
   lat: number;
   lng: number;
-  polygon: string;
+  polygon?: string;
   isParkingLot: boolean;
 };
 
@@ -89,6 +89,11 @@ export type NavigateToResponse = {
   geometry: {
     type: "LineString";
     coordinates: Array<[number, number]>;
+    outdoorSegments?: Array<Array<[number, number]>>;
+    portals?: Array<{
+      entry: [number, number];
+      exit: [number, number];
+    }>;
   };
   firstNodeId: number;
   lastNodeId: number;

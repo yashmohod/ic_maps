@@ -165,7 +165,16 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
         const styleUrl = new URL(stylePath, origin).toString();
         const pmtilesUrl = new URL(pmtilesPath, origin).toString();
 
-        const res = await fetch(styleUrl, { cache: "no-store" });
+        const cachedHit = styleCache.get(stylePath);
+        if (cachedHit) {
+          if (!cancelled) {
+            setVectorSourceId(cachedHit.vectorSourceId);
+            setBaseStyle(cloneStyle(cachedHit.style));
+          }
+          return;
+        }
+
+        const res = await fetch(styleUrl);
         if (!res.ok) throw new Error(`style fetch failed: ${res.status}`);
         const style: any = await res.json();
 
@@ -233,10 +242,11 @@ export function usePmtilesStyle(options: UsePmtilesStyleOptions = {}) {
         }
 
         if (!cancelled) {
+          const frozen = cloneStyle(style as StyleSpecification);
           setVectorSourceId(srcKey);
-          setBaseStyle(style as StyleSpecification);
+          setBaseStyle(cloneStyle(frozen));
           styleCache.set(stylePath, {
-            style: style as StyleSpecification,
+            style: frozen,
             vectorSourceId: srcKey,
           });
         }

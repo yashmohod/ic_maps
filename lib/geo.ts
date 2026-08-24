@@ -67,6 +67,13 @@ export function bearingTo(
   return normBearing(toDeg(Math.atan2(y, x)));
 }
 
+/** Publish GPS to React at ~2 Hz. Camera/off-route should use the live sample. */
+export const GPS_UI_INTERVAL_MS = 500;
+
+export function shouldPublishGpsUi(lastPublishedAt: number, now = Date.now()) {
+  return lastPublishedAt === 0 || now - lastPublishedAt >= GPS_UI_INTERVAL_MS;
+}
+
 /** Min distance from a point to a polyline ([lng, lat][]), meters. */
 export function distanceToPolylineMeters(
   lng: number,

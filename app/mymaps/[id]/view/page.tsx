@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import { parseLineFeature, parsePolygonFeature } from "@/lib/mymaps-geo";
 import { MYMAPS_DEFAULT_COLOR, normalizeHexColor } from "@/lib/mymaps-color";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
@@ -84,7 +86,8 @@ export default function MyMapPublicViewPage(): JSX.Element {
   };
   const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
 
   const [mapName, setMapName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -298,7 +301,14 @@ export default function MyMapPublicViewPage(): JSX.Element {
             </p>
           </div>
         </div>
-        <ThemeToggleButton />
+        <div className="flex items-center gap-2">
+          <ThemeToggleButton />
+          <BasemapToggle
+            basemap={basemap}
+            onChange={setBasemap}
+            className="h-11 min-h-[44px] w-11 shadow-xl backdrop-blur"
+          />
+        </div>
       </div>
 
       <div className="absolute inset-0">
@@ -310,7 +320,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
           <ReactMap
             initialViewState={initialViewState}
             mapLib={maplibregl}
-            mapStyle={baseStyle as never}
+            mapStyle={resolvedMapStyle as never}
           >
             <Source id="mymap-view-edges" type="geojson" data={edgesGeoJSON}>
               <Layer {...edgeLayerBidir} />

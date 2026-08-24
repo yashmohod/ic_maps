@@ -31,6 +31,8 @@ import EditPanel, {
 import DrawControl from "@/components/BuildingDrawControls";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
@@ -154,6 +156,9 @@ export default function BuildingEditor(): JSX.Element {
     changeMode: (mode: string) => void;
   } | null>(null);
   const { isDark, mapStyle } = useMapStyle();
+  const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
 
   const [mlMap, setMlMap] = useState<MlMap | null>(null);
   const [buildings, setBuildings] = useState<BuildingRow[]>([]);
@@ -165,9 +170,6 @@ export default function BuildingEditor(): JSX.Element {
   const [currentBuilding, setCurrentBuilding] = useState<BuildingRow>(emptyBuilding);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
-
-  const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
 
   /** Stable initial map view */
   const stableViewState = useMemo<ViewStateLite>(
@@ -181,9 +183,9 @@ export default function BuildingEditor(): JSX.Element {
 
   async function loadDestinations() {
     try {
-      const resp: any = await fetch(withBasePath("/api/destination")).then(
-        (r) => r.json(),
-      );
+      const resp: any = await fetch(
+        withBasePath("/api/destination?include=polygon"),
+      ).then((r) => r.json());
       if (!resp) {
         toast.error("Buildings failed to load");
         return;
@@ -592,6 +594,17 @@ export default function BuildingEditor(): JSX.Element {
     >
       <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
+        <BasemapToggle
+          basemap={basemap}
+          onChange={(next) => {
+            const map = mapRef.current?.getMap?.();
+            setBasemap(next);
+            if (!map) return;
+            setMlMap(null);
+            map.once("style.load", () => setMlMap(map as unknown as MlMap));
+          }}
+          className="h-12 w-12 shadow-xl backdrop-blur"
+        />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
         <Button
           type="button"
@@ -630,7 +643,7 @@ export default function BuildingEditor(): JSX.Element {
             mlMap={mlMap}
             mapRef={mapRef}
             stableViewState={stableViewState}
-            mapStyle={baseStyle as StyleSpecification}
+            mapStyle={resolvedMapStyle as StyleSpecification}
             onMapClick={onMapClick}
             onLoad={onLoad}
             onReady={onDrawReady}

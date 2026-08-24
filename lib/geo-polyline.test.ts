@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { distanceToPolylineMeters } from "@/lib/geo";
+import {
+  distanceToPolylineMeters,
+  shouldPublishGpsUi,
+} from "@/lib/geo";
 
 describe("distanceToPolylineMeters", () => {
   it("is near zero on the segment", () => {
@@ -18,5 +21,13 @@ describe("distanceToPolylineMeters", () => {
     const off = distanceToPolylineMeters(-76.4945, 42.4219, line);
     expect(off).toBeGreaterThan(80);
     expect(off).toBeLessThan(120);
+  });
+});
+
+describe("shouldPublishGpsUi", () => {
+  it("publishes the first sample and then respects the interval", () => {
+    expect(shouldPublishGpsUi(0, 10)).toBe(true);
+    expect(shouldPublishGpsUi(1000, 1200)).toBe(false);
+    expect(shouldPublishGpsUi(1000, 1500)).toBe(true);
   });
 });

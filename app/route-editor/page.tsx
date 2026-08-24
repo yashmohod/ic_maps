@@ -33,6 +33,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
@@ -63,9 +65,10 @@ export default function RouteEditor(): JSX.Element {
     latitude: DEFAULT_CENTER.lat,
     zoom: DEFAULT_ZOOM,
   });
-  const { isDark, mapStyle } = useMapStyle();
+  const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
   // Graph
   const [markers, setMarkers] = useState<MarkerNode[]>([]);
   const [edgeIndex, setEdgeIndex] = useState<EdgeIndexEntry[]>([]);
@@ -511,12 +514,47 @@ export default function RouteEditor(): JSX.Element {
   /** ---------------- Buildings ---------------- */
 
   async function handelBuildingSelect(id: number) {
-    const curDest = destinations.find((cur) => cur.id == id);
+    let curDest = destinations.find((cur) => cur.id == id);
     if (!curDest) {
       toast.error("Could not load the current building");
       return;
     }
     const reqId = ++buildingSelectRequestIdRef.current;
+
+    if (!curDest.polygon) {
+      try {
+        const destReq = await fetch(
+          withBasePath(`/api/destination?id=${encodeURIComponent(id)}`),
+        );
+        if (reqId !== buildingSelectRequestIdRef.current) return;
+        if (!destReq.ok) {
+          toast.error("Could not load the current building");
+          return;
+        }
+        const destPayload = await destReq.json().catch(() => null);
+        if (reqId !== buildingSelectRequestIdRef.current) return;
+        const full = Array.isArray(destPayload?.destinations)
+          ? destPayload.destinations[0]
+          : null;
+        if (!full) {
+          toast.error("Could not load the current building");
+          return;
+        }
+        curDest = { ...curDest, ...full };
+        setDestinations((prev) =>
+          prev.map((d) =>
+            d.id === id ? { ...d, polygon: full.polygon } : d,
+          ),
+        );
+      } catch (err) {
+        if (reqId !== buildingSelectRequestIdRef.current) return;
+        console.error(err);
+        toast.error("Could not load the current building");
+        return;
+      }
+    }
+
+    if (!curDest) return;
     setCurrentDestination(curDest);
     flyToDestination(curDest);
     try {
@@ -743,6 +781,18 @@ export default function RouteEditor(): JSX.Element {
     map.on("mouseleave", "graph-edges", handleEdgeLeave);
   }
 
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.();
+    if (!map) return;
+    const onStyle = () => handleLoad();
+    map.on("style.load", onStyle);
+    return () => {
+      map.off("style.load", onStyle);
+    };
+    // Rebind after satellite ↔ map style swaps wipe custom layers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basemap]);
+
   /** ---------------- Data loading ---------------- */
 
   async function getAllFeature() {
@@ -829,6 +879,11 @@ export default function RouteEditor(): JSX.Element {
     <div className="relative h-screen w-full bg-background text-foreground">
       <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
+        <BasemapToggle
+          basemap={basemap}
+          onChange={setBasemap}
+          className="h-12 w-12 shadow-xl backdrop-blur"
+        />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
       </div>
 
@@ -1084,7 +1139,7 @@ export default function RouteEditor(): JSX.Element {
             }
             onClick={handleMapClick as any}
             mapLib={maplibregl}
-            mapStyle={baseStyle as any}
+            mapStyle={resolvedMapStyle as any}
             onLoad={handleLoad}
             style={{ width: "100%", height: "100%" }}
           >

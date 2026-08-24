@@ -3,8 +3,13 @@ import {
   edgePathToNodeIds,
   edgePathToSegments,
   hasOutdoorEdge,
+  pathToRouteDrawModel,
 } from "@/lib/navigation-route-model";
-import { buildGraph, reconstructIndoorPath } from "@/lib/navigation-graph";
+import {
+  buildGraph,
+  encodeThroughBuildingHop,
+  reconstructIndoorPath,
+} from "@/lib/navigation-graph";
 import type {
   EdgeInside,
   EdgeOutside,
@@ -151,5 +156,62 @@ describe("indoor shortcut detection", () => {
       expect(indoor.entranceOutdoorId).toBe(20);
       expect(indoor.exitOutdoorId).toBe(30);
     }
+  });
+
+  it("treats encoded through-building hops as indoor segments", () => {
+    const outside = [
+      outdoorNode(10, 42.42, -76.49),
+      outdoorNode(20, 42.421, -76.491),
+      outdoorNode(30, 42.422, -76.492),
+      outdoorNode(40, 42.423, -76.493),
+    ];
+    const edges: EdgeOutside[] = [
+      {
+        id: 1,
+        node_a_id: 10,
+        node_b_id: 20,
+        bi_directional: true,
+        direction: true,
+        distance: 30,
+      },
+      {
+        id: 2,
+        node_a_id: 30,
+        node_b_id: 40,
+        bi_directional: true,
+        direction: true,
+        distance: 30,
+      },
+    ];
+    const graph = buildGraph([], [], outside, edges, []);
+    const hop = encodeThroughBuildingHop(20, 30);
+    const segments = edgePathToSegments(graph, 10, [1, hop, 2]);
+    expect(segments.map((s) => s.kind)).toEqual(["outdoor", "indoor", "outdoor"]);
+    const indoor = segments.find((s) => s.kind === "indoor");
+    if (indoor?.kind === "indoor") {
+      expect(indoor.entranceOutdoorId).toBe(20);
+      expect(indoor.exitOutdoorId).toBe(30);
+    }
+
+    const draw = pathToRouteDrawModel(graph, [1, hop, 2], 10);
+    expect(draw.portals).toEqual([
+      { entry: [-76.491, 42.421], exit: [-76.492, 42.422] },
+    ]);
+    expect(draw.outdoorSegments).toHaveLength(2);
+    expect(draw.outdoorSegments[0]).toEqual([
+      [-76.49, 42.42],
+      [-76.491, 42.421],
+    ]);
+    expect(draw.outdoorSegments[1]).toEqual([
+      [-76.492, 42.422],
+      [-76.493, 42.423],
+    ]);
+    // Continuous GPS line still includes the hop endpoints in order
+    expect(draw.coordinates).toEqual([
+      [-76.49, 42.42],
+      [-76.491, 42.421],
+      [-76.492, 42.422],
+      [-76.493, 42.423],
+    ]);
   });
 });

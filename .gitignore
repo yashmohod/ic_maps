@@ -46,3 +46,6 @@ next-env.d.ts
 
 # private uploads (reports + floorplans)
 /storage/private/
+
+# local database copies (contain PII / credentials)
+/backups/

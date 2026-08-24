@@ -533,10 +533,39 @@ export default function CustomRoutesPage(): JSX.Element {
     const reqId = ++buildingSelectRequestIdRef.current;
     setPreviewDestId(String(destinationId));
 
-    // 1) Polygon + lat/lng from destinations array (already loaded)
-    const dest = destinations?.find(
+    // 1) Polygon + lat/lng: use cached list, fetch polygon on demand
+    let dest = destinations?.find(
       (d) => String(d.id) === String(destinationId),
     );
+    if (dest && !dest.polygon) {
+      try {
+        const destReq = await fetch(
+          withBasePath(
+            `/api/destination?id=${encodeURIComponent(destinationId)}`,
+          ),
+        );
+        if (reqId !== buildingSelectRequestIdRef.current) return;
+        if (destReq.ok) {
+          const destPayload = await destReq.json().catch(() => null);
+          if (reqId !== buildingSelectRequestIdRef.current) return;
+          const full = Array.isArray(destPayload?.destinations)
+            ? destPayload.destinations[0]
+            : null;
+          if (full) {
+            dest = { ...dest, ...full };
+            setDestinations((prev) =>
+              (prev ?? []).map((d) =>
+                String(d.id) === String(destinationId)
+                  ? { ...d, polygon: full.polygon }
+                  : d,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
     if (dest) {
       const polyStr = dest.polygon;
       try {

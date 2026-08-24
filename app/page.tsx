@@ -13,6 +13,8 @@ import { toast } from "sonner";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import {
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
@@ -52,6 +54,7 @@ import {
   makeCircleGeoJSON,
   bearingTo,
   distanceToPolylineMeters,
+  shouldPublishGpsUi,
 } from "@/lib/geo";
 import {
   surfacePanelClass,
@@ -205,6 +208,12 @@ export default function NavigationMap(): JSX.Element {
   >(null);
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
   const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
+  const [routeOutdoorSegments, setRouteOutdoorSegments] = useState<
+    Array<Array<[number, number]>>
+  >([]);
+  const [routePortals, setRoutePortals] = useState<
+    Array<{ entry: [number, number]; exit: [number, number] }>
+  >([]);
   const routeRequestIdRef = useRef(0);
   const buildingSelectRequestIdRef = useRef(0);
   const offRouteSinceRef = useRef<number | null>(null);
@@ -214,6 +223,7 @@ export default function NavigationMap(): JSX.Element {
   trackingRef.current = tracking;
   const userPosRef = useRef<UserPos | null>(null);
   userPosRef.current = userPos;
+  const lastGpsUiAtRef = useRef(0);
   const [routeEta, setRouteEta] = useState<{
     distanceMeters: number;
     durationSeconds: number;
@@ -336,9 +346,11 @@ export default function NavigationMap(): JSX.Element {
 
   /** ---------------- PMTiles + Style ---------------- */
 
-  const { baseStyle, vectorSourceId } = usePmtilesStyle({
+  const { baseStyle } = usePmtilesStyle({
     stylePath: mapStyle,
   });
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
 
   /** -------- Accuracy ring -------- */
 
@@ -505,28 +517,44 @@ export default function NavigationMap(): JSX.Element {
       return;
     }
 
+    const applyFix = (
+      longitude: number,
+      latitude: number,
+      accuracy: number | undefined,
+    ) => {
+      const insideCampus =
+        latitude > swLat &&
+        latitude < neLat &&
+        longitude > swLng &&
+        longitude < neLng;
+
+      if (insideCampus || forceCenter) {
+        setUserPos({ lng: longitude, lat: latitude, accuracy });
+        ensureCenter(longitude, latitude, 16);
+        setMapStage((stage) => {
+          if (stage === MAP_STAGES.ROUTE) return MAP_STAGES.ROUTE;
+          if (selectedDest) return MAP_STAGES.BUILDING;
+          return MAP_STAGES.IDLE;
+        });
+      }
+    };
+
+    // Fast cached fix first, then refine with a fresh high-accuracy reading.
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { longitude, latitude, accuracy } = position.coords;
-
-        const insideCampus =
-          latitude > swLat &&
-          latitude < neLat &&
-          longitude > swLng &&
-          longitude < neLng;
-
-        if (insideCampus || forceCenter) {
-          setUserPos({ lng: longitude, lat: latitude, accuracy });
-          ensureCenter(longitude, latitude, 16);
-          setMapStage((stage) => {
-            if (stage === MAP_STAGES.ROUTE) return MAP_STAGES.ROUTE;
-            if (selectedDest) return MAP_STAGES.BUILDING;
-            return MAP_STAGES.IDLE;
-          });
-        }
+        applyFix(longitude, latitude, accuracy);
       },
       () => {},
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 },
+      { enableHighAccuracy: false, timeout: 1500, maximumAge: 60_000 },
+    );
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { longitude, latitude, accuracy } = position.coords;
+        applyFix(longitude, latitude, accuracy);
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
     );
   }
 
@@ -542,11 +570,38 @@ export default function NavigationMap(): JSX.Element {
     const reqId = ++buildingSelectRequestIdRef.current;
 
     try {
-      const curDestination: MapDestination | undefined = destinations.find(
+      let curDestination: MapDestination | undefined = destinations.find(
         (cur) => cur.id === id,
       );
       if (!curDestination)
         return toast.error("Could not find the current destination.");
+
+      if (!curDestination.polygon) {
+        const destReq = await fetch(
+          withBasePath(`/api/destination?id=${encodeURIComponent(id)}`),
+        );
+        if (reqId !== buildingSelectRequestIdRef.current) return;
+        if (!destReq.ok) {
+          toast.error("Building details did not load.");
+          return;
+        }
+        const destPayload = await destReq.json().catch(() => null);
+        if (reqId !== buildingSelectRequestIdRef.current) return;
+        const full = Array.isArray(destPayload?.destinations)
+          ? (destPayload.destinations[0] as MapDestination | undefined)
+          : undefined;
+        if (!full) {
+          toast.error("Building details did not load.");
+          return;
+        }
+        curDestination = { ...curDestination, ...full };
+        setDestinations((prev) =>
+          prev.map((d) =>
+            d.id === id ? { ...d, polygon: full.polygon } : d,
+          ),
+        );
+      }
+
       let curDestinationPoly: GeoJSONFeatureCollection | null = null;
       try {
         if (curDestination.polygon) {
@@ -600,6 +655,8 @@ export default function NavigationMap(): JSX.Element {
       setPath(PATH_RESET);
       routeCoordsRef.current = [];
       setRouteCoords([]);
+      setRouteOutdoorSegments([]);
+      setRoutePortals([]);
       setRouteEta(null);
 
       setMapStage(MAP_STAGES.BUILDING);
@@ -622,6 +679,8 @@ export default function NavigationMap(): JSX.Element {
     setNavigating(false);
     routeCoordsRef.current = [];
     setRouteCoords([]);
+    setRouteOutdoorSegments([]);
+    setRoutePortals([]);
     setRouteEta(null);
     setMapStage(MAP_STAGES.IDLE);
     showCampusOverview();
@@ -881,6 +940,16 @@ export default function NavigationMap(): JSX.Element {
     const coords = resp.geometry?.coordinates ?? [];
     routeCoordsRef.current = coords;
     setRouteCoords(coords);
+    setRouteOutdoorSegments(
+      Array.isArray(resp.geometry?.outdoorSegments)
+        ? resp.geometry.outdoorSegments
+        : coords.length >= 2
+          ? [coords]
+          : [],
+    );
+    setRoutePortals(
+      Array.isArray(resp.geometry?.portals) ? resp.geometry.portals : [],
+    );
     offRouteSinceRef.current = null;
     if (
       typeof resp.distanceMeters === "number" &&
@@ -921,6 +990,23 @@ export default function NavigationMap(): JSX.Element {
       toast.error("Failed to build route. Please try again.");
     }
   }
+
+  const showRouteRef = useRef(showRoute);
+  showRouteRef.current = showRoute;
+  const destinationStopsKey = destinationStops.join(",");
+  const prevDestinationStopsKeyRef = useRef(destinationStopsKey);
+  useEffect(() => {
+    const prevKey = prevDestinationStopsKeyRef.current;
+    prevDestinationStopsKeyRef.current = destinationStopsKey;
+    if (!navigating) return;
+    if (destinationStopsKey.length === 0) return;
+    // Only when the stop list/order changes — not when navigation first starts.
+    if (prevKey === destinationStopsKey) return;
+    const t = window.setTimeout(() => {
+      void showRouteRef.current();
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [destinationStopsKey, navigating]);
 
   async function recalcRouteForNavMode(nextNavConditions: NavConditions) {
     try {
@@ -983,23 +1069,26 @@ export default function NavigationMap(): JSX.Element {
           accuracy,
         };
         userPosRef.current = nextPos;
-        setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
+        if (shouldPublishGpsUi(lastGpsUiAtRef.current)) {
+          lastGpsUiAtRef.current = Date.now();
+          setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
 
-        let brg: number;
-        if (typeof heading === "number" && !Number.isNaN(heading))
-          brg = heading;
-        else if (deviceHeadingRef.current != null)
-          brg = deviceHeadingRef.current;
-        else if (routeCoordsRef.current.length >= 2) {
-          const [nx, ny] = routeCoordsRef.current[1];
-          brg = bearingTo(longitude, latitude, nx, ny);
-        } else brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
+          let brg: number;
+          if (typeof heading === "number" && !Number.isNaN(heading))
+            brg = heading;
+          else if (deviceHeadingRef.current != null)
+            brg = deviceHeadingRef.current;
+          else if (routeCoordsRef.current.length >= 2) {
+            const [nx, ny] = routeCoordsRef.current[1];
+            brg = bearingTo(longitude, latitude, nx, ny);
+          } else brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
 
-        aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
-          pitch: 60,
-          duration: 300,
-          zoom: 20,
-        });
+          aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
+            pitch: 60,
+            duration: 300,
+            zoom: 20,
+          });
+        }
 
         const MIN_OFF_ROUTE_M = 25;
         const OFF_ROUTE_DEBOUNCE_MS = 2500;
@@ -1053,6 +1142,9 @@ export default function NavigationMap(): JSX.Element {
       essential: true,
     });
     routeCoordsRef.current = [];
+    setRouteCoords([]);
+    setRouteOutdoorSegments([]);
+    setRoutePortals([]);
 
     setPath(PATH_RESET);
     setNavigating(false);
@@ -1208,6 +1300,8 @@ export default function NavigationMap(): JSX.Element {
         setPath(PATH_RESET);
         routeCoordsRef.current = [];
         setRouteCoords([]);
+        setRouteOutdoorSegments([]);
+        setRoutePortals([]);
         setRouteEta(null);
         setMapStage(MAP_STAGES.BUILDING);
       } else {
@@ -1218,8 +1312,6 @@ export default function NavigationMap(): JSX.Element {
   }
 
   /** ---------------- Render ---------------- */
-
-  const canRenderMap = !!baseStyle;
 
   return (
     <main
@@ -1247,6 +1339,12 @@ export default function NavigationMap(): JSX.Element {
             onAddStop={openStopsEditor}
             stopCount={destinationStops.length}
             loading={destinationsFirstLoadPending && destinations.length === 0}
+          />
+
+          <BasemapToggle
+            basemap={basemap}
+            onChange={setBasemap}
+            className="h-11 min-h-[44px] w-11 shrink-0"
           />
 
           {isSignedIn ? (
@@ -1770,7 +1868,7 @@ export default function NavigationMap(): JSX.Element {
             ref={mapRef}
             initialViewState={defViewState}
             mapLib={maplibregl}
-            mapStyle={baseStyle as any}
+            mapStyle={resolvedMapStyle as any}
             onLoad={() => {
               setMapReady(true);
               const map = mapRef.current?.getMap?.();
@@ -1788,30 +1886,7 @@ export default function NavigationMap(): JSX.Element {
               }
             }}
           >
-            <Layer
-              id="3d-buildings"
-              type="fill-extrusion"
-              source={vectorSourceId}
-              source-layer="building"
-              paint={{
-                "fill-extrusion-color": isDark ? "#2b3647" : "#dfdbd7",
-                "fill-extrusion-height": [
-                  "coalesce",
-                  ["get", "render_height"],
-                  ["get", "height"],
-                  12,
-                ],
-                "fill-extrusion-base": [
-                  "coalesce",
-                  ["get", "render_min_height"],
-                  ["get", "min_height"],
-                  0,
-                ],
-                "fill-extrusion-opacity": 0.75,
-              }}
-            />
-
-            {buildingNodesFC && (
+            {buildingNodesFC && !navigating && (
               <Source
                 id="building-nodes"
                 type="geojson"
@@ -1840,8 +1915,14 @@ export default function NavigationMap(): JSX.Element {
               </Source>
             )}
 
-            {routeCoords.length >= 2 && (
-              <RoutePathLayer coordinates={routeCoords} />
+            {(routeOutdoorSegments.length > 0 ||
+              routePortals.length > 0 ||
+              routeCoords.length >= 2) && (
+              <RoutePathLayer
+                coordinates={routeCoords}
+                segments={routeOutdoorSegments}
+                portals={routePortals}
+              />
             )}
 
             <TripStopMarkers stops={tripStopMarkers} />

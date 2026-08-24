@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin } from "@/lib/auth-guards";
 import { reloadGraphOr503 } from "@/lib/reload-graph-response";
+import { mapDestinationRow } from "@/lib/destination-list";
 import { isNonEmptyString, isValidLatLng, parseId, parsePolygon } from "@/lib/utils";
 
 const ROUTE = "/api/destination";
@@ -187,27 +188,45 @@ export async function DELETE(req: Request) {
   }
 }
 
-export async function GET(_req: Request) {
+export async function GET(req: Request) {
   try {
-    console.log(`[API ${ROUTE} GET] called`);
-    const result = await db.execute(sql`
-      SELECT * FROM destination;
-    `);
+    const url = new URL(req.url);
+    const idRaw = url.searchParams.get("id");
+    const includePolygon =
+      url.searchParams.get("include") === "polygon" || idRaw != null;
+
+    console.log(`[API ${ROUTE} GET] called`, {
+      id: idRaw,
+      includePolygon,
+    });
+
+    let result;
+    if (idRaw != null) {
+      const nid = parseId(idRaw);
+      if (!nid) {
+        return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+      }
+      result = await db.execute(sql`
+        SELECT id, name, lat, lng, polygon, is_parking_lot, open_time, close_time
+        FROM destination
+        WHERE id = ${nid};
+      `);
+    } else if (includePolygon) {
+      result = await db.execute(sql`
+        SELECT id, name, lat, lng, polygon, is_parking_lot, open_time, close_time
+        FROM destination;
+      `);
+    } else {
+      result = await db.execute(sql`
+        SELECT id, name, lat, lng, is_parking_lot, open_time, close_time
+        FROM destination;
+      `);
+    }
 
     const rows = result.rows as Array<Record<string, unknown>>;
-    const destinations = rows.map((row) => {
-      const { is_parking_lot, open_time, close_time, ...rest } = row;
-      const openStr =
-        open_time != null ? String(open_time).slice(0, 8) : "00:00:00";
-      const closeStr =
-        close_time != null ? String(close_time).slice(0, 8) : "23:59:59";
-      return {
-        ...rest,
-        isParkingLot: is_parking_lot,
-        openTime: openStr,
-        closeTime: closeStr,
-      };
-    });
+    const destinations = rows.map((row) =>
+      mapDestinationRow(row, includePolygon),
+    );
 
     return NextResponse.json({ destinations }, { status: 200 });
   } catch (err: any) {
