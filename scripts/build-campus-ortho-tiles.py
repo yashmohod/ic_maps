@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-Build Web Mercator PNG tiles from NYS Town of Ithaca 12\" ortho JP2s.
+Build Web Mercator PNG tiles from NYS Town of Ithaca ortho JP2s.
 
 Usage:
-  PYTHONPATH=.pydeps python3 scripts/build-campus-ortho-tiles.py
-  PYTHONPATH=.pydeps python3 scripts/build-campus-ortho-tiles.py --maxzoom 21
+  # 12" spring 2023 overview (z12–18 typically):
+  python3 scripts/build-campus-ortho-tiles.py --src IC_sat/twn --out public/tiles/satellite
+
+  # 6" spring 2012 detail (z19–21):
+  python3 scripts/build-campus-ortho-tiles.py \\
+    --src IC_sat/twn6 --out public/tiles/satellite-6in --work IC_sat/work6 \\
+    --minzoom 19 --maxzoom 21
 """
 from __future__ import annotations
 
 import argparse
 import math
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,8 +40,14 @@ F = 1 / 298.257222101
 E2 = F * (2 - F)
 EP2 = E2 / (1 - E2)
 
-OPJ = Path("/tmp/openjpeg-v2.5.3-linux-x86_64/bin/opj_decompress")
-OPJ_LIB = Path("/tmp/openjpeg-v2.5.3-linux-x86_64/lib")
+# Prefer PATH / OPJ_DECOMPRESS; fall back to the bundled-on-server layout.
+_OPJ_CANDIDATES = [
+    os.environ.get("OPJ_DECOMPRESS", ""),
+    shutil.which("opj_decompress") or "",
+    "/tmp/openjpeg-v2.5.3-linux-x86_64/bin/opj_decompress",
+]
+OPJ = Path(next((p for p in _OPJ_CANDIDATES if p and Path(p).exists()), ""))
+OPJ_LIB = OPJ.parent.parent / "lib" if OPJ.name else Path()
 MERC_MAX = 20037508.342789244
 
 
@@ -183,9 +195,17 @@ def jp2_extent_ft(
     return minx, miny, maxx, maxy
 
 
+def estimate_jp2_px(j2w: Path) -> tuple[int, int, float]:
+    """NYS sheets are ~3000×2000 ft; pixel count follows world-file GSD."""
+    A, D, _C, _F = read_j2w(j2w)
+    gsd = abs(A)
+    return int(round(3000 / gsd)), int(round(2000 / abs(D))), gsd
+
+
 def decompress(jp2: Path, out_png: Path) -> None:
     env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = f"{OPJ_LIB}:{env.get('LD_LIBRARY_PATH', '')}"
+    if OPJ_LIB.is_dir():
+        env["LD_LIBRARY_PATH"] = f"{OPJ_LIB}:{env.get('LD_LIBRARY_PATH', '')}"
     subprocess.run(
         [str(OPJ), "-i", str(jp2), "-o", str(out_png)],
         check=True,
@@ -199,6 +219,7 @@ def render_tile(
     mosaic: np.ndarray,
     cminx: float,
     cmaxy: float,
+    gsd: float,
     z: int,
     tx: int,
     ty: int,
@@ -209,8 +230,8 @@ def render_tile(
     mx, my = np.meshgrid(xs, ys)
     lng, lat = world_to_ll_vec(mx, my)
     sx, sy = forward_ny_central_ft_vec(lat, lng)
-    u = np.floor(sx - cminx).astype(np.int32)
-    v = np.floor(cmaxy - sy).astype(np.int32)
+    u = np.floor((sx - cminx) / gsd).astype(np.int32)
+    v = np.floor((cmaxy - sy) / gsd).astype(np.int32)
     h, w = mosaic.shape[:2]
     valid = (u >= 0) & (u < w) & (v >= 0) & (v < h)
     out = np.zeros((256, 256, 4), dtype=np.uint8)
@@ -235,6 +256,12 @@ def main() -> None:
     )
     ap.add_argument("--work", type=Path, default=ROOT / "IC_sat" / "work")
     ap.add_argument(
+        "--gsd",
+        type=float,
+        default=None,
+        help="Ground sample distance in feet (default: from first .j2w, e.g. 1.0 or 0.5)",
+    )
+    ap.add_argument(
         "--no-clear",
         action="store_true",
         help="Do not delete existing tiles under --out (resume / add zooms)",
@@ -257,28 +284,40 @@ def main() -> None:
     print(f"campus SP ft: {cminx:.0f},{cminy:.0f} → {cmaxx:.0f},{cmaxy:.0f}")
 
     jp2s = sorted(args.src.glob("*.jp2"))
-    selected: list[tuple[Path, tuple[float, float, float, float]]] = []
+    selected: list[tuple[Path, tuple[float, float, float, float], float]] = []
     for jp2 in jp2s:
         j2w = jp2.with_suffix(".j2w")
         if not j2w.exists():
             continue
-        ext = jp2_extent_ft(j2w, 3000, 2000)
+        w_px, h_px, file_gsd = estimate_jp2_px(j2w)
+        ext = jp2_extent_ft(j2w, w_px, h_px)
         minx, miny, maxx, maxy = ext
         if maxx < cminx or minx > cmaxx or maxy < cminy or miny > cmaxy:
             continue
-        selected.append((jp2, ext))
+        selected.append((jp2, ext, file_gsd))
 
-    print(f"selected {len(selected)} / {len(jp2s)} JP2s")
     if not selected:
         sys.exit("No tiles intersect campus")
 
+    if args.gsd is not None:
+        gsd = args.gsd
+    else:
+        # Prefer the finest GSD among intersecting sheets (zips may mix 6"/24").
+        gsd = min(g for _jp2, _ext, g in selected)
+        selected = [(jp2, ext, g) for jp2, ext, g in selected if abs(g - gsd) < 1e-6]
+
+    if gsd <= 0:
+        sys.exit("Could not determine GSD from sources")
+    print(f"GSD {gsd:g} ft/px")
+    print(f"selected {len(selected)} JP2s at this GSD")
+
     args.work.mkdir(parents=True, exist_ok=True)
-    mosaic_w = int(math.ceil(cmaxx - cminx))
-    mosaic_h = int(math.ceil(cmaxy - cminy))
-    print(f"SP mosaic {mosaic_w}×{mosaic_h} px")
+    mosaic_w = int(math.ceil((cmaxx - cminx) / gsd))
+    mosaic_h = int(math.ceil((cmaxy - cminy) / gsd))
+    print(f"SP mosaic {mosaic_w}×{mosaic_h} px (~{mosaic_w * mosaic_h * 4 / 1e9:.2f} GB RGBA)")
     mosaic_img = Image.new("RGBA", (mosaic_w, mosaic_h), (0, 0, 0, 0))
 
-    for jp2, (rminx, rminy, rmaxx, rmaxy) in selected:
+    for jp2, _ext, _file_gsd in selected:
         png = args.work / f"{jp2.stem}.png"
         if not png.exists():
             print(f"  decode {jp2.name}")
@@ -286,10 +325,13 @@ def main() -> None:
         im = Image.open(png).convert("RGBA")
         r, g, b, _a = im.split()
         im = Image.merge("RGBA", (r, g, b, Image.new("L", im.size, 255)))
-        left = int(round(rminx - cminx))
-        top = int(round(cmaxy - rmaxy))
+        # Recompute extent from actual decode size (estimate can be off by 1).
+        j2w = jp2.with_suffix(".j2w")
+        rminx, rminy, rmaxx, rmaxy = jp2_extent_ft(j2w, im.size[0], im.size[1])
+        left = int(round((rminx - cminx) / gsd))
+        top = int(round((cmaxy - rmaxy) / gsd))
         mosaic_img.paste(im, (left, top))
-        print(f"  paste {jp2.name} at ({left},{top})")
+        print(f"  paste {jp2.name} at ({left},{top}) size={im.size}")
 
     mosaic_path = args.work / "campus_sp_mosaic.png"
     mosaic_img.save(mosaic_path)
@@ -311,7 +353,7 @@ def main() -> None:
             xdir = args.out / str(z) / str(tx)
             xdir.mkdir(parents=True, exist_ok=True)
             for ty in range(y_lo, y_hi + 1):
-                tile = render_tile(mosaic, cminx, cmaxy, z, tx, ty)
+                tile = render_tile(mosaic, cminx, cmaxy, gsd, z, tx, ty)
                 if tile is None:
                     continue
                 tile.save(xdir / f"{ty}.png", optimize=True)

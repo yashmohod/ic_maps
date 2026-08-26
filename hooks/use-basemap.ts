@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { StyleSpecification } from "maplibre-gl";
 import {
   buildSatelliteStyle,
+  SATELLITE_DETAIL_TILE_PATH,
   SATELLITE_TILE_PATH,
 } from "@/lib/map-constants";
 import { withBasePath } from "@/lib/base-path";
@@ -13,7 +14,10 @@ export type BasemapId = "map" | "satellite";
 const STORAGE_KEY = "ic-maps-basemap";
 
 export function cloneSatelliteStyle(): StyleSpecification {
-  return buildSatelliteStyle(withBasePath(SATELLITE_TILE_PATH));
+  return buildSatelliteStyle(
+    withBasePath(SATELLITE_TILE_PATH),
+    withBasePath(SATELLITE_DETAIL_TILE_PATH),
+  );
 }
 
 export function useBasemap() {
@@ -44,8 +48,7 @@ export function useBasemap() {
 export function useBasemapStyle(baseStyle: StyleSpecification | null) {
   const { basemap, setBasemap } = useBasemap();
   const satelliteStyle = useMemo(() => cloneSatelliteStyle(), []);
-  const resolvedMapStyle =
-    basemap === "satellite" ? satelliteStyle : baseStyle;
+  const resolvedMapStyle = basemap === "satellite" ? satelliteStyle : baseStyle;
   const canRenderMap = basemap === "satellite" || !!baseStyle;
   return { basemap, setBasemap, resolvedMapStyle, canRenderMap };
 }
