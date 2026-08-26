@@ -3,6 +3,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  myMapsArrow,
   myMapsEdge,
   myMapsLine,
   myMapsNode,
@@ -22,6 +23,13 @@ import {
   remapEdgeEndpoints,
   toStoredLineGeometry,
 } from "@/lib/mymaps-transfer";
+import {
+  clampArrowSize,
+  clampNodeSize,
+  MYMAPS_ARROW_SIZE_DEFAULT,
+  MYMAPS_NODE_SIZE_DEFAULT,
+  normArrowBearing,
+} from "@/lib/mymaps-size";
 import { isValidLatLng, parseId, parsePolygon } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
@@ -80,6 +88,14 @@ export async function POST(req: Request, { params }: Params) {
       if (!isValidLatLng(t.lat, t.lng)) {
         return NextResponse.json(
           { error: "Invalid lat/lng for text" },
+          { status: 400 },
+        );
+      }
+    }
+    for (const a of payload.arrows) {
+      if (!isValidLatLng(a.lat, a.lng)) {
+        return NextResponse.json(
+          { error: "Invalid lat/lng for arrow" },
           { status: 400 },
         );
       }
@@ -143,6 +159,7 @@ export async function POST(req: Request, { params }: Params) {
         await tx.delete(myMapsLine).where(eq(myMapsLine.my_maps_id, mapId));
         await tx.delete(myMapsPoint).where(eq(myMapsPoint.my_maps_id, mapId));
         await tx.delete(myMapsText).where(eq(myMapsText.my_maps_id, mapId));
+        await tx.delete(myMapsArrow).where(eq(myMapsArrow.my_maps_id, mapId));
       }
 
       const idMap = new Map<number, number>();
@@ -157,6 +174,7 @@ export async function POST(req: Request, { params }: Params) {
             lng: n.lng,
             name: n.name ?? "",
             color: n.color,
+            size: clampNodeSize(n.size ?? MYMAPS_NODE_SIZE_DEFAULT),
           })
           .returning();
         if (!inserted) continue;
@@ -260,6 +278,17 @@ export async function POST(req: Request, { params }: Params) {
           font_size: t.font_size ?? 14,
         });
       }
+
+      for (const a of payload.arrows) {
+        await tx.insert(myMapsArrow).values({
+          my_maps_id: mapId,
+          lat: a.lat,
+          lng: a.lng,
+          bearing: normArrowBearing(a.bearing ?? 0),
+          color: a.color,
+          size: clampArrowSize(a.size ?? MYMAPS_ARROW_SIZE_DEFAULT),
+        });
+      }
     });
 
     const nodes = await db
@@ -280,7 +309,7 @@ export async function POST(req: Request, { params }: Params) {
               ),
             );
 
-    const [polygons, lines, points, texts] = await Promise.all([
+    const [polygons, lines, points, texts, arrows] = await Promise.all([
       db
         .select()
         .from(myMapsPolygon)
@@ -288,6 +317,7 @@ export async function POST(req: Request, { params }: Params) {
       db.select().from(myMapsLine).where(eq(myMapsLine.my_maps_id, mapId)),
       db.select().from(myMapsPoint).where(eq(myMapsPoint.my_maps_id, mapId)),
       db.select().from(myMapsText).where(eq(myMapsText.my_maps_id, mapId)),
+      db.select().from(myMapsArrow).where(eq(myMapsArrow.my_maps_id, mapId)),
     ]);
 
     return NextResponse.json(
@@ -301,6 +331,7 @@ export async function POST(req: Request, { params }: Params) {
         lines,
         points,
         texts,
+        arrows,
       },
       { status: 200 },
     );

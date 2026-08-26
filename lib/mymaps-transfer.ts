@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 import { hexColorSchema, MYMAPS_DEFAULT_COLOR } from "@/lib/mymaps-color";
+import {
+  MYMAPS_ARROW_SIZE_DEFAULT,
+  MYMAPS_ARROW_SIZE_MAX,
+  MYMAPS_ARROW_SIZE_MIN,
+  MYMAPS_NODE_SIZE_DEFAULT,
+  MYMAPS_NODE_SIZE_MAX,
+  MYMAPS_NODE_SIZE_MIN,
+} from "@/lib/mymaps-size";
 
 const transferNodeSchema = z.object({
   id: z.number().int().positive(),
@@ -8,6 +16,13 @@ const transferNodeSchema = z.object({
   lng: z.number(),
   name: z.string().max(256).optional().default(""),
   color: hexColorSchema,
+  size: z.coerce
+    .number()
+    .int()
+    .min(MYMAPS_NODE_SIZE_MIN)
+    .max(MYMAPS_NODE_SIZE_MAX)
+    .optional()
+    .default(MYMAPS_NODE_SIZE_DEFAULT),
 });
 
 const transferEdgeSchema = z.object({
@@ -42,6 +57,20 @@ const transferTextSchema = z.object({
   font_size: z.coerce.number().int().min(10).max(48).optional().default(14),
 });
 
+const transferArrowSchema = z.object({
+  lat: z.number(),
+  lng: z.number(),
+  bearing: z.number().optional().default(0),
+  color: hexColorSchema,
+  size: z.coerce
+    .number()
+    .int()
+    .min(MYMAPS_ARROW_SIZE_MIN)
+    .max(MYMAPS_ARROW_SIZE_MAX)
+    .optional()
+    .default(MYMAPS_ARROW_SIZE_DEFAULT),
+});
+
 export const myMapsTransferSchema = z.object({
   version: z.literal(1),
   exportedAt: z.string().optional(),
@@ -52,6 +81,7 @@ export const myMapsTransferSchema = z.object({
   lines: z.array(transferLineSchema).max(2000).default([]),
   points: z.array(transferPointSchema).max(5000).default([]),
   texts: z.array(transferTextSchema).max(2000).default([]),
+  arrows: z.array(transferArrowSchema).max(5000).default([]),
 });
 
 export type MyMapsTransfer = z.infer<typeof myMapsTransferSchema>;
@@ -139,6 +169,7 @@ export function buildTransferPayload(input: {
     lng: number;
     name?: string;
     color?: string;
+    size?: number;
   }>;
   edges: Array<{
     from: number;
@@ -156,6 +187,13 @@ export function buildTransferPayload(input: {
     lng: number;
     font_size?: number;
   }>;
+  arrows?: Array<{
+    lat: number;
+    lng: number;
+    bearing?: number;
+    color?: string;
+    size?: number;
+  }>;
 }): MyMapsTransfer {
   return myMapsTransferSchema.parse({
     version: 1,
@@ -167,6 +205,7 @@ export function buildTransferPayload(input: {
       lng: n.lng,
       name: n.name ?? "",
       color: n.color ?? MYMAPS_DEFAULT_COLOR,
+      size: n.size ?? MYMAPS_NODE_SIZE_DEFAULT,
     })),
     edges: input.edges.map((e) => ({
       from: e.from,
@@ -195,6 +234,13 @@ export function buildTransferPayload(input: {
       lng: t.lng,
       font_size: t.font_size ?? 14,
     })),
+    arrows: (input.arrows ?? []).map((a) => ({
+      lat: a.lat,
+      lng: a.lng,
+      bearing: a.bearing ?? 0,
+      color: a.color ?? MYMAPS_DEFAULT_COLOR,
+      size: a.size ?? MYMAPS_ARROW_SIZE_DEFAULT,
+    })),
   });
 }
 
@@ -208,4 +254,11 @@ export function transferDownloadFilename(
     .replace(/^-|-$/g, "")
     .slice(0, 40);
   return `mymap-${mapId}-${slug || "map"}.json`;
+}
+
+export function transferImageFilename(
+  mapId: number,
+  mapName?: string,
+): string {
+  return transferDownloadFilename(mapId, mapName).replace(/\.json$/, ".png");
 }

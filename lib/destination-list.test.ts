@@ -7,6 +7,7 @@ const row = {
   lat: 42.42,
   lng: -76.49,
   is_parking_lot: false,
+  navigatable_destination: true,
   open_time: "08:00:00",
   close_time: "22:00:00",
   polygon: '{"type":"FeatureCollection","features":[]}',
@@ -21,6 +22,7 @@ describe("mapDestinationRow", () => {
       lat: 42.42,
       lng: -76.49,
       isParkingLot: false,
+      navigatableDestination: true,
       openTime: "08:00:00",
       closeTime: "22:00:00",
     });

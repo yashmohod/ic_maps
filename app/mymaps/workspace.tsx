@@ -15,6 +15,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  ImageDown,
   Link2,
   MousePointer2,
   Palette,
@@ -50,6 +51,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import DrawControl from "@/components/BuildingDrawControls";
 import { HomeLogoLink } from "@/components/home-logo-link";
+import { MapArrowIcon } from "@/components/MapArrowIcon";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,11 +82,23 @@ import {
   normalizeHexColor,
 } from "@/lib/mymaps-color";
 import {
+  clampArrowSize,
+  clampNodeSize,
+  MYMAPS_ARROW_SIZE_DEFAULT,
+  MYMAPS_NODE_SIZE_DEFAULT,
+  normArrowBearing,
+} from "@/lib/mymaps-size";
+import {
   buildTransferPayload,
   myMapsTransferSchema,
   transferDownloadFilename,
+  transferImageFilename,
   type MyMapsTransfer,
 } from "@/lib/mymaps-transfer";
+import {
+  captureMapContainerPng,
+  waitForMapIdle,
+} from "@/lib/mymaps-export-image";
 import { withBasePath } from "@/lib/base-path";
 import { bearingTo, calcDistance } from "@/lib/geo";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
@@ -121,6 +135,7 @@ type SimpleNode = {
   lng: number;
   name: string;
   color: string;
+  size: number;
 };
 
 type PolygonRow = {
@@ -138,6 +153,14 @@ type TextRow = {
   lng: number;
   font_size: number;
 };
+type ArrowRow = {
+  id: number;
+  lat: number;
+  lng: number;
+  bearing: number;
+  color: string;
+  size: number;
+};
 
 type MapAccess = {
   role: "owner" | "editor" | "viewer" | null;
@@ -146,12 +169,55 @@ type MapAccess = {
   canManageSharing: boolean;
 };
 
-type EditorMode = "select" | "draw" | "text" | "color" | "delete";
-type DrawTool = "point" | "line" | "polygon";
+type EditorMode = "view" | "select" | "draw" | "text" | "color" | "delete";
+type DrawTool = "point" | "line" | "polygon" | "arrow";
+type VisibleElementKey =
+  | "nodes"
+  | "edges"
+  | "polygons"
+  | "lines"
+  | "points"
+  | "texts"
+  | "arrows";
 
 type DrawEvent = { features: Feature[] };
 
 const NODE_SNAP_METERS = 14;
+
+const DEFAULT_VISIBLE_ELEMENTS: Record<VisibleElementKey, boolean> = {
+  nodes: true,
+  edges: true,
+  polygons: true,
+  lines: true,
+  points: true,
+  texts: true,
+  arrows: true,
+};
+
+const VISIBLE_ELEMENT_OPTIONS: {
+  key: VisibleElementKey;
+  label: string;
+}[] = [
+  { key: "nodes", label: "Nodes" },
+  { key: "edges", label: "Paths" },
+  { key: "polygons", label: "Areas" },
+  { key: "lines", label: "Lines" },
+  { key: "points", label: "Points" },
+  { key: "texts", label: "Text" },
+  { key: "arrows", label: "Arrows" },
+];
+
+const NODE_SIZE_PRESETS = [
+  { label: "S", value: 10 },
+  { label: "M", value: 14 },
+  { label: "L", value: 22 },
+] as const;
+
+const ARROW_SIZE_PRESETS = [
+  { label: "S", value: 20 },
+  { label: "M", value: 28 },
+  { label: "L", value: 40 },
+] as const;
 
 function clampFontSize(n: number): number {
   if (!Number.isFinite(n)) return 14;
@@ -217,7 +283,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
     useBasemapStyle(baseStyle);
   const mapRef = useRef<MapRef | null>(null);
+  const mapCaptureRef = useRef<HTMLDivElement | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [exportingImage, setExportingImage] = useState(false);
   const [clientReady, setClientReady] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
   const activeMapIdRef = useRef<number | null>(null);
@@ -241,15 +309,32 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const [lines, setLines] = useState<LineRow[]>([]);
   const [points, setPoints] = useState<PointRow[]>([]);
   const [texts, setTexts] = useState<TextRow[]>([]);
-  const [mode, setMode] = useState<EditorMode>("select");
+  const [arrows, setArrows] = useState<ArrowRow[]>([]);
+  const [mode, setMode] = useState<EditorMode>("view");
+  const [visibleElements, setVisibleElements] = useState(
+    DEFAULT_VISIBLE_ELEMENTS,
+  );
   const [drawTool, setDrawTool] = useState<DrawTool>("point");
   const [drawColor, setDrawColor] = useState(MYMAPS_DEFAULT_COLOR);
+  const [drawNodeSize, setDrawNodeSize] = useState(MYMAPS_NODE_SIZE_DEFAULT);
+  const [drawArrowSize, setDrawArrowSize] = useState(MYMAPS_ARROW_SIZE_DEFAULT);
+  /** First click while placing an annotation arrow (second click = tip). */
+  const [arrowDraftStart, setArrowDraftStart] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const arrowDraftStartRef = useRef(arrowDraftStart);
+  arrowDraftStartRef.current = arrowDraftStart;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [biDirectional, setBiDirectional] = useState(true);
   const biDirectionalRef = useRef(biDirectional);
   biDirectionalRef.current = biDirectional;
   const drawColorRef = useRef(drawColor);
   drawColorRef.current = drawColor;
+  const drawNodeSizeRef = useRef(drawNodeSize);
+  drawNodeSizeRef.current = drawNodeSize;
+  const drawArrowSizeRef = useRef(drawArrowSize);
+  drawArrowSizeRef.current = drawArrowSize;
 
   const [selectedPolygonId, setSelectedPolygonId] = useState<number | null>(
     null,
@@ -257,10 +342,14 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const [polygonName, setPolygonName] = useState("");
   const [selectedLineId, setSelectedLineId] = useState<number | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<number | null>(null);
+  const [selectedArrowId, setSelectedArrowId] = useState<number | null>(null);
   const [textDraft, setTextDraft] = useState("");
   const [textFontSizeInput, setTextFontSizeInput] = useState("14");
+  const [arrowBearingInput, setArrowBearingInput] = useState("0");
 
   const modeRef = useRef(mode);
+  const drawToolRef = useRef(drawTool);
+  drawToolRef.current = drawTool;
   const selectedRef = useRef(selectedId);
   const canEditRef = useRef(false);
   const nodesRef = useRef<SimpleNode[]>([]);
@@ -319,11 +408,14 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     setLines([]);
     setPoints([]);
     setTexts([]);
+    setArrows([]);
     setSelectedId(null);
     setSelectedPolygonId(null);
     setSelectedLineId(null);
     setSelectedTextId(null);
-    setMode("select");
+    setSelectedArrowId(null);
+    setVisibleElements(DEFAULT_VISIBLE_ELEMENTS);
+    setMode("view");
     try {
       const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}`));
       if (activeMapIdRef.current !== mapId) return;
@@ -346,12 +438,14 @@ export default function MyMapsWorkspacePage(): JSX.Element {
             lng: number;
             name?: string;
             color?: string;
+            size?: number;
           }) => ({
             id: n.id,
             lat: n.lat,
             lng: n.lng,
             name: n.name ?? "",
             color: normalizeHexColor(n.color),
+            size: clampNodeSize(n.size ?? MYMAPS_NODE_SIZE_DEFAULT),
           }),
         ),
       );
@@ -393,6 +487,25 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       setLines(data.lines ?? []);
       setPoints(data.points ?? []);
       setTexts(data.texts ?? []);
+      setArrows(
+        (data.arrows ?? []).map(
+          (a: {
+            id: number;
+            lat: number;
+            lng: number;
+            bearing?: number;
+            color?: string;
+            size?: number;
+          }) => ({
+            id: a.id,
+            lat: a.lat,
+            lng: a.lng,
+            bearing: normArrowBearing(a.bearing ?? 0),
+            color: normalizeHexColor(a.color),
+            size: clampArrowSize(a.size ?? MYMAPS_ARROW_SIZE_DEFAULT),
+          }),
+        ),
+      );
     } catch {
       if (activeMapIdRef.current === mapId) {
         setEditorError("Could not load map");
@@ -456,18 +569,25 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   useEffect(() => {
     const draw = drawApiRef.current;
     if (!draw || mode !== "draw") return;
+    if (drawTool === "arrow") return;
     const next =
       drawTool === "point"
         ? "draw_point"
-        : drawTool === "line"
-          ? "draw_line_string"
-          : "draw_polygon";
+        : drawTool === "polygon"
+          ? "draw_polygon"
+          : "draw_line_string";
     try {
       (draw as { changeMode: (m: string) => void }).changeMode(next);
     } catch {
       /* ignore */
     }
   }, [mode, drawTool, mapReady]);
+
+  useEffect(() => {
+    if (mode !== "draw" || drawTool !== "arrow") {
+      setArrowDraftStart(null);
+    }
+  }, [mode, drawTool]);
 
   const edgesGeoJSON = useMemo<
     FeatureCollection<LineString, GeoJsonProperties>
@@ -766,6 +886,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       lines,
       points,
       texts,
+      arrows,
     });
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -777,6 +898,41 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Map elements exported");
+  }
+
+  async function exportMapImage() {
+    if (selectedMapId == null || !mapReady || exportingImage) return;
+    const container = mapCaptureRef.current;
+    const map = mapRef.current?.getMap?.() ?? null;
+    if (!container || !map) {
+      toast.error("Map is not ready to export");
+      return;
+    }
+
+    setExportingImage(true);
+    try {
+      // Let chrome hide before capture
+      await new Promise<void>((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => r())),
+      );
+      await waitForMapIdle(map);
+      const dataUrl = await captureMapContainerPng(container, map, {
+        nodes: visibleElements.nodes ? nodes : [],
+        points: visibleElements.points ? points : [],
+        texts: visibleElements.texts ? texts : [],
+        arrows: visibleElements.arrows ? arrows : [],
+      });
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = transferImageFilename(selectedMapId, mapName);
+      a.click();
+      toast.success("Map image downloaded");
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not export map image");
+    } finally {
+      setExportingImage(false);
+    }
   }
 
   function onImportFileChange(e: ChangeEvent<HTMLInputElement>) {
@@ -840,6 +996,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           lng,
           name: "",
           color: drawColorRef.current,
+          size: drawNodeSizeRef.current,
         }),
       },
     );
@@ -849,10 +1006,52 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       return null;
     }
     const data = await res.json();
-    const node = data.node as SimpleNode;
+    const node = {
+      ...(data.node as SimpleNode),
+      color: normalizeHexColor(data.node?.color),
+      size: clampNodeSize(data.node?.size ?? MYMAPS_NODE_SIZE_DEFAULT),
+    };
     setNodes((prev) => [...prev, node]);
     nodesRef.current = [...nodesRef.current, node];
     return node;
+  }
+
+  async function addArrow(
+    lat: number,
+    lng: number,
+    bearing: number,
+  ): Promise<ArrowRow | null> {
+    if (!selectedMapId || !canEditRef.current) return null;
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/arrows`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat,
+          lng,
+          bearing: normArrowBearing(bearing),
+          color: drawColorRef.current,
+          size: drawArrowSizeRef.current,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error ?? "Could not add arrow");
+      return null;
+    }
+    const data = await res.json();
+    const arrow: ArrowRow = {
+      id: data.arrow.id,
+      lat: data.arrow.lat,
+      lng: data.arrow.lng,
+      bearing: normArrowBearing(data.arrow.bearing ?? 0),
+      color: normalizeHexColor(data.arrow.color),
+      size: clampArrowSize(data.arrow.size ?? MYMAPS_ARROW_SIZE_DEFAULT),
+    };
+    setArrows((prev) => [...prev, arrow]);
+    return arrow;
   }
 
   async function resolveNodeAt(
@@ -997,6 +1196,128 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     if (selectedTextId === id) {
       setSelectedTextId(null);
       setTextDraft("");
+    }
+  }
+
+  async function deleteArrow(id: number) {
+    if (!selectedMapId || !canEditRef.current) return;
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/arrows?arrowId=${id}`),
+      { method: "DELETE" },
+    );
+    if (!res.ok) {
+      toast.error("Could not delete arrow");
+      return;
+    }
+    setArrows((prev) => prev.filter((a) => a.id !== id));
+    if (selectedArrowId === id) setSelectedArrowId(null);
+  }
+
+  async function moveArrow(id: number, lat: number, lng: number) {
+    if (!selectedMapId || !canEditRef.current) return;
+    const prev = arrows.find((a) => a.id === id);
+    setArrows((rows) =>
+      rows.map((a) => (a.id === id ? { ...a, lat, lng } : a)),
+    );
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/arrows`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arrowId: id, lat, lng }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setArrows((rows) => rows.map((a) => (a.id === id ? prev : a)));
+      }
+      toast.error("Could not move arrow");
+    }
+  }
+
+  async function recolorArrow(id: number) {
+    if (!selectedMapId || !canEditRef.current) return;
+    const color = drawColorRef.current;
+    const prev = arrows.find((a) => a.id === id);
+    setArrows((rows) =>
+      rows.map((a) => (a.id === id ? { ...a, color } : a)),
+    );
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/arrows`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arrowId: id, color }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setArrows((rows) => rows.map((a) => (a.id === id ? prev : a)));
+      }
+      toast.error("Could not update arrow color");
+    }
+  }
+
+  async function saveArrowBearing() {
+    if (!selectedMapId || selectedArrowId == null || !canEditRef.current)
+      return;
+    const bearing = normArrowBearing(Number(arrowBearingInput));
+    const prev = arrows.find((a) => a.id === selectedArrowId);
+    setArrows((rows) =>
+      rows.map((a) =>
+        a.id === selectedArrowId ? { ...a, bearing } : a,
+      ),
+    );
+    setArrowBearingInput(String(Math.round(bearing)));
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/arrows`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arrowId: selectedArrowId, bearing }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setArrows((rows) =>
+          rows.map((a) => (a.id === selectedArrowId ? prev : a)),
+        );
+        setArrowBearingInput(String(Math.round(prev.bearing)));
+      }
+      toast.error("Could not update arrow direction");
+      return;
+    }
+    toast.success("Arrow direction saved");
+  }
+
+  async function resizeSelectedNode(size: number) {
+    if (!selectedMapId || selectedId == null || !canEditRef.current) return;
+    const nextSize = clampNodeSize(size);
+    const prev = nodesRef.current.find((n) => n.id === selectedId);
+    setNodes((rows) =>
+      rows.map((n) => (n.id === selectedId ? { ...n, size: nextSize } : n)),
+    );
+    nodesRef.current = nodesRef.current.map((n) =>
+      n.id === selectedId ? { ...n, size: nextSize } : n,
+    );
+    const res = await fetch(
+      withBasePath(`/api/mymaps/maps/${selectedMapId}/nodes`),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeId: selectedId, size: nextSize }),
+      },
+    );
+    if (!res.ok) {
+      if (prev) {
+        setNodes((rows) =>
+          rows.map((n) => (n.id === selectedId ? prev : n)),
+        );
+        nodesRef.current = nodesRef.current.map((n) =>
+          n.id === selectedId ? prev : n,
+        );
+      }
+      toast.error("Could not update node size");
     }
   }
 
@@ -1204,6 +1525,26 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     (e: MapLayerMouseEvent) => {
       if (!canEditRef.current) return;
       const m = modeRef.current;
+      if (m === "view") return;
+
+      // Annotation arrow: click 1 = start, click 2 = end (tip).
+      if (m === "draw" && drawToolRef.current === "arrow") {
+        const { lat, lng } = e.lngLat;
+        const start = arrowDraftStartRef.current;
+        if (!start) {
+          setArrowDraftStart({ lat, lng });
+          return;
+        }
+        if (calcDistance(start.lat, start.lng, lat, lng) < 1) return;
+        const bearing = bearingTo(start.lng, start.lat, lng, lat);
+        setArrowDraftStart(null);
+        void (async () => {
+          const arrow = await addArrow(lat, lng, bearing);
+          if (arrow) toast.success("Arrow added");
+        })();
+        return;
+      }
+
       if (m === "text") {
         void addText(e.lngLat.lat, e.lngLat.lng);
         return;
@@ -1291,6 +1632,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       return;
     }
     const m = modeRef.current;
+    if (m === "view") return;
     if (m === "delete") {
       void deleteNode(id);
       return;
@@ -1313,6 +1655,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     setSelectedTextId(null);
     setSelectedPolygonId(null);
     setSelectedLineId(null);
+    setSelectedArrowId(null);
   }
 
   async function recolorNode(id: number) {
@@ -1434,9 +1777,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         const next =
           drawTool === "point"
             ? "draw_point"
-            : drawTool === "line"
-              ? "draw_line_string"
-              : "draw_polygon";
+            : drawTool === "polygon"
+              ? "draw_polygon"
+              : "draw_line_string";
         try {
           (draw as { changeMode: (m: string) => void }).changeMode(next);
         } catch {
@@ -1480,6 +1823,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           resumeDraw();
           return;
         }
+
         const nodeIds: number[] = [];
         for (const [lng, lat] of coords) {
           const node = await resolveNodeAt(lat, lng);
@@ -1495,16 +1839,17 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         toast.success(
           biDirectionalRef.current
             ? "Line added (bidirectional edges)"
-            : "Arrow path added (one-way edges)",
+            : "One-way path added",
         );
         resumeDraw();
         return;
       }
 
       if (gType === "Point") {
+        // Node tool: always create (no snap). Snap is only for path drawing.
         const coords = (feature.geometry as Point).coordinates;
         const [lng, lat] = coords;
-        const node = await resolveNodeAt(lat, lng);
+        const node = await addNode(lat, lng);
         if (node) toast.success("Node added");
         resumeDraw();
       }
@@ -1849,7 +2194,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           </div>
         ) : (
           <>
-            <div className="absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 px-3 py-2">
+            <div
+              className="absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 px-3 py-2"
+              data-mymap-export-hide=""
+              hidden={exportingImage}
+            >
               <div
                 className={`min-w-0 rounded-2xl border px-3 py-1.5 ${borderMutedClass} ${surfacePanelClass}`}
               >
@@ -1884,6 +2233,17 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   type="button"
                   size="sm"
                   variant="ghost"
+                  disabled={editorLoading || !!editorError || exportingImage}
+                  onClick={() => void exportMapImage()}
+                  title="Download map as PNG"
+                >
+                  <ImageDown size={14} />
+                  {exportingImage ? "…" : "Image"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
                   disabled={editorLoading || !!editorError}
                   onClick={() => exportMapElements()}
                 >
@@ -1912,49 +2272,137 @@ export default function MyMapsWorkspacePage(): JSX.Element {
               </div>
             </div>
 
-            {canEdit ? (
-              <div className="absolute left-3 top-16 z-30 flex w-44 flex-col gap-2">
-                <div
-                  className={`grid grid-cols-2 gap-1.5 rounded-2xl border p-2 ${borderMutedClass} ${panelClass}`}
-                >
-                  {(
-                    [
-                      ["select", "Select", MousePointer2],
-                      ["draw", "Draw", Pencil],
-                      ["color", "Color", Palette],
-                      ["text", "Text", Type],
-                      ["delete", "Delete", Trash2],
-                    ] as const
-                  ).map(([key, label, Icon]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      title={label}
-                      aria-label={label}
-                      aria-pressed={mode === key}
-                      onClick={() => setMode(key)}
-                      className={[
-                        "flex h-16 flex-col items-center justify-center gap-1 rounded-xl border text-[11px] font-medium transition",
-                        mode === key
-                          ? "border-brand-cta bg-brand-cta text-brand-cta-foreground"
-                          : "border-border bg-panel text-panel-foreground hover:bg-panel-muted",
-                      ].join(" ")}
-                    >
-                      <Icon size={18} />
-                      {label}
-                    </button>
-                  ))}
-                </div>
+            {selectedMapId != null && !exportingImage ? (
+              <div
+                className="absolute left-3 top-16 z-30 flex w-44 flex-col gap-2"
+                data-mymap-export-hide=""
+              >
+                {canEdit ? (
+                  <div
+                    className={`grid grid-cols-2 gap-1.5 rounded-2xl border p-2 ${borderMutedClass} ${panelClass}`}
+                  >
+                    {(
+                      [
+                        ["view", "View", Eye],
+                        ["select", "Select", MousePointer2],
+                        ["draw", "Draw", Pencil],
+                        ["color", "Color", Palette],
+                        ["text", "Text", Type],
+                        ["delete", "Delete", Trash2],
+                      ] as const
+                    ).map(([key, label, Icon]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        title={label}
+                        aria-label={label}
+                        aria-pressed={mode === key}
+                        onClick={() => setMode(key)}
+                        className={[
+                          "flex h-16 flex-col items-center justify-center gap-1 rounded-xl border text-[11px] font-medium transition",
+                          mode === key
+                            ? "border-brand-cta bg-brand-cta text-brand-cta-foreground"
+                            : "border-border bg-panel text-panel-foreground hover:bg-panel-muted",
+                        ].join(" ")}
+                      >
+                        <Icon size={18} />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div
                   className={`min-h-[7.5rem] rounded-2xl border p-2 ${borderMutedClass} ${panelClass}`}
                 >
-                  {mode === "select" ? (
+                  {mode === "view" || !canEdit ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium text-panel-foreground">
+                        Show on map
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        {VISIBLE_ELEMENT_OPTIONS.map(({ key, label }) => (
+                          <label
+                            key={key}
+                            className="flex cursor-pointer items-center gap-2 text-[11px] leading-snug"
+                          >
+                            <input
+                              type="checkbox"
+                              className="size-3.5"
+                              checked={visibleElements[key]}
+                              onChange={(e) =>
+                                setVisibleElements((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.checked,
+                                }))
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {canEdit && mode === "select" ? (
                     <div className="space-y-2">
                       <p className="text-[11px] text-panel-muted-foreground">
-                        Drag nodes (path points), text, areas, or legacy
-                        markers/lines to move them.
+                        Drag nodes, text, areas, arrows, or markers to move
+                        them.
                       </p>
+                      {selectedId != null ? (
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-medium">Node size</p>
+                          <div className="grid grid-cols-3 gap-1">
+                            {NODE_SIZE_PRESETS.map(({ label, value }) => {
+                              const current =
+                                nodes.find((n) => n.id === selectedId)?.size ??
+                                MYMAPS_NODE_SIZE_DEFAULT;
+                              return (
+                                <button
+                                  key={label}
+                                  type="button"
+                                  onClick={() => void resizeSelectedNode(value)}
+                                  className={[
+                                    "rounded-lg border px-1 py-1.5 text-[11px] font-medium",
+                                    current === value
+                                      ? "border-brand bg-brand text-brand-foreground"
+                                      : "border-border bg-panel",
+                                  ].join(" ")}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                      {selectedArrowId != null ? (
+                        <div className="flex flex-col gap-1">
+                          <p className="text-[11px] font-medium">
+                            Arrow bearing (°)
+                          </p>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            value={arrowBearingInput}
+                            onChange={(e) =>
+                              setArrowBearingInput(
+                                e.target.value.replace(/[^\d.-]/g, ""),
+                              )
+                            }
+                            placeholder="0–360"
+                            aria-label="Arrow bearing"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void saveArrowBearing()}
+                          >
+                            Save direction
+                          </Button>
+                        </div>
+                      ) : null}
                       {selectedPolygonId != null ? (
                         <div className="flex flex-col gap-1">
                           <Input
@@ -1970,22 +2418,24 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                             Save name
                           </Button>
                         </div>
-                      ) : (
+                      ) : selectedId == null &&
+                        selectedArrowId == null ? (
                         <p className="text-[11px] text-panel-muted-foreground">
-                          Select an area to rename it.
+                          Select a node, arrow, or area to edit it.
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   ) : null}
 
-                  {mode === "draw" ? (
+                  {canEdit && mode === "draw" ? (
                     <div className="space-y-2">
-                      <div className="grid grid-cols-3 gap-1">
+                      <div className="grid grid-cols-2 gap-1">
                         {(
                           [
                             ["point", "Node"],
                             ["line", "Path"],
                             ["polygon", "Area"],
+                            ["arrow", "Arrow"],
                           ] as const
                         ).map(([key, label]) => (
                           <button
@@ -2003,6 +2453,31 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                           </button>
                         ))}
                       </div>
+                      {drawTool === "point" ? (
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-panel-muted-foreground">
+                            Tap the map to place a node.
+                          </p>
+                          <p className="text-[11px] font-medium">Size</p>
+                          <div className="grid grid-cols-3 gap-1">
+                            {NODE_SIZE_PRESETS.map(({ label, value }) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => setDrawNodeSize(value)}
+                                className={[
+                                  "rounded-lg border px-1 py-1.5 text-[11px] font-medium",
+                                  drawNodeSize === value
+                                    ? "border-brand bg-brand text-brand-foreground"
+                                    : "border-border bg-panel",
+                                ].join(" ")}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       {drawTool === "line" ? (
                         <label className="flex items-start gap-2 text-[11px] leading-snug">
                           <input
@@ -2012,36 +2487,62 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                             onChange={(e) => setBiDirectional(e.target.checked)}
                           />
                           <span>
-                            Bidirectional line. Uncheck for one-way arrows.
+                            Bidirectional line. Uncheck for one-way paths.
                           </span>
                         </label>
-                      ) : (
-                        <p className="text-[11px] text-panel-muted-foreground">
-                          {drawTool === "point"
-                            ? "Tap the map to place a node."
-                            : "Draw an area polygon."}
-                        </p>
-                      )}
+                      ) : null}
                       {drawTool === "line" ? (
                         <p className="text-[11px] text-panel-muted-foreground">
                           Draw a path, or click two nodes to connect them.
                         </p>
                       ) : null}
+                      {drawTool === "polygon" ? (
+                        <p className="text-[11px] text-panel-muted-foreground">
+                          Draw an area polygon.
+                        </p>
+                      ) : null}
+                      {drawTool === "arrow" ? (
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-panel-muted-foreground">
+                            {arrowDraftStart
+                              ? "Click the end point. Arrow will point start → end."
+                              : "Click the start point, then the end point."}
+                          </p>
+                          <p className="text-[11px] font-medium">Size</p>
+                          <div className="grid grid-cols-3 gap-1">
+                            {ARROW_SIZE_PRESETS.map(({ label, value }) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => setDrawArrowSize(value)}
+                                className={[
+                                  "rounded-lg border px-1 py-1.5 text-[11px] font-medium",
+                                  drawArrowSize === value
+                                    ? "border-brand bg-brand text-brand-foreground"
+                                    : "border-border bg-panel",
+                                ].join(" ")}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       {colorPicker}
                     </div>
                   ) : null}
 
-                  {mode === "color" ? (
+                  {canEdit && mode === "color" ? (
                     <div className="space-y-2">
                       <p className="text-[11px] leading-snug text-panel-muted-foreground">
-                        Pick a color, then click a node, path, or area to
+                        Pick a color, then click a node, path, area, or arrow to
                         recolor it.
                       </p>
                       {colorPicker}
                     </div>
                   ) : null}
 
-                  {mode === "text" ? (
+                  {canEdit && mode === "text" ? (
                     <div className="flex flex-col gap-1.5">
                       <p className="text-[11px] text-panel-muted-foreground">
                         Click map to add. Drag a label to move it.
@@ -2084,24 +2585,33 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     </div>
                   ) : null}
 
-                  {mode === "delete" ? (
+                  {canEdit && mode === "delete" ? (
                     <p className="text-[11px] leading-snug text-panel-muted-foreground">
-                      Click any node, edge, polygon, line, point, or text to
-                      delete it.
+                      Click any node, edge, polygon, line, point, text, or
+                      arrow to delete it.
                     </p>
                   ) : null}
                 </div>
               </div>
             ) : null}
 
-            <div className="absolute inset-0 h-full w-full">
+            <div
+              ref={mapCaptureRef}
+              className="absolute inset-0 h-full w-full"
+            >
               {editorLoading ? (
-                <div className="absolute inset-0 z-20 grid place-items-center bg-background/40">
+                <div
+                  className="absolute inset-0 z-20 grid place-items-center bg-background/40"
+                  data-mymap-export-hide=""
+                >
                   <Spinner className="size-8" />
                 </div>
               ) : null}
               {editorError && !editorLoading ? (
-                <div className="absolute inset-0 z-20 grid place-items-center bg-background/70 p-6 text-center">
+                <div
+                  className="absolute inset-0 z-20 grid place-items-center bg-background/70 p-6 text-center"
+                  data-mymap-export-hide=""
+                >
                   <div>
                     <p className="text-sm font-medium">{editorError}</p>
                     <Button
@@ -2131,22 +2641,29 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   style={{ width: "100%", height: "100%" }}
                   mapLib={maplibregl}
                   mapStyle={resolvedMapStyle as never}
+                  canvasContextAttributes={{ preserveDrawingBuffer: true }}
                   onLoad={() => setMapReady(true)}
                   interactiveLayerIds={[
-                    "mymap-edges-bidir",
-                    "mymap-edges-oneway",
-                    "mymap-poly-fill",
-                    "mymap-poly-line",
-                    "mymap-drawn-lines",
+                    ...(visibleElements.edges
+                      ? (["mymap-edges-bidir", "mymap-edges-oneway"] as const)
+                      : []),
+                    ...(visibleElements.polygons
+                      ? (["mymap-poly-fill", "mymap-poly-line"] as const)
+                      : []),
+                    ...(visibleElements.lines
+                      ? (["mymap-drawn-lines"] as const)
+                      : []),
                   ]}
                   onClick={onMapClick}
                 >
-                  <Source id="mymap-edges" type="geojson" data={edgesGeoJSON}>
-                    <Layer {...edgeLayerBidir} />
-                    <Layer {...edgeLayerOneWay} />
-                  </Source>
+                  {visibleElements.edges ? (
+                    <Source id="mymap-edges" type="geojson" data={edgesGeoJSON}>
+                      <Layer {...edgeLayerBidir} />
+                      <Layer {...edgeLayerOneWay} />
+                    </Source>
+                  ) : null}
 
-                  {polyFeatures.length > 0 ? (
+                  {visibleElements.polygons && polyFeatures.length > 0 ? (
                     <Source
                       id="mymap-polys"
                       type="geojson"
@@ -2182,7 +2699,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     </Source>
                   ) : null}
 
-                  {lineFeatures.length > 0 ? (
+                  {visibleElements.lines && lineFeatures.length > 0 ? (
                     <Source
                       id="mymap-lines"
                       type="geojson"
@@ -2202,7 +2719,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     </Source>
                   ) : null}
 
-                  {points.map((p) => (
+                  {visibleElements.points
+                    ? points.map((p) => (
                     <Marker
                       key={`pt-${p.id}`}
                       longitude={p.lng}
@@ -2242,9 +2760,11 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         title={p.name || `Point ${p.id}`}
                       />
                     </Marker>
-                  ))}
+                  ))
+                    : null}
 
-                  {nodes.map((n) => (
+                  {visibleElements.nodes
+                    ? nodes.map((n) => (
                     <Marker
                       key={n.id}
                       longitude={n.lng}
@@ -2273,7 +2793,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       <button
                         type="button"
                         className={[
-                          "h-3.5 w-3.5 rounded-full border-2 border-white shadow",
+                          "rounded-full border-2 border-white shadow",
                           canEdit && mode === "select"
                             ? "cursor-grab active:cursor-grabbing"
                             : "",
@@ -2282,14 +2802,18 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                             : "",
                         ].join(" ")}
                         style={{
+                          width: n.size || MYMAPS_NODE_SIZE_DEFAULT,
+                          height: n.size || MYMAPS_NODE_SIZE_DEFAULT,
                           backgroundColor: n.color || MYMAPS_DEFAULT_COLOR,
                         }}
                         aria-label={`Node ${n.id}`}
                       />
                     </Marker>
-                  ))}
+                  ))
+                    : null}
 
-                  {oneWayArrows.map((a) => (
+                  {visibleElements.edges
+                    ? oneWayArrows.map((a) => (
                     <Marker
                       key={`arr-${a.id}`}
                       longitude={a.lng}
@@ -2310,9 +2834,88 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         ▲
                       </div>
                     </Marker>
-                  ))}
+                  ))
+                    : null}
 
-                  {canEdit && mode === "select"
+                  {visibleElements.arrows
+                    ? arrows.map((a) => (
+                        <Marker
+                          key={`mymap-arrow-${a.id}`}
+                          longitude={a.lng}
+                          latitude={a.lat}
+                          anchor="top"
+                          rotation={a.bearing}
+                          rotationAlignment="map"
+                          pitchAlignment="map"
+                          draggable={canEdit && mode === "select"}
+                          onDrag={(e) => {
+                            const { lat, lng } = e.lngLat;
+                            setArrows((prev) =>
+                              prev.map((row) =>
+                                row.id === a.id ? { ...row, lat, lng } : row,
+                              ),
+                            );
+                          }}
+                          onDragEnd={(e) => {
+                            void moveArrow(a.id, e.lngLat.lat, e.lngLat.lng);
+                          }}
+                          onClick={(e) => {
+                            e.originalEvent.stopPropagation();
+                            if (modeRef.current === "view") return;
+                            if (modeRef.current === "delete") {
+                              void deleteArrow(a.id);
+                              return;
+                            }
+                            if (modeRef.current === "color") {
+                              void recolorArrow(a.id);
+                              return;
+                            }
+                            setSelectedArrowId(a.id);
+                            setArrowBearingInput(
+                              String(Math.round(a.bearing)),
+                            );
+                            setSelectedId(null);
+                            setSelectedTextId(null);
+                            setSelectedPolygonId(null);
+                            setSelectedLineId(null);
+                          }}
+                        >
+                          <div
+                            className={[
+                              "pointer-events-auto",
+                              canEdit && mode === "select"
+                                ? "cursor-grab active:cursor-grabbing"
+                                : "",
+                            ].join(" ")}
+                          >
+                            <MapArrowIcon
+                              color={a.color || MYMAPS_DEFAULT_COLOR}
+                              size={a.size || MYMAPS_ARROW_SIZE_DEFAULT}
+                              selected={selectedArrowId === a.id}
+                              aria-label={`Arrow ${a.id}`}
+                            />
+                          </div>
+                        </Marker>
+                      ))
+                    : null}
+
+                  {arrowDraftStart &&
+                  mode === "draw" &&
+                  drawTool === "arrow" ? (
+                    <Marker
+                      longitude={arrowDraftStart.lng}
+                      latitude={arrowDraftStart.lat}
+                      anchor="center"
+                    >
+                      <div
+                        className="h-3 w-3 rounded-full border-2 border-white shadow"
+                        style={{ backgroundColor: drawColor }}
+                        title="Arrow start"
+                      />
+                    </Marker>
+                  ) : null}
+
+                  {visibleElements.polygons && canEdit && mode === "select"
                     ? polyFeatures.map((f) => {
                         const polygonId = Number(f.properties?.polygonId);
                         if (!polygonId) return null;
@@ -2410,7 +3013,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       })
                     : null}
 
-                  {canEdit && mode === "select"
+                  {visibleElements.lines && canEdit && mode === "select"
                     ? lineFeatures.map((f) => {
                         const lineId = Number(f.properties?.lineId);
                         if (!lineId) return null;
@@ -2506,7 +3109,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       })
                     : null}
 
-                  {texts.map((t) => (
+                  {visibleElements.texts
+                    ? texts.map((t) => (
                     <Marker
                       key={`txt-${t.id}`}
                       longitude={t.lng}
@@ -2528,6 +3132,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       }}
                       onClick={(e) => {
                         e.originalEvent.stopPropagation();
+                        if (modeRef.current === "view") return;
                         if (modeRef.current === "delete") {
                           void deleteText(t.id);
                           return;
@@ -2558,9 +3163,14 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         {t.text}
                       </div>
                     </Marker>
-                  ))}
+                  ))
+                    : null}
 
-                  {mapReady && mode === "draw" && canEdit ? (
+                  {mapReady &&
+                  mode === "draw" &&
+                  canEdit &&
+                  !exportingImage &&
+                  drawTool !== "arrow" ? (
                     <DrawControl
                       map={mlMap}
                       features={drawFeatures}
@@ -2581,9 +3191,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         const next =
                           drawTool === "point"
                             ? "draw_point"
-                            : drawTool === "line"
-                              ? "draw_line_string"
-                              : "draw_polygon";
+                            : drawTool === "polygon"
+                              ? "draw_polygon"
+                              : "draw_line_string";
                         try {
                           (
                             draw as { changeMode: (m: string) => void }

@@ -85,6 +85,27 @@
       "when": 1782136649253,
       "tag": "0011_node_outside_incline",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782136649254,
+      "tag": "0012_destination_parking_lot",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782136649255,
+      "tag": "0013_destination_navigatable",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1782136649256,
+      "tag": "0014_mymaps_node_size_and_arrows",
+      "breakpoints": true
     }
   ]
 }

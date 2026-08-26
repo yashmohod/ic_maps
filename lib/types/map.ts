@@ -69,6 +69,7 @@ export type MapDestination = {
   lng: number;
   polygon?: string;
   isParkingLot: boolean;
+  navigatableDestination?: boolean;
 };
 
 export type OutsideNodeDetail = {
@@ -82,6 +83,13 @@ export type RouteLegMetrics = {
   destinationId: number;
   distanceMeters: number;
   durationSeconds: number;
+  mode?: "vehicular" | "pedestrian";
+  kind?: "parking" | "building";
+};
+
+export type RouteModeSegment = {
+  mode: "vehicular" | "pedestrian";
+  coordinates: Array<[number, number]>;
 };
 
 export type NavigateToResponse = {
@@ -94,6 +102,7 @@ export type NavigateToResponse = {
       entry: [number, number];
       exit: [number, number];
     }>;
+    modeSegments?: RouteModeSegment[];
   };
   firstNodeId: number;
   lastNodeId: number;

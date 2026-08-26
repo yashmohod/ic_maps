@@ -1,0 +1,1206 @@
+{
+  "version": 1,
+  "exportedAt": "2026-08-25T13:21:36.828000Z",
+  "mapName": "Blue Light \u2014 Dense (high visibility)",
+  "nodes": [
+    {
+      "id": 1,
+      "lat": 42.42165353585645,
+      "lng": -76.49941227625979,
+      "name": "Blue Light 1 (existing pole \u00b7 old#492)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 2,
+      "lat": 42.425242,
+      "lng": -76.49216,
+      "name": "Blue Light 2 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 3,
+      "lat": 42.42450831015776,
+      "lng": -76.49590312536316,
+      "name": "Blue Light 3 (existing pole \u00b7 old#553)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 4,
+      "lat": 42.42050409308432,
+      "lng": -76.49473058010204,
+      "name": "Blue Light 4 (building wall \u00b7 Towers Dining Hall)",
+      "color": "#15803D"
+    },
+    {
+      "id": 5,
+      "lat": 42.42303663772043,
+      "lng": -76.49510264081745,
+      "name": "Blue Light 5 (building wall \u00b7 Center For Natural Sciences)",
+      "color": "#15803D"
+    },
+    {
+      "id": 6,
+      "lat": 42.4249663,
+      "lng": -76.4946235,
+      "name": "Blue Light 6 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 7,
+      "lat": 42.42358347993938,
+      "lng": -76.49166850122289,
+      "name": "Blue Light 7 (building wall \u00b7 Lyon Hall)",
+      "color": "#15803D"
+    },
+    {
+      "id": 8,
+      "lat": 42.41939166666666,
+      "lng": -76.49802366666667,
+      "name": "Blue Light 8 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 9,
+      "lat": 42.42174251229227,
+      "lng": -76.49593693242312,
+      "name": "Blue Light 9 (existing pole \u00b7 old#499)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 10,
+      "lat": 42.422716,
+      "lng": -76.4980241,
+      "name": "Blue Light 10 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 11,
+      "lat": 42.42002934665754,
+      "lng": -76.49613918930847,
+      "name": "Blue Light 11 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 12,
+      "lat": 42.4218245405788,
+      "lng": -76.50087982627032,
+      "name": "Blue Light 12 (existing pole \u00b7 old#493)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 13,
+      "lat": 42.42201880750113,
+      "lng": -76.48961090808953,
+      "name": "Blue Light 13 (existing pole \u00b7 old#516)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 14,
+      "lat": 42.421887418987836,
+      "lng": -76.49103080499572,
+      "name": "Blue Light 14 (existing pole \u00b7 old#511)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 15,
+      "lat": 42.411064229309375,
+      "lng": -76.50105540496949,
+      "name": "Blue Light 15 (existing pole \u00b7 old#479)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 16,
+      "lat": 42.41982425586542,
+      "lng": -76.49934395286007,
+      "name": "Blue Light 16 (existing pole \u00b7 old#487)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 17,
+      "lat": 42.428646,
+      "lng": -76.4916226,
+      "name": "Blue Light 17 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 18,
+      "lat": 42.4258101,
+      "lng": -76.493682,
+      "name": "Blue Light 18 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 19,
+      "lat": 42.426116671038955,
+      "lng": -76.48922701209676,
+      "name": "Blue Light 19 (existing pole \u00b7 old#538)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 20,
+      "lat": 42.42411946366022,
+      "lng": -76.4974710959299,
+      "name": "Blue Light 20 (existing pole \u00b7 old#555)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 21,
+      "lat": 42.42640812925575,
+      "lng": -76.49111973571895,
+      "name": "Blue Light 21 (existing pole \u00b7 old#534)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 22,
+      "lat": 42.426064,
+      "lng": -76.495115,
+      "name": "Blue Light 22 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 23,
+      "lat": 42.4247019,
+      "lng": -76.4912745,
+      "name": "Blue Light 23 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 24,
+      "lat": 42.4206978,
+      "lng": -76.492934725,
+      "name": "Blue Light 24 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 25,
+      "lat": 42.41753560964606,
+      "lng": -76.49815104299262,
+      "name": "Blue Light 25 (building wall \u00b7 Terrace 13)",
+      "color": "#15803D"
+    },
+    {
+      "id": 26,
+      "lat": 42.42366362456525,
+      "lng": -76.49388822907923,
+      "name": "Blue Light 26 (existing pole \u00b7 old#505)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 27,
+      "lat": 42.41163874864205,
+      "lng": -76.49948200454662,
+      "name": "Blue Light 27 (existing pole \u00b7 old#476)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 28,
+      "lat": 42.427478,
+      "lng": -76.496105,
+      "name": "Blue Light 28 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 29,
+      "lat": 42.414086266666665,
+      "lng": -76.5003686,
+      "name": "Blue Light 29 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 30,
+      "lat": 42.4228438,
+      "lng": -76.488819,
+      "name": "Blue Light 30 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 31,
+      "lat": 42.4211450766592,
+      "lng": -76.49972925588834,
+      "name": "Blue Light 31 (existing pole \u00b7 old#489)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 32,
+      "lat": 42.412682421443364,
+      "lng": -76.50052100099835,
+      "name": "Blue Light 32 (building wall \u00b7 College Circle 120)",
+      "color": "#15803D"
+    },
+    {
+      "id": 33,
+      "lat": 42.4232805,
+      "lng": -76.5003378,
+      "name": "Blue Light 33 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 34,
+      "lat": 42.411022992323524,
+      "lng": -76.50231193584835,
+      "name": "Blue Light 34 (existing pole \u00b7 old#483)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 35,
+      "lat": 42.4153824,
+      "lng": -76.5009203,
+      "name": "Blue Light 35 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 36,
+      "lat": 42.42453,
+      "lng": -76.500131,
+      "name": "Blue Light 36 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 37,
+      "lat": 42.4247374,
+      "lng": -76.4955288,
+      "name": "Blue Light 37 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 38,
+      "lat": 42.418400964082196,
+      "lng": -76.49752789906923,
+      "name": "Blue Light 38 (existing pole \u00b7 old#455)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 39,
+      "lat": 42.4165795060932,
+      "lng": -76.50032085483117,
+      "name": "Blue Light 39 (existing pole \u00b7 old#460)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 40,
+      "lat": 42.42827774275784,
+      "lng": -76.49707020649953,
+      "name": "Blue Light 40 (building wall \u00b7 Facilities Administration)",
+      "color": "#15803D"
+    },
+    {
+      "id": 41,
+      "lat": 42.41358211763844,
+      "lng": -76.49891223549808,
+      "name": "Blue Light 41 (existing pole \u00b7 old#474)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 42,
+      "lat": 42.4215245,
+      "lng": -76.4976934,
+      "name": "Blue Light 42 (building wall)",
+      "color": "#15803D"
+    },
+    {
+      "id": 43,
+      "lat": 42.42731762,
+      "lng": -76.49157112,
+      "name": "Blue Light 43 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 44,
+      "lat": 42.4223399,
+      "lng": -76.4938769,
+      "name": "Blue Light 44 (building wall)",
+      "color": "#15803D"
+    },
+    {
+      "id": 45,
+      "lat": 42.4225559,
+      "lng": -76.4911854,
+      "name": "Blue Light 45 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 46,
+      "lat": 42.424867320000004,
+      "lng": -76.49305456,
+      "name": "Blue Light 46 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 47,
+      "lat": 42.4254909915945,
+      "lng": -76.49019352688698,
+      "name": "Blue Light 47 (existing pole \u00b7 old#529)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 48,
+      "lat": 42.42397,
+      "lng": -76.488506,
+      "name": "Blue Light 48 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 49,
+      "lat": 42.4251535,
+      "lng": -76.4885398,
+      "name": "Blue Light 49 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 50,
+      "lat": 42.42801466666667,
+      "lng": -76.49007933333334,
+      "name": "Blue Light 50 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 51,
+      "lat": 42.41238760620715,
+      "lng": -76.4991940500684,
+      "name": "Blue Light 51 (existing pole \u00b7 old#473)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 52,
+      "lat": 42.4212584,
+      "lng": -76.5019526,
+      "name": "Blue Light 52 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 53,
+      "lat": 42.420427,
+      "lng": -76.4977741,
+      "name": "Blue Light 53 (building wall)",
+      "color": "#15803D"
+    },
+    {
+      "id": 54,
+      "lat": 42.42345096306488,
+      "lng": -76.49276350714996,
+      "name": "Blue Light 54 (existing pole \u00b7 old#506)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 55,
+      "lat": 42.417233342972224,
+      "lng": -76.498759732861,
+      "name": "Blue Light 55 (existing pole \u00b7 old#457)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 56,
+      "lat": 42.4200532,
+      "lng": -76.4922516,
+      "name": "Blue Light 56 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 57,
+      "lat": 42.42197153055694,
+      "lng": -76.49274156679735,
+      "name": "Blue Light 57 (building wall \u00b7 Hilliard Hall)",
+      "color": "#15803D"
+    },
+    {
+      "id": 58,
+      "lat": 42.42372466090677,
+      "lng": -76.49574084748377,
+      "name": "Blue Light 58 (building wall \u00b7 Center For Natural Sciences)",
+      "color": "#15803D"
+    },
+    {
+      "id": 59,
+      "lat": 42.41216636353761,
+      "lng": -76.50083775927172,
+      "name": "Blue Light 59 (existing pole \u00b7 old#470)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 60,
+      "lat": 42.42151150595342,
+      "lng": -76.49426158560095,
+      "name": "Blue Light 60 (existing pole \u00b7 old#501)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 61,
+      "lat": 42.41905350213873,
+      "lng": -76.49668726222883,
+      "name": "Blue Light 61 (building wall \u00b7 Terrace 8)",
+      "color": "#15803D"
+    },
+    {
+      "id": 62,
+      "lat": 42.41516434395152,
+      "lng": -76.49898249272154,
+      "name": "Blue Light 62 (existing pole \u00b7 old#463)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 63,
+      "lat": 42.424090370552676,
+      "lng": -76.4903082718,
+      "name": "Blue Light 63 (existing pole \u00b7 old#522)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 64,
+      "lat": 42.4268141,
+      "lng": -76.488889,
+      "name": "Blue Light 64 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 65,
+      "lat": 42.4189611,
+      "lng": -76.49887912,
+      "name": "Blue Light 65 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 66,
+      "lat": 42.426637383484945,
+      "lng": -76.48988810702593,
+      "name": "Blue Light 66 (existing pole \u00b7 old#537)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 67,
+      "lat": 42.4210567,
+      "lng": -76.4963056,
+      "name": "Blue Light 67 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 68,
+      "lat": 42.411031362037335,
+      "lng": -76.49967260195949,
+      "name": "Blue Light 68 (existing pole \u00b7 old#477)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 69,
+      "lat": 42.42639095567864,
+      "lng": -76.4924577565783,
+      "name": "Blue Light 69 (existing pole \u00b7 old#533)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 70,
+      "lat": 42.426689157239224,
+      "lng": -76.49560864749911,
+      "name": "Blue Light 70 (existing pole \u00b7 old#542)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 71,
+      "lat": 42.42156738389903,
+      "lng": -76.4916601461988,
+      "name": "Blue Light 71 (existing pole \u00b7 old#512)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 72,
+      "lat": 42.424020863633984,
+      "lng": -76.49874058523541,
+      "name": "Blue Light 72 (existing pole \u00b7 old#556)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 73,
+      "lat": 42.41626352737947,
+      "lng": -76.49854016357524,
+      "name": "Blue Light 73 (existing pole \u00b7 old#458)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 74,
+      "lat": 42.419723774999994,
+      "lng": -76.495116375,
+      "name": "Blue Light 74 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 75,
+      "lat": 42.42560326666667,
+      "lng": -76.49962743333333,
+      "name": "Blue Light 75 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 76,
+      "lat": 42.424625,
+      "lng": -76.497047,
+      "name": "Blue Light 76 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 77,
+      "lat": 42.4184329,
+      "lng": -76.4941485,
+      "name": "Blue Light 77 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 78,
+      "lat": 42.418048533333334,
+      "lng": -76.49985553333333,
+      "name": "Blue Light 78 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 79,
+      "lat": 42.422383633459646,
+      "lng": -76.49676489597518,
+      "name": "Blue Light 79 (existing pole \u00b7 old#498)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 80,
+      "lat": 42.42401595088458,
+      "lng": -76.49253541053045,
+      "name": "Blue Light 80 (existing pole \u00b7 old#549)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 81,
+      "lat": 42.42117166201817,
+      "lng": -76.5006215902609,
+      "name": "Blue Light 81 (existing pole \u00b7 old#494)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 82,
+      "lat": 42.41074761094333,
+      "lng": -76.5017245970024,
+      "name": "Blue Light 82 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 83,
+      "lat": 42.4288501,
+      "lng": -76.4962875,
+      "name": "Blue Light 83 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 84,
+      "lat": 42.4235024,
+      "lng": -76.497594,
+      "name": "Blue Light 84 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 85,
+      "lat": 42.4224418,
+      "lng": -76.4986932,
+      "name": "Blue Light 85 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 86,
+      "lat": 42.4261,
+      "lng": -76.48818,
+      "name": "Blue Light 86 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 87,
+      "lat": 42.413910417258194,
+      "lng": -76.49998375973703,
+      "name": "Blue Light 87 (existing pole \u00b7 old#465)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 88,
+      "lat": 42.41900410879711,
+      "lng": -76.49991221788463,
+      "name": "Blue Light 88 (existing pole \u00b7 old#485)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 89,
+      "lat": 42.4217811,
+      "lng": -76.5013572,
+      "name": "Blue Light 89 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 90,
+      "lat": 42.4185108,
+      "lng": -76.495627,
+      "name": "Blue Light 90 (new pole)",
+      "color": "#EA580C"
+    },
+    {
+      "id": 91,
+      "lat": 42.42095208263254,
+      "lng": -76.49906558979552,
+      "name": "Blue Light 91 (existing pole \u00b7 old#490)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 92,
+      "lat": 42.422165355153055,
+      "lng": -76.49044542645203,
+      "name": "Blue Light 92 (existing pole \u00b7 old#513)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 93,
+      "lat": 42.423442430296205,
+      "lng": -76.48977662943216,
+      "name": "Blue Light 93 (existing pole \u00b7 old#520)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 94,
+      "lat": 42.417669195764034,
+      "lng": -76.49401552666798,
+      "name": "Blue Light 94 (existing pole \u00b7 old#558)",
+      "color": "#1D4ED8"
+    },
+    {
+      "id": 95,
+      "lat": 42.422928,
+      "lng": -76.492643,
+      "name": "Blue Light 95 (new pole)",
+      "color": "#EA580C"
+    }
+  ],
+  "edges": [],
+  "polygons": [],
+  "lines": [],
+  "points": [],
+  "texts": [
+    {
+      "text": "Alumni Hall",
+      "lat": 42.42208642857143,
+      "lng": -76.5002836,
+      "font_size": 12
+    },
+    {
+      "text": "Athletics & Events Center",
+      "lat": 42.422677828,
+      "lng": -76.490207992,
+      "font_size": 12
+    },
+    {
+      "text": "Bogart Hall",
+      "lat": 42.423580692857136,
+      "lng": -76.4928527357143,
+      "font_size": 12
+    },
+    {
+      "text": "Boothroyd Hall",
+      "lat": 42.42129422,
+      "lng": -76.49085136,
+      "font_size": 12
+    },
+    {
+      "text": "Center for Health Sciences",
+      "lat": 42.42003619166667,
+      "lng": -76.49809613333332,
+      "font_size": 12
+    },
+    {
+      "text": "Center For Natural Sciences",
+      "lat": 42.42340663684211,
+      "lng": -76.49551248947368,
+      "font_size": 12
+    },
+    {
+      "text": "Center for Public Safety and General Services",
+      "lat": 42.427107324999994,
+      "lng": -76.4955197,
+      "font_size": 12
+    },
+    {
+      "text": "Circle 10",
+      "lat": 42.411423575,
+      "lng": -76.5024781,
+      "font_size": 12
+    },
+    {
+      "text": "Circle 12",
+      "lat": 42.41112055,
+      "lng": -76.50224625,
+      "font_size": 12
+    },
+    {
+      "text": "Circle Apartments Community Building 30",
+      "lat": 42.41176975,
+      "lng": -76.500320525,
+      "font_size": 12
+    },
+    {
+      "text": "Clarke Hall",
+      "lat": 42.42395224285714,
+      "lng": -76.49221240714284,
+      "font_size": 12
+    },
+    {
+      "text": "Clinton Ford Observatory",
+      "lat": 42.41755685,
+      "lng": -76.4940754,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 110",
+      "lat": 42.413486922727294,
+      "lng": -76.50027519848484,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 111",
+      "lat": 42.4135186,
+      "lng": -76.50092830833331,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 120",
+      "lat": 42.412680475925924,
+      "lng": -76.50065717962961,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 121",
+      "lat": 42.41297857499999,
+      "lng": -76.50117061249999,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 130",
+      "lat": 42.41218069253732,
+      "lng": -76.5012387835821,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 131",
+      "lat": 42.41255724444446,
+      "lng": -76.50170038611112,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 141",
+      "lat": 42.41199025,
+      "lng": -76.5018681,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 150",
+      "lat": 42.41156101230768,
+      "lng": -76.501275,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 151",
+      "lat": 42.4113975,
+      "lng": -76.501787575,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 160",
+      "lat": 42.41103814745763,
+      "lng": -76.50050424237288,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 170",
+      "lat": 42.411223899999996,
+      "lng": -76.499604,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 171",
+      "lat": 42.410798,
+      "lng": -76.49922372500001,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 175",
+      "lat": 42.411102424999996,
+      "lng": -76.498819575,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 180",
+      "lat": 42.41181115,
+      "lng": -76.499195425,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 181",
+      "lat": 42.4114913,
+      "lng": -76.49858139999999,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 185",
+      "lat": 42.41194044,
+      "lng": -76.49851892000001,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 190",
+      "lat": 42.412387575,
+      "lng": -76.49951522500001,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 211",
+      "lat": 42.41367745,
+      "lng": -76.49977515,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle 341",
+      "lat": 42.413562675,
+      "lng": -76.499158675,
+      "font_size": 12
+    },
+    {
+      "text": "College Circle351",
+      "lat": 42.41304881999999,
+      "lng": -76.49930791999999,
+      "font_size": 12
+    },
+    {
+      "text": "Compost Facility",
+      "lat": 42.426447333333336,
+      "lng": -76.49640798333333,
+      "font_size": 12
+    },
+    {
+      "text": "Dillingham Center",
+      "lat": 42.42117879999999,
+      "lng": -76.49834553999999,
+      "font_size": 12
+    },
+    {
+      "text": "Dorothy D. and Roy H. Park Center for Business and Sustainable Enterprise",
+      "lat": 42.422071671428576,
+      "lng": -76.49701018571429,
+      "font_size": 12
+    },
+    {
+      "text": "East Tower",
+      "lat": 42.42066256666667,
+      "lng": -76.49395693333334,
+      "font_size": 12
+    },
+    {
+      "text": "Eastman Hall",
+      "lat": 42.42316852142857,
+      "lng": -76.49233085714286,
+      "font_size": 12
+    },
+    {
+      "text": "Egbert Hall",
+      "lat": 42.422172563636366,
+      "lng": -76.49405757272727,
+      "font_size": 12
+    },
+    {
+      "text": "Facilities Administration",
+      "lat": 42.428155828571434,
+      "lng": -76.49706655714284,
+      "font_size": 12
+    },
+    {
+      "text": "Fitness Center",
+      "lat": 42.4226074,
+      "lng": -76.49238618333332,
+      "font_size": 12
+    },
+    {
+      "text": "Friends Hall",
+      "lat": 42.421785549999996,
+      "lng": -76.4967703625,
+      "font_size": 12
+    },
+    {
+      "text": "Gannett Center",
+      "lat": 42.421233125,
+      "lng": -76.49501178,
+      "font_size": 12
+    },
+    {
+      "text": "Garden 25",
+      "lat": 42.425725299999996,
+      "lng": -76.489741275,
+      "font_size": 12
+    },
+    {
+      "text": "Garden 26",
+      "lat": 42.4253585,
+      "lng": -76.4900578,
+      "font_size": 12
+    },
+    {
+      "text": "Garden 27",
+      "lat": 42.425344225,
+      "lng": -76.49071325,
+      "font_size": 12
+    },
+    {
+      "text": "Garden 28",
+      "lat": 42.42551955,
+      "lng": -76.4912007,
+      "font_size": 12
+    },
+    {
+      "text": "Garden 29",
+      "lat": 42.42594623237411,
+      "lng": -76.49067136762591,
+      "font_size": 12
+    },
+    {
+      "text": "Hammond Health Center",
+      "lat": 42.423041725000004,
+      "lng": -76.4937581,
+      "font_size": 12
+    },
+    {
+      "text": "Hill Center",
+      "lat": 42.420470775000005,
+      "lng": -76.49719508333334,
+      "font_size": 12
+    },
+    {
+      "text": "Hilliard Hall",
+      "lat": 42.421929666666664,
+      "lng": -76.49250292499998,
+      "font_size": 12
+    },
+    {
+      "text": "Holmes Hall",
+      "lat": 42.421223258333335,
+      "lng": -76.49380716666667,
+      "font_size": 12
+    },
+    {
+      "text": "Hood Hall",
+      "lat": 42.421763033333335,
+      "lng": -76.49331765833332,
+      "font_size": 12
+    },
+    {
+      "text": "Job Hall",
+      "lat": 42.42152226,
+      "lng": -76.49738213333333,
+      "font_size": 12
+    },
+    {
+      "text": "Landon Hall",
+      "lat": 42.423545730769234,
+      "lng": -76.4937570923077,
+      "font_size": 12
+    },
+    {
+      "text": "Lyon Hall",
+      "lat": 42.42358156666667,
+      "lng": -76.49180027499999,
+      "font_size": 12
+    },
+    {
+      "text": "Muller Chapel",
+      "lat": 42.422720562500004,
+      "lng": -76.496749575,
+      "font_size": 12
+    },
+    {
+      "text": "Muller Faculty Center",
+      "lat": 42.422013033333336,
+      "lng": -76.49562893333334,
+      "font_size": 12
+    },
+    {
+      "text": "Park Hall",
+      "lat": 42.423987929999996,
+      "lng": -76.49517072,
+      "font_size": 12
+    },
+    {
+      "text": "Peggy Ryan Williams Center",
+      "lat": 42.421752250000004,
+      "lng": -76.49868743333333,
+      "font_size": 12
+    },
+    {
+      "text": "Phillips Hall",
+      "lat": 42.422424972222224,
+      "lng": -76.49458253888888,
+      "font_size": 12
+    },
+    {
+      "text": "Physical Plant Gounds",
+      "lat": 42.427771299999996,
+      "lng": -76.496895325,
+      "font_size": 12
+    },
+    {
+      "text": "Physical Plant Wash Bay",
+      "lat": 42.427639883333335,
+      "lng": -76.49663579999999,
+      "font_size": 12
+    },
+    {
+      "text": "Rowland Hall",
+      "lat": 42.42142462499999,
+      "lng": -76.49225151666666,
+      "font_size": 12
+    },
+    {
+      "text": "Smiddy Hall",
+      "lat": 42.4204009,
+      "lng": -76.49852062222223,
+      "font_size": 12
+    },
+    {
+      "text": "Smiley's Mini Mart",
+      "lat": 42.428539900000004,
+      "lng": -76.4974306,
+      "font_size": 12
+    },
+    {
+      "text": "Sunoco",
+      "lat": 42.4287517,
+      "lng": -76.4974951,
+      "font_size": 12
+    },
+    {
+      "text": "Tallcott Hall",
+      "lat": 42.42127815,
+      "lng": -76.4929953,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 1",
+      "lat": 42.42011055833333,
+      "lng": -76.49601298333333,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 10",
+      "lat": 42.4187594,
+      "lng": -76.49644672000001,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 11",
+      "lat": 42.41835286,
+      "lng": -76.49689532,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 12",
+      "lat": 42.41803507272727,
+      "lng": -76.49720758181819,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 13",
+      "lat": 42.417483399999995,
+      "lng": -76.498026525,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 2",
+      "lat": 42.4198580375,
+      "lng": -76.49646331249998,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 3",
+      "lat": 42.41958493333333,
+      "lng": -76.49571621666668,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 4",
+      "lat": 42.419453825,
+      "lng": -76.49644699999999,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 5",
+      "lat": 42.419402925,
+      "lng": -76.49692035,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 6",
+      "lat": 42.419044316666664,
+      "lng": -76.49722587499998,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 7",
+      "lat": 42.4186835875,
+      "lng": -76.49737618750001,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 8",
+      "lat": 42.41886277142857,
+      "lng": -76.49679851428571,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace 9",
+      "lat": 42.41914093333333,
+      "lng": -76.49638598333333,
+      "font_size": 12
+    },
+    {
+      "text": "Terrace Dining Hall",
+      "lat": 42.41992729047619,
+      "lng": -76.49613119523808,
+      "font_size": 12
+    },
+    {
+      "text": "Textor Hall",
+      "lat": 42.4218152,
+      "lng": -76.49618408,
+      "font_size": 12
+    },
+    {
+      "text": "Towers Dining Hall",
+      "lat": 42.42058561538462,
+      "lng": -76.49450102307694,
+      "font_size": 12
+    },
+    {
+      "text": "Warehouse Shops",
+      "lat": 42.427993166666674,
+      "lng": -76.49544196666666,
+      "font_size": 12
+    },
+    {
+      "text": "West Tower",
+      "lat": 42.42052336666667,
+      "lng": -76.49507498333334,
+      "font_size": 12
+    },
+    {
+      "text": "Whalen Center For Music",
+      "lat": 42.42105388928571,
+      "lng": -76.49577812142857,
+      "font_size": 12
+    },
+    {
+      "text": "Williams Hall",
+      "lat": 42.42265468461539,
+      "lng": -76.49517523076923,
+      "font_size": 12
+    },
+    {
+      "text": "Total Blue Lights: 95\n(Dense \u00b7 ~70m reach)\nBlue = 42 reused \u00b7 Green = 12 wall \u00b7 Orange = 41 new",
+      "lat": 42.42855,
+      "lng": -76.50135,
+      "font_size": 16
+    }
+  ]
+}

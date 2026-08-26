@@ -34,6 +34,14 @@ export async function POST(req: Request) {
 
     if (result.rowCount === 0) return NextResponse.json({ error: "DB did not update" }, { status: 400 });
 
+    if (isParkingLot) {
+      // A parking lot cannot be a building with recommended lots, nor keep building→lot links as building.
+      await db.execute(sql`
+        DELETE FROM destination_parking_lot
+        WHERE building_id = ${nid} OR parking_lot_id = ${nid};
+      `);
+    }
+
     return NextResponse.json({}, { status: 200 });
   } catch (e: any) {
     console.error(`[API ${ROUTE} POST] error`, e);

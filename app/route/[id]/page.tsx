@@ -64,7 +64,6 @@ import {
 } from "@/lib/distance-display";
 import { useNavigationProgress } from "@/hooks/use-navigation-progress";
 
-import ComboboxSelect from "@/components/ComboboxSelect";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
@@ -117,9 +116,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   } | null;
 
   const [routeInfo, setRouteInfo] = useState<RouteInfo>(null);
-  const [selectedParkingId, setSelectedParkingId] = useState<number | null>(
-    null,
-  );
   const [routeLoadPending, setRouteLoadPending] = useState(true);
 
   const [curNavConditions, setCurNavConditions] = useState<NavConditions>({
@@ -173,11 +169,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         destinationId: Number(firstDest.id),
         parkingLots,
       });
-      if (parkingLots.length === 1) {
-        setSelectedParkingId(parkingLots[0].id);
-      } else {
-        setSelectedParkingId(null);
-      }
     } catch (e) {
       console.error(e);
       toast.error("Failed to load route.");
@@ -214,6 +205,9 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
   const [routeOutdoorSegments, setRouteOutdoorSegments] = useState<
     Array<Array<[number, number]>>
+  >([]);
+  const [routeModeSegments, setRouteModeSegments] = useState<
+    import("@/lib/types/map").RouteModeSegment[]
   >([]);
   const [routePortals, setRoutePortals] = useState<
     Array<{ entry: [number, number]; exit: [number, number] }>
@@ -536,11 +530,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       await locateOnce();
       return;
     }
-    if (showParkingOptions && selectedParkingId == null) {
-      toast.error("Select a parking lot first.");
-      return;
-    }
-
     if (!navigating && !tracking) {
       await refreshRoute();
       setSheetPosition(effectiveSheetPeek);
@@ -559,22 +548,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
   }
 
-  const hasParkingLots = (routeInfo?.parkingLots.length ?? 0) > 0;
-  const showParkingOptions = hasParkingLots && curNavConditions.is_vehicular;
-
-  const parkingComboboxItems = useMemo(
-    () =>
-      (routeInfo?.parkingLots ?? []).map((lot) => ({
-        value: lot.id,
-        label: lot.name,
-      })),
-    [routeInfo?.parkingLots],
-  );
-
-  const canNavigate =
-    !!userPos &&
-    !!routeInfo?.destinationId &&
-    (!showParkingOptions || selectedParkingId != null);
+  const canNavigate = !!userPos && !!routeInfo?.destinationId;
 
   async function refreshRoute(overridePos?: { lat: number; lng: number }) {
     const pos = overridePos ?? userPosRef.current;
@@ -585,11 +559,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       routePendingRef.current
     )
       return;
-    if (showParkingOptions && selectedParkingId == null) {
-      toast.error("Select a parking lot first.");
-      return;
-    }
-
     const reqId = ++routeRequestIdRef.current;
     setRoutePending(true);
     routePendingRef.current = true;
@@ -600,11 +569,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         navConditions: curNavConditions,
       };
 
-      if (showParkingOptions && selectedParkingId != null) {
-        body.viaDestIds = [selectedParkingId, routeInfo.destinationId];
-      } else {
-        body.destId = routeInfo.destinationId;
-      }
+      // Server expands vehicular trips via building recommended parking lots.
+      body.destId = routeInfo.destinationId;
 
       const res = await fetch(withBasePath("/api/map/navigateTo"), {
         method: "POST",
@@ -623,6 +589,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       if (!res.ok || !Array.isArray(data.path) || data.path.length === 0) {
         setRouteCoords([]);
         setRouteOutdoorSegments([]);
+      setRouteModeSegments([]);
         setRoutePortals([]);
         routeCoordsRef.current = [];
         routeStartNodeRef.current = null;
@@ -642,6 +609,9 @@ export default function ShareRouteNavigatePage(): JSX.Element {
           : coords.length >= 2
             ? [coords]
             : [],
+      );
+      setRouteModeSegments(
+        Array.isArray(data.geometry?.modeSegments) ? data.geometry.modeSegments : [],
       );
       setRoutePortals(
         Array.isArray(data.geometry?.portals) ? data.geometry.portals : [],
@@ -671,12 +641,17 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         setTimeout(() => fitToUserAndRoute(coords), 0);
       }
 
-      if (showParkingOptions && selectedParkingId != null) {
+      const parkingLeg = Array.isArray(data.legs)
+        ? data.legs.find((l) => l.kind === "parking")
+        : undefined;
+      if (parkingLeg) {
         const lot = routeInfo.parkingLots.find(
-          (p) => p.id === selectedParkingId,
+          (p) => p.id === parkingLeg.destinationId,
         );
         if (lot?.lat != null && lot?.lng != null) {
           setParkingPos({ lat: Number(lot.lat), lng: Number(lot.lng) });
+        } else {
+          setParkingPos(null);
         }
       } else {
         setParkingPos(null);
@@ -686,6 +661,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       console.error(e);
       setRouteCoords([]);
       setRouteOutdoorSegments([]);
+      setRouteModeSegments([]);
       setRoutePortals([]);
       routeCoordsRef.current = [];
       routeStartNodeRef.current = null;
@@ -716,7 +692,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     if (!canNavigate) return;
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeInfo?.destinationId, selectedParkingId, curNavConditions]);
+  }, [routeInfo?.destinationId, curNavConditions]);
 
   useEffect(() => {
     if (!pendingRouteStartRef.current) return;
@@ -787,6 +763,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               <RoutePathLayer
                 coordinates={routeCoords}
                 segments={routeOutdoorSegments}
+                modeSegments={routeModeSegments}
                 portals={routePortals}
                 id="share-route"
               />
@@ -961,7 +938,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                       ...opt.conditions,
                     }));
                     if (opt.id === "pedestrian") {
-                      setSelectedParkingId(null);
                       setParkingPos(null);
                     }
                   }}
@@ -980,28 +956,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             })}
           </div>
         </div>
-
-        {showParkingOptions && routeInfo && (
-          <div className="mt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
-              Parking lot
-            </p>
-            <p className="mt-1 text-xs text-panel-muted-foreground">
-              Drive via the selected parking lot to the destination.
-            </p>
-            <div className="mt-2">
-              <ComboboxSelect
-                placeholder="Select parking…"
-                searchPlaceholder="Search parking lots…"
-                value={selectedParkingId}
-                items={parkingComboboxItems}
-                onChange={(id) => setSelectedParkingId(Number(id))}
-                widthClassName="w-full min-h-11"
-                disabled={routePending}
-              />
-            </div>
-          </div>
-        )}
 
         {curNavConditions.is_pedestrian ? (
           <details
@@ -1160,9 +1114,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               ? tracking
                 ? "Live navigation active — follow the teal path."
                 : "Follow the teal path on the map. Tap the navigation button for live tracking."
-              : showParkingOptions && !selectedParkingId
-                ? "Choose parking, then tap the route button above."
-                : userPos
+              : userPos
                   ? "Tap the route button above to build your path."
                   : "Allow location to build your route."}
         </p>

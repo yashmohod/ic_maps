@@ -3,6 +3,7 @@ import { eq, inArray, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  myMapsArrow,
   myMapsEdge,
   myMapsLine,
   myMapsNode,
@@ -54,7 +55,7 @@ export async function GET(_req: Request, { params }: Params) {
               ),
             );
 
-    const [polygons, lines, points, texts] = await Promise.all([
+    const [polygons, lines, points, texts, arrows] = await Promise.all([
       db
         .select()
         .from(myMapsPolygon)
@@ -62,6 +63,7 @@ export async function GET(_req: Request, { params }: Params) {
       db.select().from(myMapsLine).where(eq(myMapsLine.my_maps_id, mapId)),
       db.select().from(myMapsPoint).where(eq(myMapsPoint.my_maps_id, mapId)),
       db.select().from(myMapsText).where(eq(myMapsText.my_maps_id, mapId)),
+      db.select().from(myMapsArrow).where(eq(myMapsArrow.my_maps_id, mapId)),
     ]);
 
     // Guests / public viewers do not need owner_id.
@@ -78,6 +80,7 @@ export async function GET(_req: Request, { params }: Params) {
         lines,
         points,
         texts,
+        arrows,
       },
       { status: 200 },
     );

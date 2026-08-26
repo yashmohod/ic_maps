@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-08-25T13:21:36.828000Z",
+  "source": {
+    "file": "Blurlight_old.json",
+    "poles": 110
+  },
+  "snap_radius_m": 30.0,
+  "colors": {
+    "existing": "#1D4ED8",
+    "building_wall": "#15803D",
+    "new_freestanding": "#EA580C"
+  },
+  "variants": [
+    {
+      "density": "sparse",
+      "file": "data/blue-light-proposals/blue-light-sparse.json",
+      "count": 36,
+      "reused_existing": 15,
+      "building_wall": 5,
+      "new_freestanding": 16,
+      "weighted_coverage": 0.993,
+      "cover_radius_m": 130.0,
+      "min_spacing_m": 115.0,
+      "central_spacing_m": 175.0,
+      "median_nn_m": 132.3
+    },
+    {
+      "density": "medium",
+      "file": "data/blue-light-proposals/blue-light-medium.json",
+      "count": 62,
+      "reused_existing": 28,
+      "building_wall": 10,
+      "new_freestanding": 24,
+      "weighted_coverage": 0.985,
+      "cover_radius_m": 95.0,
+      "min_spacing_m": 80.0,
+      "central_spacing_m": 120.0,
+      "median_nn_m": 109.7
+    },
+    {
+      "density": "dense",
+      "file": "data/blue-light-proposals/blue-light-dense.json",
+      "count": 95,
+      "reused_existing": 42,
+      "building_wall": 12,
+      "new_freestanding": 41,
+      "weighted_coverage": 0.967,
+      "cover_radius_m": 70.0,
+      "min_spacing_m": 55.0,
+      "central_spacing_m": 85.0,
+      "median_nn_m": 85.0
+    }
+  ]
+}

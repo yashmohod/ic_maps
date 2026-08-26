@@ -504,7 +504,9 @@ export default function CustomRoutesPage(): JSX.Element {
 
   async function getDestinations() {
     try {
-      const res = await fetch(withBasePath("/api/destination"));
+      const res = await fetch(
+        withBasePath("/api/destination?navigatableOnly=1"),
+      );
       const data = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(data?.destinations)) {
         setDestinations(data.destinations);

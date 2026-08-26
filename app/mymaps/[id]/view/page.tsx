@@ -22,6 +22,7 @@ import type {
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { HomeLogoLink } from "@/components/home-logo-link";
+import { MapArrowIcon } from "@/components/MapArrowIcon";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -31,6 +32,13 @@ import { useBasemapStyle } from "@/hooks/use-basemap";
 import { BasemapToggle } from "@/components/basemap-toggle";
 import { parseLineFeature, parsePolygonFeature } from "@/lib/mymaps-geo";
 import { MYMAPS_DEFAULT_COLOR, normalizeHexColor } from "@/lib/mymaps-color";
+import {
+  clampArrowSize,
+  clampNodeSize,
+  MYMAPS_ARROW_SIZE_DEFAULT,
+  MYMAPS_NODE_SIZE_DEFAULT,
+  normArrowBearing,
+} from "@/lib/mymaps-size";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import {
   borderMutedClass,
@@ -45,6 +53,7 @@ type SimpleNode = {
   lng: number;
   name: string;
   color: string;
+  size: number;
 };
 type EdgeRow = {
   id: number;
@@ -67,6 +76,14 @@ type TextRow = {
   lat: number;
   lng: number;
   font_size: number;
+};
+type ArrowRow = {
+  id: number;
+  lat: number;
+  lng: number;
+  bearing: number;
+  color: string;
+  size: number;
 };
 
 export default function MyMapPublicViewPage(): JSX.Element {
@@ -98,6 +115,7 @@ export default function MyMapPublicViewPage(): JSX.Element {
   const [lines, setLines] = useState<LineRow[]>([]);
   const [points, setPoints] = useState<PointRow[]>([]);
   const [texts, setTexts] = useState<TextRow[]>([]);
+  const [arrows, setArrows] = useState<ArrowRow[]>([]);
 
   const loadMap = useCallback(async () => {
     if (!mapId) {
@@ -121,12 +139,14 @@ export default function MyMapPublicViewPage(): JSX.Element {
             lng: number;
             name?: string;
             color?: string;
+            size?: number;
           }) => ({
             id: n.id,
             lat: n.lat,
             lng: n.lng,
             name: n.name ?? "",
             color: normalizeHexColor(n.color),
+            size: clampNodeSize(n.size ?? MYMAPS_NODE_SIZE_DEFAULT),
           }),
         ),
       );
@@ -166,6 +186,25 @@ export default function MyMapPublicViewPage(): JSX.Element {
       setLines(data.lines ?? []);
       setPoints(data.points ?? []);
       setTexts(data.texts ?? []);
+      setArrows(
+        (data.arrows ?? []).map(
+          (a: {
+            id: number;
+            lat: number;
+            lng: number;
+            bearing?: number;
+            color?: string;
+            size?: number;
+          }) => ({
+            id: a.id,
+            lat: a.lat,
+            lng: a.lng,
+            bearing: normArrowBearing(a.bearing ?? 0),
+            color: normalizeHexColor(a.color),
+            size: clampArrowSize(a.size ?? MYMAPS_ARROW_SIZE_DEFAULT),
+          }),
+        ),
+      );
     } catch {
       toast.error("Could not load map");
       setNotFound(true);
@@ -392,11 +431,29 @@ export default function MyMapPublicViewPage(): JSX.Element {
                 anchor="center"
               >
                 <div
-                  className="h-3 w-3 rounded-full border-2 border-white shadow"
+                  className="rounded-full border-2 border-white shadow"
                   style={{
+                    width: n.size || MYMAPS_NODE_SIZE_DEFAULT,
+                    height: n.size || MYMAPS_NODE_SIZE_DEFAULT,
                     backgroundColor: n.color || MYMAPS_DEFAULT_COLOR,
                   }}
                   title={n.name || `Node ${n.id}`}
+                />
+              </Marker>
+            ))}
+            {arrows.map((a) => (
+              <Marker
+                key={`arrow-${a.id}`}
+                longitude={a.lng}
+                latitude={a.lat}
+                anchor="top"
+                rotation={a.bearing}
+                rotationAlignment="map"
+                pitchAlignment="map"
+              >
+                <MapArrowIcon
+                  color={a.color || MYMAPS_DEFAULT_COLOR}
+                  size={a.size || MYMAPS_ARROW_SIZE_DEFAULT}
                 />
               </Marker>
             ))}

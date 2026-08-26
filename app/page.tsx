@@ -211,6 +211,9 @@ export default function NavigationMap(): JSX.Element {
   const [routeOutdoorSegments, setRouteOutdoorSegments] = useState<
     Array<Array<[number, number]>>
   >([]);
+  const [routeModeSegments, setRouteModeSegments] = useState<
+    import("@/lib/types/map").RouteModeSegment[]
+  >([]);
   const [routePortals, setRoutePortals] = useState<
     Array<{ entry: [number, number]; exit: [number, number] }>
   >([]);
@@ -656,6 +659,7 @@ export default function NavigationMap(): JSX.Element {
       routeCoordsRef.current = [];
       setRouteCoords([]);
       setRouteOutdoorSegments([]);
+      setRouteModeSegments([]);
       setRoutePortals([]);
       setRouteEta(null);
 
@@ -680,6 +684,7 @@ export default function NavigationMap(): JSX.Element {
     routeCoordsRef.current = [];
     setRouteCoords([]);
     setRouteOutdoorSegments([]);
+      setRouteModeSegments([]);
     setRoutePortals([]);
     setRouteEta(null);
     setMapStage(MAP_STAGES.IDLE);
@@ -947,6 +952,9 @@ export default function NavigationMap(): JSX.Element {
           ? [coords]
           : [],
     );
+    setRouteModeSegments(
+      Array.isArray(resp.geometry?.modeSegments) ? resp.geometry.modeSegments : [],
+    );
     setRoutePortals(
       Array.isArray(resp.geometry?.portals) ? resp.geometry.portals : [],
     );
@@ -1144,6 +1152,7 @@ export default function NavigationMap(): JSX.Element {
     routeCoordsRef.current = [];
     setRouteCoords([]);
     setRouteOutdoorSegments([]);
+      setRouteModeSegments([]);
     setRoutePortals([]);
 
     setPath(PATH_RESET);
@@ -1160,7 +1169,9 @@ export default function NavigationMap(): JSX.Element {
 
   async function getBuildings() {
     try {
-      const req = await fetch(withBasePath("/api/destination"));
+      const req = await fetch(
+        withBasePath("/api/destination?navigatableOnly=1"),
+      );
       if (req.status !== 200) return toast.error("Buildings did not load!");
       const resp = await req.json();
       setDestinations(resp.destinations || []);
@@ -1301,6 +1312,7 @@ export default function NavigationMap(): JSX.Element {
         routeCoordsRef.current = [];
         setRouteCoords([]);
         setRouteOutdoorSegments([]);
+      setRouteModeSegments([]);
         setRoutePortals([]);
         setRouteEta(null);
         setMapStage(MAP_STAGES.BUILDING);
@@ -1921,6 +1933,7 @@ export default function NavigationMap(): JSX.Element {
               <RoutePathLayer
                 coordinates={routeCoords}
                 segments={routeOutdoorSegments}
+                modeSegments={routeModeSegments}
                 portals={routePortals}
               />
             )}

@@ -54,13 +54,26 @@ function fallbackStyles(activeColor = "#35D5A4") {
       id: "gl-draw-polygon-fill.cold",
       type: "fill",
       filter: ["all", ["==", "$type", "Polygon"], ["!=", "active", "true"]],
-      paint: { "fill-color": cold, "fill-opacity": 0.4 },
+      // Inactive building fills come from BuildingsOverlay; keep a light hit target for Draw.
+      paint: { "fill-color": cold, "fill-opacity": 0.08 },
     },
     {
       id: "gl-draw-polygon-fill.hot",
       type: "fill",
       filter: ["all", ["==", "$type", "Polygon"], ["==", "active", "true"]],
-      paint: { "fill-color": hot, "fill-opacity": 0.4 },
+      paint: { "fill-color": hot, "fill-opacity": 0.35 },
+    },
+    {
+      id: "gl-draw-polygon-stroke.cold",
+      type: "line",
+      filter: ["all", ["==", "$type", "Polygon"], ["!=", "active", "true"]],
+      paint: { "line-color": cold, "line-width": 1, "line-opacity": 0.35 },
+    },
+    {
+      id: "gl-draw-polygon-stroke.hot",
+      type: "line",
+      filter: ["all", ["==", "$type", "Polygon"], ["==", "active", "true"]],
+      paint: { "line-color": hot, "line-width": 2 },
     },
     {
       id: "gl-draw-lines.cold",
@@ -190,6 +203,17 @@ export default function DrawControl({
   const syncIntoDraw = (draw: any, incomingRaw: any[]) => {
     const incoming = normalizeFeatures(incomingRaw as Feature[]);
 
+    const mode =
+      typeof draw.getMode === "function" ? String(draw.getMode()) : "";
+    // Never wipe an in-progress create / vertex edit.
+    if (
+      mode.startsWith("draw_") ||
+      mode === "direct_select" ||
+      mode === "static"
+    ) {
+      return;
+    }
+
     // If user has a selection, don't nuke state
     const selectedIds: string[] =
       typeof draw.getSelectedIds === "function" ? draw.getSelectedIds() : [];
@@ -268,48 +292,84 @@ export default function DrawControl({
   useEffect(() => {
     if (!map) return;
 
-    // StrictMode/dev double effect protection
-    if (drawRef.current) return;
+    const unbind = (draw: MapLibreDraw) => {
+      map.off("draw.create" as any, (draw as any).__icOnCreate);
+      map.off("draw.update" as any, (draw as any).__icOnUpdate);
+      map.off("draw.delete" as any, (draw as any).__icOnDelete);
+      map.off("draw.selectionchange" as any, (draw as any).__icOnSel);
+      map.off("draw.modechange" as any, (draw as any).__icOnMode);
+    };
 
-    const draw = new MapLibreDraw({
-      displayControlsDefault,
-      controls,
-      styles: fallbackStyles(activeColor),
-    });
+    const install = () => {
+      if (drawRef.current) {
+        try {
+          unbind(drawRef.current);
+          map.removeControl(drawRef.current as any);
+        } catch {
+          /* already gone */
+        }
+        drawRef.current = null;
+      }
 
-    map.addControl(draw as any, position);
-    drawRef.current = draw;
+      const draw = new MapLibreDraw({
+        displayControlsDefault,
+        controls,
+        styles: fallbackStyles(activeColor),
+      });
 
-    // wire events using handler refs (no re-add control when callbacks change)
-    const handleCreate = (e: any) => handlersRef.current.onCreate?.(e, draw);
-    const handleUpdate = (e: any) => handlersRef.current.onUpdate?.(e, draw);
-    const handleDelete = (e: any) => handlersRef.current.onDelete?.(e, draw);
-    const handleSel = (e: any) =>
-      handlersRef.current.onSelectionChange?.(e, draw);
-    const handleMode = (e: any) => handlersRef.current.onModeChange?.(e, draw);
+      const handleCreate = (e: any) => handlersRef.current.onCreate?.(e, draw);
+      const handleUpdate = (e: any) => handlersRef.current.onUpdate?.(e, draw);
+      const handleDelete = (e: any) => handlersRef.current.onDelete?.(e, draw);
+      const handleSel = (e: any) =>
+        handlersRef.current.onSelectionChange?.(e, draw);
+      const handleMode = (e: any) =>
+        handlersRef.current.onModeChange?.(e, draw);
 
-    map.on("draw.create" as any, handleCreate);
-    map.on("draw.update" as any, handleUpdate);
-    map.on("draw.delete" as any, handleDelete);
-    map.on("draw.selectionchange" as any, handleSel);
-    map.on("draw.modechange" as any, handleMode);
+      (draw as any).__icOnCreate = handleCreate;
+      (draw as any).__icOnUpdate = handleUpdate;
+      (draw as any).__icOnDelete = handleDelete;
+      (draw as any).__icOnSel = handleSel;
+      (draw as any).__icOnMode = handleMode;
 
-    // ✅ CRITICAL: sync immediately using latest features
-    syncIntoDraw(draw as any, featuresRef.current);
-    handlersRef.current.onReady?.(draw);
+      map.addControl(draw as any, position);
+      drawRef.current = draw;
+
+      map.on("draw.create" as any, handleCreate);
+      map.on("draw.update" as any, handleUpdate);
+      map.on("draw.delete" as any, handleDelete);
+      map.on("draw.selectionchange" as any, handleSel);
+      map.on("draw.modechange" as any, handleMode);
+
+      syncIntoDraw(draw as any, featuresRef.current);
+      handlersRef.current.onReady?.(draw);
+    };
+
+    install();
+
+    // Only reinstall when style fully reloads AND draw layers are gone.
+    const onStyleLoad = () => {
+      const hasDrawLayer = Boolean(
+        map.getStyle()?.layers?.some((l) => String(l.id).includes("gl-draw")),
+      );
+      if (hasDrawLayer && drawRef.current) {
+        syncIntoDraw(drawRef.current as any, featuresRef.current);
+        return;
+      }
+      install();
+    };
+    map.on("style.load", onStyleLoad);
 
     return () => {
-      map.off("draw.create" as any, handleCreate);
-      map.off("draw.update" as any, handleUpdate);
-      map.off("draw.delete" as any, handleDelete);
-      map.off("draw.selectionchange" as any, handleSel);
-      map.off("draw.modechange" as any, handleMode);
-
-      try {
-        map.removeControl(draw as any);
-      } catch {}
-      drawRef.current = null;
-      handlersRef.current.onReady?.(null);
+      map.off("style.load", onStyleLoad);
+      const draw = drawRef.current;
+      if (draw) {
+        try {
+          unbind(draw);
+          map.removeControl(draw as any);
+        } catch {}
+        drawRef.current = null;
+        handlersRef.current.onReady?.(null);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, position, displayControlsDefault, controlsKey, activeColor]);

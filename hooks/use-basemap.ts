@@ -2,14 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { StyleSpecification } from "maplibre-gl";
-import { SATELLITE_STYLE } from "@/lib/map-constants";
+import {
+  buildSatelliteStyle,
+  SATELLITE_TILE_PATH,
+} from "@/lib/map-constants";
+import { withBasePath } from "@/lib/base-path";
 
 export type BasemapId = "map" | "satellite";
 
 const STORAGE_KEY = "ic-maps-basemap";
 
 export function cloneSatelliteStyle(): StyleSpecification {
-  return JSON.parse(JSON.stringify(SATELLITE_STYLE)) as StyleSpecification;
+  return buildSatelliteStyle(withBasePath(SATELLITE_TILE_PATH));
 }
 
 export function useBasemap() {

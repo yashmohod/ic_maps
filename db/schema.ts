@@ -264,6 +264,10 @@ export const destination = pgTable("destination", {
   name: varchar("name", { length: 256 }).notNull().unique(),
   polygon: text("polygon").default(""),
   is_parking_lot: boolean("is_parking_lot").notNull().default(false),
+  /** When true, appears in the main map navigate-to dropdown. */
+  navigatable_destination: boolean("navigatable_destination")
+    .notNull()
+    .default(false),
   open_time: time("open_time", { precision: 6, withTimezone: true })
     .notNull()
     .default("00:00:00"),
@@ -313,6 +317,20 @@ export const route_parking_lot = pgTable(
   (t) => [primaryKey({ columns: [t.route_id, t.destination_id] })],
 );
 
+/** Building → recommended parking lots for vehicular navigation. */
+export const destination_parking_lot = pgTable(
+  "destination_parking_lot",
+  {
+    building_id: integer("building_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+    parking_lot_id: integer("parking_lot_id")
+      .notNull()
+      .references(() => destination.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.building_id, t.parking_lot_id] })],
+);
+
 // Relations for route ↔ route_destination ↔ destination
 export const routeRelations = relations(route, ({ one, many }) => ({
   user: one(user, { fields: [route.user_id], references: [user.id] }),
@@ -337,7 +355,29 @@ export const routeDestinationRelations = relations(
 export const destinationRelations = relations(destination, ({ many }) => ({
   route_destinations: many(route_destination),
   route_parking_lots: many(route_parking_lot),
+  recommended_parking_lots: many(destination_parking_lot, {
+    relationName: "building_parking",
+  }),
+  recommended_for_buildings: many(destination_parking_lot, {
+    relationName: "parking_building",
+  }),
 }));
+
+export const destinationParkingLotRelations = relations(
+  destination_parking_lot,
+  ({ one }) => ({
+    building: one(destination, {
+      fields: [destination_parking_lot.building_id],
+      references: [destination.id],
+      relationName: "building_parking",
+    }),
+    parkingLot: one(destination, {
+      fields: [destination_parking_lot.parking_lot_id],
+      references: [destination.id],
+      relationName: "parking_building",
+    }),
+  }),
+);
 
 export const routeParkingLotRelations = relations(
   route_parking_lot,
@@ -526,6 +566,8 @@ export const myMapsNode = pgTable("my_maps_node", {
   lat: doublePrecision("lat").notNull().default(0),
   lng: doublePrecision("lng").notNull().default(0),
   color: text("color").notNull().default("#35D5A4"),
+  /** Marker diameter in CSS pixels. */
+  size: integer("size").notNull().default(14),
 });
 
 /** Table name is my_map_polygon (singular) for historical reasons. */
@@ -601,6 +643,20 @@ export const myMapsText = pgTable("my_map_text", {
   font_size: integer("font_size").notNull().default(14),
 });
 
+/** Standalone direction arrows (annotation), unrelated to path edges. */
+export const myMapsArrow = pgTable("my_map_arrow", {
+  id: serial("id").primaryKey(),
+  my_maps_id: integer("my_maps_id")
+    .references(() => myMaps.id, { onDelete: "cascade" })
+    .notNull(),
+  lat: doublePrecision("lat").notNull().default(0),
+  lng: doublePrecision("lng").notNull().default(0),
+  /** Degrees clockwise from north (MapLibre marker rotation). */
+  bearing: doublePrecision("bearing").notNull().default(0),
+  color: text("color").notNull().default("#35D5A4"),
+  size: integer("size").notNull().default(28),
+});
+
 export const schema = {
   user,
   session,
@@ -614,6 +670,7 @@ export const schema = {
   route,
   route_destination,
   route_parking_lot,
+  destination_parking_lot,
   destinationNode,
   user_favorite_destination,
   destination_chain,
@@ -629,6 +686,7 @@ export const schema = {
   myMapsLine,
   myMapsPoint,
   myMapsText,
+  myMapsArrow,
 };
 export type NodeOutside = InferSelectModel<typeof nodeOutside>;
 export type NodeInside = InferSelectModel<typeof nodeInside>;

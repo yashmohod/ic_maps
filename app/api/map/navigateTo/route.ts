@@ -5,6 +5,7 @@ import {
   closestNode,
   navigate,
   navigateMulti,
+  navigateVehicularWithParking,
   getGraph,
   pathToRouteGeometry,
   endNodeFromPath,
@@ -14,6 +15,7 @@ import {
 import {
   buildRouteDirections,
   buildMultiLegDirections,
+  buildMixedModeDirections,
   loadDestinationNames,
 } from "@/lib/navigation-instructions";
 import {
@@ -115,6 +117,58 @@ export async function POST(req: Request) {
       );
     }
 
+    const graph = await getGraph();
+    const startNode = graph.nodesOutside.get(startNodeId);
+    if (!startNode) {
+      return NextResponse.json(
+        { error: "Start node not found in graph" },
+        { status: 500 },
+      );
+    }
+
+    if (navConditions.is_vehicular) {
+      const mixed = await navigateVehicularWithParking(
+        startNodeId,
+        destIds,
+        navConditions,
+      );
+      if (!mixed) {
+        return NextResponse.json({ error: "No route found" }, { status: 404 });
+      }
+
+      const geometry = pathToRouteGeometry(graph, mixed.path, startNodeId);
+      const lastNodeId = endNodeFromPath(graph, startNodeId, mixed.path);
+      const steps = await buildMixedModeDirections(
+        graph,
+        startNodeId,
+        mixed.legs,
+        mixed.legPaths,
+        navConditions,
+      );
+
+      return NextResponse.json(
+        {
+          path: mixed.path,
+          geometry: {
+            ...geometry,
+            modeSegments: mixed.modeSegments,
+          },
+          firstNodeId: startNodeId,
+          lastNodeId,
+          startNode: {
+            id: startNodeId,
+            lat: startNode.lat,
+            lng: startNode.lng,
+          },
+          distanceMeters: mixed.distanceMeters,
+          durationSeconds: mixed.durationSeconds,
+          legs: mixed.legs,
+          steps,
+        },
+        { status: 200 },
+      );
+    }
+
     const path =
       destIds.length === 1
         ? await navigate(startNodeId, destIds[0]!, navConditions)
@@ -124,17 +178,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No route found" }, { status: 404 });
     }
 
-    const graph = await getGraph();
     const geometry = pathToRouteGeometry(graph, path, startNodeId);
     const lastNodeId = endNodeFromPath(graph, startNodeId, path);
-    const startNode = graph.nodesOutside.get(startNodeId);
-
-    if (!startNode) {
-      return NextResponse.json(
-        { error: "Start node not found in graph" },
-        { status: 500 },
-      );
-    }
 
     const metrics =
       destIds.length === 1
@@ -153,6 +198,8 @@ export async function POST(req: Request) {
                   destinationId: destIds[0]!,
                   distanceMeters: pathMetrics.distanceMeters,
                   durationSeconds: pathMetrics.durationSeconds,
+                  mode: "pedestrian" as const,
+                  kind: "building" as const,
                 },
               ],
             };
@@ -187,7 +234,7 @@ export async function POST(req: Request) {
             startNodeId,
             destIds,
             navConditions,
-            (from, destId, nav) => navigate(from, destId, nav),
+            (from, dId, nav) => navigate(from, dId, nav),
           );
 
     return NextResponse.json(

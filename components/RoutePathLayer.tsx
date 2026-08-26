@@ -4,12 +4,15 @@ import React, { useMemo } from "react";
 import { Source, Layer } from "@vis.gl/react-maplibre";
 import type { LayerProps } from "@vis.gl/react-maplibre";
 import type { ThroughBuildingPortal } from "@/lib/navigation-route-model";
+import type { RouteModeSegment } from "@/lib/types/map";
 
 type Props = {
   /** Continuous polyline (legacy / GPS). Used for drawing when segments are absent. */
   coordinates?: [number, number][];
   /** Outdoor-only line runs; gaps at through-building hops. */
   segments?: [number, number][][];
+  /** Drive vs walk styling when present (takes precedence over segments for paint). */
+  modeSegments?: RouteModeSegment[];
   /** Entry/exit door markers for through-building hops. */
   portals?: ThroughBuildingPortal[];
   id?: string;
@@ -18,10 +21,26 @@ type Props = {
 export function RoutePathLayer({
   coordinates,
   segments,
+  modeSegments,
   portals = [],
   id = "route-path",
 }: Props) {
   const lineGeoJSON = useMemo(() => {
+    if (modeSegments && modeSegments.length > 0) {
+      const features = modeSegments
+        .filter((s) => s.coordinates.length >= 2)
+        .map((s, i) => ({
+          type: "Feature" as const,
+          properties: { i, mode: s.mode },
+          geometry: {
+            type: "LineString" as const,
+            coordinates: s.coordinates,
+          },
+        }));
+      if (features.length === 0) return null;
+      return { type: "FeatureCollection" as const, features };
+    }
+
     const runs =
       segments && segments.length > 0
         ? segments.filter((s) => s.length >= 2)
@@ -33,14 +52,14 @@ export function RoutePathLayer({
       type: "FeatureCollection" as const,
       features: runs.map((coords, i) => ({
         type: "Feature" as const,
-        properties: { i },
+        properties: { i, mode: "pedestrian" },
         geometry: {
           type: "LineString" as const,
           coordinates: coords,
         },
       })),
     };
-  }, [coordinates, segments]);
+  }, [coordinates, segments, modeSegments]);
 
   const portalGeoJSON = useMemo(() => {
     if (!portals.length) return null;
@@ -65,8 +84,24 @@ export function RoutePathLayer({
       type: "line",
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-width": 7,
-        "line-color": "#35D5A4",
+        "line-width": [
+          "match",
+          ["get", "mode"],
+          "vehicular",
+          8,
+          "pedestrian",
+          5,
+          7,
+        ],
+        "line-color": [
+          "match",
+          ["get", "mode"],
+          "vehicular",
+          "#003c71",
+          "pedestrian",
+          "#35D5A4",
+          "#35D5A4",
+        ],
         "line-opacity": 0.95,
         "line-blur": 0.2,
       },

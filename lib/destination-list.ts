@@ -4,9 +4,12 @@ export type DestinationListRow = {
   lat: number;
   lng: number;
   isParkingLot: boolean;
+  navigatableDestination: boolean;
   openTime: string;
   closeTime: string;
   polygon?: string;
+  /** Recommended parking lot destination ids (buildings only). */
+  parkingLotIds?: number[];
 };
 
 function clock(value: unknown, fallback: string) {
@@ -24,6 +27,7 @@ export function mapDestinationRow(
     lat: Number(row.lat),
     lng: Number(row.lng),
     isParkingLot: Boolean(row.is_parking_lot),
+    navigatableDestination: Boolean(row.navigatable_destination),
     openTime: clock(row.open_time, "00:00:00"),
     closeTime: clock(row.close_time, "23:59:59"),
   };

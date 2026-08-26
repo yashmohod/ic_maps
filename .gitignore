@@ -49,3 +49,12 @@ next-env.d.ts
 
 # local database copies (contain PII / credentials)
 /backups/
+
+# Circle ped batch workdir (CSV backups + apply manifests)
+/data/circle-ped-work/
+
+# Ortho source, build scratch, and generated satellite XYZ tiles (rebuild locally)
+/IC_sat/
+/public/tiles/satellite/
+/.pydeps/
+/.mamba/

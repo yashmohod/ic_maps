@@ -382,3 +382,77 @@ export async function buildMultiLegDirections(
 
   return allSteps;
 }
+
+/** Mixed vehicular/pedestrian legs with drive/walk arrival wording. */
+export async function buildMixedModeDirections(
+  graph: Graph,
+  startNodeId: number,
+  legs: Array<{
+    destinationId: number;
+    mode?: "vehicular" | "pedestrian";
+    kind?: "parking" | "building";
+  }>,
+  legPaths: number[][],
+  baseNavConditions: NavConditions,
+): Promise<NavStep[]> {
+  const names = await loadDestinationNames(legs.map((l) => l.destinationId));
+  const allSteps: NavStep[] = [];
+  let legStart = startNodeId;
+
+  for (let i = 0; i < legs.length; i++) {
+    const leg = legs[i]!;
+    const edgePath = legPaths[i] ?? [];
+    const destName = names.get(leg.destinationId) ?? "destination";
+    const mode = leg.mode ?? "pedestrian";
+    const verb = mode === "vehicular" ? "Drive" : "Walk";
+    const arrival =
+      leg.kind === "parking"
+        ? `${verb} to parking at ${destName}`
+        : `${verb} to ${destName}`;
+
+    const legNav: NavConditions =
+      mode === "vehicular"
+        ? {
+            ...baseNavConditions,
+            is_pedestrian: false,
+            is_vehicular: true,
+            is_through_building: false,
+          }
+        : {
+            ...baseNavConditions,
+            is_pedestrian: true,
+            is_vehicular: false,
+          };
+
+    const legSteps = buildRouteDirections(
+      graph,
+      edgePath,
+      legStart,
+      legNav,
+      names,
+      { finalDestinationName: destName },
+    );
+
+    if (legSteps.length > 0) {
+      const last = legSteps[legSteps.length - 1]!;
+      if (last.kind === "outdoor" && last.maneuver === "arrive") {
+        last.instruction = `Arrive — ${arrival}`;
+      }
+      if (i > 0) {
+        const first = legSteps[0];
+        if (first?.kind === "outdoor" && first.maneuver === "depart") {
+          first.instruction =
+            mode === "vehicular" ? "Continue driving" : "Continue on foot";
+        }
+      } else if (legSteps[0]?.kind === "outdoor" && legSteps[0].maneuver === "depart") {
+        legSteps[0].instruction =
+          mode === "vehicular" ? "Start driving" : "Start walking";
+      }
+    }
+
+    allSteps.push(...legSteps);
+    legStart = endNodeFromPath(graph, legStart, edgePath);
+  }
+
+  return allSteps;
+}

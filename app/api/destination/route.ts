@@ -194,11 +194,19 @@ export async function GET(req: Request) {
     const idRaw = url.searchParams.get("id");
     const includePolygon =
       url.searchParams.get("include") === "polygon" || idRaw != null;
+    const navigatableOnly =
+      url.searchParams.get("navigatableOnly") === "1" ||
+      url.searchParams.get("navigatableOnly") === "true";
 
     console.log(`[API ${ROUTE} GET] called`, {
       id: idRaw,
       includePolygon,
+      navigatableOnly,
     });
+
+    const navigatableFilter = navigatableOnly
+      ? sql` AND navigatable_destination = true`
+      : sql``;
 
     let result;
     if (idRaw != null) {
@@ -207,19 +215,21 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: "Invalid id" }, { status: 400 });
       }
       result = await db.execute(sql`
-        SELECT id, name, lat, lng, polygon, is_parking_lot, open_time, close_time
+        SELECT id, name, lat, lng, polygon, is_parking_lot, navigatable_destination, open_time, close_time
         FROM destination
         WHERE id = ${nid};
       `);
     } else if (includePolygon) {
       result = await db.execute(sql`
-        SELECT id, name, lat, lng, polygon, is_parking_lot, open_time, close_time
-        FROM destination;
+        SELECT id, name, lat, lng, polygon, is_parking_lot, navigatable_destination, open_time, close_time
+        FROM destination
+        WHERE true ${navigatableFilter};
       `);
     } else {
       result = await db.execute(sql`
-        SELECT id, name, lat, lng, is_parking_lot, open_time, close_time
-        FROM destination;
+        SELECT id, name, lat, lng, is_parking_lot, navigatable_destination, open_time, close_time
+        FROM destination
+        WHERE true ${navigatableFilter};
       `);
     }
 
@@ -227,6 +237,39 @@ export async function GET(req: Request) {
     const destinations = rows.map((row) =>
       mapDestinationRow(row, includePolygon),
     );
+
+    const buildingIds = destinations
+      .filter((d) => !d.isParkingLot)
+      .map((d) => d.id);
+    if (buildingIds.length > 0) {
+      const linkRows = await db.execute(sql`
+        SELECT building_id, parking_lot_id
+        FROM destination_parking_lot
+        WHERE building_id IN (${sql.join(
+          buildingIds.map((id) => sql`${id}`),
+          sql`, `,
+        )});
+      `);
+      const byBuilding = new Map<number, number[]>();
+      for (const row of linkRows.rows as Array<{
+        building_id: number;
+        parking_lot_id: number;
+      }>) {
+        const bid = Number(row.building_id);
+        const list = byBuilding.get(bid) ?? [];
+        list.push(Number(row.parking_lot_id));
+        byBuilding.set(bid, list);
+      }
+      for (const dest of destinations) {
+        dest.parkingLotIds = dest.isParkingLot
+          ? []
+          : (byBuilding.get(dest.id) ?? []);
+      }
+    } else {
+      for (const dest of destinations) {
+        dest.parkingLotIds = [];
+      }
+    }
 
     return NextResponse.json({ destinations }, { status: 200 });
   } catch (err: any) {
