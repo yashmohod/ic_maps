@@ -70,8 +70,15 @@ export function bearingTo(
 /** Publish GPS to React at ~2 Hz. Camera/off-route should use the live sample. */
 export const GPS_UI_INTERVAL_MS = 500;
 
-export function shouldPublishGpsUi(lastPublishedAt: number, now = Date.now()) {
-  return lastPublishedAt === 0 || now - lastPublishedAt >= GPS_UI_INTERVAL_MS;
+/** Slower publish rate while live navigation is tracking (battery / churn). */
+export const GPS_NAV_UI_INTERVAL_MS = 2000;
+
+export function shouldPublishGpsUi(
+  lastPublishedAt: number,
+  now = Date.now(),
+  intervalMs = GPS_UI_INTERVAL_MS,
+) {
+  return lastPublishedAt === 0 || now - lastPublishedAt >= intervalMs;
 }
 
 /** Min distance from a point to a polyline ([lng, lat][]), meters. */

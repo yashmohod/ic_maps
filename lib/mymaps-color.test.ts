@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  colorSwatchLabel,
   isHexColor,
   MYMAPS_DEFAULT_COLOR,
   normalizeHexColor,
@@ -23,5 +24,12 @@ describe("normalizeHexColor", () => {
     expect(normalizeHexColor("#dc2626")).toBe("#dc2626");
     expect(normalizeHexColor("nope")).toBe(MYMAPS_DEFAULT_COLOR);
     expect(normalizeHexColor("35D5A4")).toBe("#35D5A4");
+  });
+});
+
+describe("colorSwatchLabel", () => {
+  it("returns palette labels and falls back to hex", () => {
+    expect(colorSwatchLabel("#35D5A4")).toBe("Teal");
+    expect(colorSwatchLabel("#abcdef")).toBe("#ABCDEF");
   });
 });

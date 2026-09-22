@@ -54,6 +54,7 @@ import {
   makeCircleGeoJSON,
   bearingTo,
   distanceToPolylineMeters,
+  GPS_NAV_UI_INTERVAL_MS,
   shouldPublishGpsUi,
 } from "@/lib/geo";
 import {
@@ -1079,26 +1080,33 @@ export default function NavigationMap(): JSX.Element {
           accuracy,
         };
         userPosRef.current = nextPos;
-        if (shouldPublishGpsUi(lastGpsUiAtRef.current)) {
-          lastGpsUiAtRef.current = Date.now();
-          setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
-
-          let brg: number;
-          if (typeof heading === "number" && !Number.isNaN(heading))
-            brg = heading;
-          else if (deviceHeadingRef.current != null)
-            brg = deviceHeadingRef.current;
-          else if (routeCoordsRef.current.length >= 2) {
-            const [nx, ny] = routeCoordsRef.current[1];
-            brg = bearingTo(longitude, latitude, nx, ny);
-          } else brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
-
-          aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
-            pitch: 60,
-            duration: 300,
-            zoom: 20,
-          });
+        if (
+          !shouldPublishGpsUi(
+            lastGpsUiAtRef.current,
+            Date.now(),
+            GPS_NAV_UI_INTERVAL_MS,
+          )
+        ) {
+          return;
         }
+        lastGpsUiAtRef.current = Date.now();
+        setUserPos((up) => (up ? { ...up, ...nextPos } : nextPos));
+
+        let brg: number;
+        if (typeof heading === "number" && !Number.isNaN(heading))
+          brg = heading;
+        else if (deviceHeadingRef.current != null)
+          brg = deviceHeadingRef.current;
+        else if (routeCoordsRef.current.length >= 2) {
+          const [nx, ny] = routeCoordsRef.current[1];
+          brg = bearingTo(longitude, latitude, nx, ny);
+        } else brg = mapRef.current?.getMap?.()?.getBearing?.() ?? 0;
+
+        aimCamera(mapRef.current?.getMap?.(), longitude, latitude, brg, {
+          pitch: 60,
+          duration: 300,
+          zoom: 20,
+        });
 
         const MIN_OFF_ROUTE_M = 25;
         const OFF_ROUTE_DEBOUNCE_MS = 2500;
@@ -1129,7 +1137,12 @@ export default function NavigationMap(): JSX.Element {
         toast.error(err.message || "Tracking error");
         stopTracking();
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        // Allow reused fixes so the browser queries GPS less often during nav.
+        maximumAge: GPS_NAV_UI_INTERVAL_MS,
+      },
     );
 
     watchIdRef.current = id;

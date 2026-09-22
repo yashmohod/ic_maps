@@ -12,6 +12,8 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
+  ChevronLeft,
+  Circle,
   Download,
   Eye,
   EyeOff,
@@ -19,6 +21,8 @@ import {
   Link2,
   MousePointer2,
   Palette,
+  PanelLeft,
+  PanelRight,
   Pencil,
   Plus,
   Share2,
@@ -50,6 +54,7 @@ import type {
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import DrawControl from "@/components/BuildingDrawControls";
+import { ElementTreePanel } from "@/components/ElementTreePanel";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { MapArrowIcon } from "@/components/MapArrowIcon";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
@@ -100,7 +105,7 @@ import {
   waitForMapIdle,
 } from "@/lib/mymaps-export-image";
 import { withBasePath } from "@/lib/base-path";
-import { bearingTo, calcDistance } from "@/lib/geo";
+import { bearingTo, calcDistance, makeCircleGeoJSON } from "@/lib/geo";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import {
   borderMutedClass,
@@ -111,6 +116,12 @@ import {
   surfaceSubtleClass,
 } from "@/lib/panel-classes";
 import type { EdgeIndexEntry } from "@/lib/types/map";
+import {
+  emptyHidden,
+  pathLinkedNodeIds,
+  type ElementKind,
+  type HiddenByKind,
+} from "@/lib/element-visibility";
 
 type OwnedMap = {
   id: number;
@@ -169,43 +180,31 @@ type MapAccess = {
   canManageSharing: boolean;
 };
 
-type EditorMode = "view" | "select" | "draw" | "text" | "color" | "delete";
+type EditorMode =
+  | "view"
+  | "select"
+  | "draw"
+  | "text"
+  | "color"
+  | "delete"
+  | "radius";
 type DrawTool = "point" | "line" | "polygon" | "arrow";
-type VisibleElementKey =
-  | "nodes"
-  | "edges"
-  | "polygons"
-  | "lines"
-  | "points"
-  | "texts"
-  | "arrows";
 
 type DrawEvent = { features: Feature[] };
 
 const NODE_SNAP_METERS = 14;
 
-const DEFAULT_VISIBLE_ELEMENTS: Record<VisibleElementKey, boolean> = {
-  nodes: true,
-  edges: true,
-  polygons: true,
-  lines: true,
-  points: true,
-  texts: true,
-  arrows: true,
-};
+const NODE_RADIUS_PRESETS_M = [25, 50, 100, 250, 500] as const;
+const NODE_RADIUS_MIN_M = 1;
+const NODE_RADIUS_MAX_M = 50_000;
 
-const VISIBLE_ELEMENT_OPTIONS: {
-  key: VisibleElementKey;
-  label: string;
-}[] = [
-  { key: "nodes", label: "Nodes" },
-  { key: "edges", label: "Paths" },
-  { key: "polygons", label: "Areas" },
-  { key: "lines", label: "Lines" },
-  { key: "points", label: "Points" },
-  { key: "texts", label: "Text" },
-  { key: "arrows", label: "Arrows" },
-];
+function clampNodeRadiusMeters(n: number): number {
+  if (!Number.isFinite(n)) return 50;
+  return Math.min(
+    NODE_RADIUS_MAX_M,
+    Math.max(NODE_RADIUS_MIN_M, Math.round(n)),
+  );
+}
 
 const NODE_SIZE_PRESETS = [
   { label: "S", value: 10 },
@@ -311,9 +310,14 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   const [texts, setTexts] = useState<TextRow[]>([]);
   const [arrows, setArrows] = useState<ArrowRow[]>([]);
   const [mode, setMode] = useState<EditorMode>("view");
-  const [visibleElements, setVisibleElements] = useState(
-    DEFAULT_VISIBLE_ELEMENTS,
-  );
+  const [hidden, setHidden] = useState<HiddenByKind>(emptyHidden);
+  const [mapsPanelOpen, setMapsPanelOpen] = useState(true);
+  const [elementsPanelOpen, setElementsPanelOpen] = useState(true);
+  const [nodeRadiusEnabled, setNodeRadiusEnabled] = useState(false);
+  const [nodeRadiusHighlightOverlap, setNodeRadiusHighlightOverlap] =
+    useState(false);
+  const [nodeRadiusMeters, setNodeRadiusMeters] = useState(50);
+  const [nodeRadiusInput, setNodeRadiusInput] = useState("50");
   const [drawTool, setDrawTool] = useState<DrawTool>("point");
   const [drawColor, setDrawColor] = useState(MYMAPS_DEFAULT_COLOR);
   const [drawNodeSize, setDrawNodeSize] = useState(MYMAPS_NODE_SIZE_DEFAULT);
@@ -341,6 +345,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
   );
   const [polygonName, setPolygonName] = useState("");
   const [selectedLineId, setSelectedLineId] = useState<number | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<number | null>(null);
   const [selectedArrowId, setSelectedArrowId] = useState<number | null>(null);
   const [textDraft, setTextDraft] = useState("");
@@ -412,9 +417,10 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     setSelectedId(null);
     setSelectedPolygonId(null);
     setSelectedLineId(null);
+    setSelectedEdgeId(null);
     setSelectedTextId(null);
     setSelectedArrowId(null);
-    setVisibleElements(DEFAULT_VISIBLE_ELEMENTS);
+    setHidden(emptyHidden());
     setMode("view");
     try {
       const res = await fetch(withBasePath(`/api/mymaps/maps/${mapId}`));
@@ -616,6 +622,123 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     }
     return { type: "FeatureCollection", features };
   }, [edges, nodes]);
+
+  const visiblePolyFeatures = useMemo(
+    () =>
+      polyFeatures.filter((f) => {
+        const id = Number(
+          (f.properties as { polygonId?: number } | null)?.polygonId,
+        );
+        return Number.isFinite(id) && !hidden.polygons.has(id);
+      }),
+    [polyFeatures, hidden.polygons],
+  );
+
+  const visibleLineFeatures = useMemo(
+    () =>
+      lineFeatures.filter((f) => {
+        const id = Number((f.properties as { lineId?: number } | null)?.lineId);
+        return Number.isFinite(id) && !hidden.lines.has(id);
+      }),
+    [lineFeatures, hidden.lines],
+  );
+
+  const visibleEdgesGeoJSON = useMemo<
+    FeatureCollection<LineString, GeoJsonProperties>
+  >(
+    () => ({
+      type: "FeatureCollection",
+      features: edgesGeoJSON.features.filter((f) => {
+        const id = Number(f.properties?.id);
+        return Number.isFinite(id) && !hidden.edges.has(id);
+      }),
+    }),
+    [edgesGeoJSON, hidden.edges],
+  );
+
+  const linkedNodeIds = useMemo(() => pathLinkedNodeIds(edges), [edges]);
+
+  const visibleNodes = useMemo(
+    () =>
+      nodes.filter((n) => {
+        if (linkedNodeIds.has(n.id)) {
+          return edges.some(
+            (e) =>
+              (e.from === n.id || e.to === n.id) && !hidden.edges.has(e.id),
+          );
+        }
+        return !hidden.nodes.has(n.id);
+      }),
+    [nodes, edges, linkedNodeIds, hidden.nodes, hidden.edges],
+  );
+
+  /** Placed nodes only (excludes path endpoint / "back" nodes). */
+  const placedNodesForRadius = useMemo(
+    () =>
+      nodes.filter((n) => !linkedNodeIds.has(n.id) && !hidden.nodes.has(n.id)),
+    [nodes, linkedNodeIds, hidden.nodes],
+  );
+
+  const nodeRadiusCirclesGeoJSON = useMemo<
+    FeatureCollection<Polygon, GeoJsonProperties>
+  >(() => {
+    if (!nodeRadiusEnabled || nodeRadiusMeters <= 0) {
+      return { type: "FeatureCollection", features: [] };
+    }
+
+    const overlapIds = new Set<number>();
+    if (nodeRadiusHighlightOverlap) {
+      const limit = 2 * nodeRadiusMeters;
+      for (let i = 0; i < placedNodesForRadius.length; i++) {
+        const a = placedNodesForRadius[i]!;
+        for (let j = i + 1; j < placedNodesForRadius.length; j++) {
+          const b = placedNodesForRadius[j]!;
+          if (calcDistance(a.lat, a.lng, b.lat, b.lng) < limit) {
+            overlapIds.add(a.id);
+            overlapIds.add(b.id);
+          }
+        }
+      }
+    }
+
+    const overlapColor = "#22c55e";
+    const features: FeatureCollection<Polygon, GeoJsonProperties>["features"] =
+      [];
+    for (const n of placedNodesForRadius) {
+      const circle = makeCircleGeoJSON(n.lng, n.lat, nodeRadiusMeters);
+      const geom = circle.features[0]?.geometry;
+      if (!geom || geom.type !== "Polygon") continue;
+      const overlaps = overlapIds.has(n.id);
+      features.push({
+        type: "Feature",
+        properties: {
+          id: n.id,
+          color: overlaps ? overlapColor : n.color || MYMAPS_DEFAULT_COLOR,
+          overlaps: overlaps ? 1 : 0,
+        },
+        geometry: geom,
+      });
+    }
+    return { type: "FeatureCollection", features };
+  }, [
+    nodeRadiusEnabled,
+    nodeRadiusHighlightOverlap,
+    nodeRadiusMeters,
+    placedNodesForRadius,
+  ]);
+
+  const visiblePoints = useMemo(
+    () => points.filter((p) => !hidden.points.has(p.id)),
+    [points, hidden.points],
+  );
+  const visibleTexts = useMemo(
+    () => texts.filter((t) => !hidden.texts.has(t.id)),
+    [texts, hidden.texts],
+  );
+  const visibleArrows = useMemo(
+    () => arrows.filter((a) => !hidden.arrows.has(a.id)),
+    [arrows, hidden.arrows],
+  );
 
   const edgeLayerBidir = useMemo<LineLayerSpecification>(
     () => ({
@@ -917,10 +1040,10 @@ export default function MyMapsWorkspacePage(): JSX.Element {
       );
       await waitForMapIdle(map);
       const dataUrl = await captureMapContainerPng(container, map, {
-        nodes: visibleElements.nodes ? nodes : [],
-        points: visibleElements.points ? points : [],
-        texts: visibleElements.texts ? texts : [],
-        arrows: visibleElements.arrows ? arrows : [],
+        nodes: visibleNodes,
+        points: visiblePoints,
+        texts: visibleTexts,
+        arrows: visibleArrows,
       });
       const a = document.createElement("a");
       a.href = dataUrl;
@@ -1239,9 +1362,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     if (!selectedMapId || !canEditRef.current) return;
     const color = drawColorRef.current;
     const prev = arrows.find((a) => a.id === id);
-    setArrows((rows) =>
-      rows.map((a) => (a.id === id ? { ...a, color } : a)),
-    );
+    setArrows((rows) => rows.map((a) => (a.id === id ? { ...a, color } : a)));
     const res = await fetch(
       withBasePath(`/api/mymaps/maps/${selectedMapId}/arrows`),
       {
@@ -1264,9 +1385,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     const bearing = normArrowBearing(Number(arrowBearingInput));
     const prev = arrows.find((a) => a.id === selectedArrowId);
     setArrows((rows) =>
-      rows.map((a) =>
-        a.id === selectedArrowId ? { ...a, bearing } : a,
-      ),
+      rows.map((a) => (a.id === selectedArrowId ? { ...a, bearing } : a)),
     );
     setArrowBearingInput(String(Math.round(bearing)));
     const res = await fetch(
@@ -1310,9 +1429,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     );
     if (!res.ok) {
       if (prev) {
-        setNodes((rows) =>
-          rows.map((n) => (n.id === selectedId ? prev : n)),
-        );
+        setNodes((rows) => rows.map((n) => (n.id === selectedId ? prev : n)));
         nodesRef.current = nodesRef.current.map((n) =>
           n.id === selectedId ? prev : n,
         );
@@ -1607,6 +1724,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           setSelectedPolygonId(Number(polyHit.properties.polygonId));
           setPolygonName(String(polyHit.properties.name ?? ""));
           setSelectedId(null);
+          setSelectedEdgeId(null);
           setSelectedTextId(null);
           setSelectedLineId(null);
           return;
@@ -1618,7 +1736,22 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           setSelectedLineId(Number(lineHit.properties.lineId));
           setSelectedPolygonId(null);
           setSelectedId(null);
+          setSelectedEdgeId(null);
           setSelectedTextId(null);
+          return;
+        }
+        const edgeHit = features.find(
+          (f) =>
+            f.layer?.id === "mymap-edges-bidir" ||
+            f.layer?.id === "mymap-edges-oneway",
+        );
+        if (edgeHit?.properties?.id) {
+          setSelectedEdgeId(Number(edgeHit.properties.id));
+          setSelectedPolygonId(null);
+          setSelectedLineId(null);
+          setSelectedId(null);
+          setSelectedTextId(null);
+          setSelectedArrowId(null);
         }
       }
     },
@@ -1951,6 +2084,105 @@ export default function MyMapsWorkspacePage(): JSX.Element {
     return out;
   }, [edges, nodes]);
 
+  const treeSelected = useMemo((): { kind: ElementKind; id: number } | null => {
+    if (selectedId != null) return { kind: "nodes", id: selectedId };
+    if (selectedEdgeId != null) return { kind: "edges", id: selectedEdgeId };
+    if (selectedPolygonId != null)
+      return { kind: "polygons", id: selectedPolygonId };
+    if (selectedLineId != null) return { kind: "lines", id: selectedLineId };
+    if (selectedTextId != null) return { kind: "texts", id: selectedTextId };
+    if (selectedArrowId != null) return { kind: "arrows", id: selectedArrowId };
+    return null;
+  }, [
+    selectedId,
+    selectedEdgeId,
+    selectedPolygonId,
+    selectedLineId,
+    selectedTextId,
+    selectedArrowId,
+  ]);
+
+  function clearTreeSelection() {
+    setSelectedId(null);
+    setSelectedEdgeId(null);
+    setSelectedPolygonId(null);
+    setSelectedLineId(null);
+    setSelectedTextId(null);
+    setSelectedArrowId(null);
+  }
+
+  function focusLatLng(lat: number, lng: number) {
+    const map = mapRef.current?.getMap?.();
+    if (!map) return;
+    map.easeTo({ center: [lng, lat], duration: 350 });
+  }
+
+  function selectFromTree(kind: ElementKind, id: number) {
+    clearTreeSelection();
+    if (kind === "nodes") {
+      const n = nodes.find((row) => row.id === id);
+      setSelectedId(id);
+      if (n) focusLatLng(n.lat, n.lng);
+      return;
+    }
+    if (kind === "edges") {
+      const e = edges.find((row) => row.id === id);
+      setSelectedEdgeId(id);
+      if (e) {
+        const a = nodes.find((n) => n.id === e.from);
+        const b = nodes.find((n) => n.id === e.to);
+        if (a && b) {
+          focusLatLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
+        }
+      }
+      return;
+    }
+    if (kind === "polygons") {
+      const row = polygons.find((p) => p.id === id);
+      setSelectedPolygonId(id);
+      if (row) {
+        const f = parsePolygonFeature(row.polygon);
+        const c = f ? featureCentroid(f) : null;
+        if (c) focusLatLng(c.lat, c.lng);
+        setPolygonName(row.name ?? "");
+      }
+      return;
+    }
+    if (kind === "lines") {
+      const row = lines.find((l) => l.id === id);
+      setSelectedLineId(id);
+      if (row) {
+        const f = parseLineFeature(row.geometry);
+        const c = f ? featureCentroid(f) : null;
+        if (c) focusLatLng(c.lat, c.lng);
+      }
+      return;
+    }
+    if (kind === "points") {
+      const row = points.find((p) => p.id === id);
+      if (row) focusLatLng(row.lat, row.lng);
+      return;
+    }
+    if (kind === "texts") {
+      const row = texts.find((t) => t.id === id);
+      setSelectedTextId(id);
+      if (row) {
+        setTextDraft(row.text);
+        setTextFontSizeInput(String(row.font_size ?? 14));
+        focusLatLng(row.lat, row.lng);
+      }
+      return;
+    }
+    if (kind === "arrows") {
+      const row = arrows.find((a) => a.id === id);
+      setSelectedArrowId(id);
+      if (row) {
+        setArrowBearingInput(String(Math.round(row.bearing)));
+        focusLatLng(row.lat, row.lng);
+      }
+    }
+  }
+
   function renderMapListItem(map: OwnedMap | SharedMap, owned: boolean) {
     const isSelected = selectedMapId === map.id;
     const role = "role" in map ? map.role : undefined;
@@ -2094,10 +2326,18 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
   return (
     <div
-      className={`${mapPageClass} flex w-full flex-col overflow-hidden bg-background md:flex-row`}
+      className={`${mapPageClass} relative flex w-full flex-col overflow-hidden bg-background md:flex-row`}
     >
       <aside
-        className={`flex max-h-[40vh] w-full shrink-0 flex-col overflow-hidden border-b md:max-h-none md:h-full md:w-80 md:max-w-80 md:border-b-0 md:border-r ${borderMutedClass} ${surfacePanelClass}`}
+        className={[
+          "flex shrink-0 flex-col overflow-hidden border-b transition-[width,max-height,opacity] duration-200 ease-out md:h-full md:border-b-0 md:border-r",
+          borderMutedClass,
+          surfacePanelClass,
+          mapsPanelOpen
+            ? "max-h-[32vh] w-full opacity-100 md:max-h-none md:w-80 md:max-w-80"
+            : "pointer-events-none max-h-0 w-full opacity-0 md:max-h-none md:w-0 md:max-w-0 md:border-r-0",
+        ].join(" ")}
+        aria-hidden={!mapsPanelOpen}
       >
         <div
           className={`flex items-center justify-between gap-2 border-b px-3 py-2 ${safeAreaTopClass} ${borderMutedClass}`}
@@ -2111,7 +2351,20 @@ export default function MyMapsWorkspacePage(): JSX.Element {
               </p>
             </div>
           </div>
-          <ThemeToggleButton />
+          <div className="flex shrink-0 items-center gap-1">
+            <ThemeToggleButton />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8"
+              aria-label="Collapse maps panel"
+              onClick={() => setMapsPanelOpen(false)}
+            >
+              <ChevronLeft size={16} className="hidden md:block" />
+              <ChevronLeft size={16} className="rotate-90 md:hidden" />
+            </Button>
+          </div>
         </div>
 
         <div className={`border-b p-3 ${borderMutedClass}`}>
@@ -2182,7 +2435,19 @@ export default function MyMapsWorkspacePage(): JSX.Element {
         </div>
       </aside>
 
-      <main className="relative h-full min-h-[55vh] min-w-0 flex-1 md:min-h-0">
+      {!mapsPanelOpen ? (
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className="absolute left-0 top-1/2 z-50 size-9 -translate-y-1/2 rounded-l-none shadow-md"
+          aria-label="Expand maps panel"
+          onClick={() => setMapsPanelOpen(true)}
+        >
+          <PanelLeft size={16} />
+        </Button>
+      ) : null}
+      <main className="relative min-h-0 min-w-0 flex-1">
         {selectedMapId == null ? (
           <div className="grid h-full place-items-center p-6 text-center">
             <div>
@@ -2289,6 +2554,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         ["color", "Color", Palette],
                         ["text", "Text", Type],
                         ["delete", "Delete", Trash2],
+                        ["radius", "Radius", Circle],
                       ] as const
                     ).map(([key, label, Icon]) => (
                       <button
@@ -2297,7 +2563,10 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         title={label}
                         aria-label={label}
                         aria-pressed={mode === key}
-                        onClick={() => setMode(key)}
+                        onClick={() => {
+                          setMode(key);
+                          if (key === "radius") setNodeRadiusEnabled(true);
+                        }}
                         className={[
                           "flex h-16 flex-col items-center justify-center gap-1 rounded-xl border text-[11px] font-medium transition",
                           mode === key
@@ -2316,32 +2585,10 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   className={`min-h-[7.5rem] rounded-2xl border p-2 ${borderMutedClass} ${panelClass}`}
                 >
                   {mode === "view" || !canEdit ? (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-medium text-panel-foreground">
-                        Show on map
-                      </p>
-                      <div className="flex flex-col gap-1">
-                        {VISIBLE_ELEMENT_OPTIONS.map(({ key, label }) => (
-                          <label
-                            key={key}
-                            className="flex cursor-pointer items-center gap-2 text-[11px] leading-snug"
-                          >
-                            <input
-                              type="checkbox"
-                              className="size-3.5"
-                              checked={visibleElements[key]}
-                              onChange={(e) =>
-                                setVisibleElements((prev) => ({
-                                  ...prev,
-                                  [key]: e.target.checked,
-                                }))
-                              }
-                            />
-                            <span>{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
+                    <p className="text-[11px] leading-snug text-panel-muted-foreground">
+                      Use the Elements panel on the right to show or hide
+                      individual items.
+                    </p>
                   ) : null}
 
                   {canEdit && mode === "select" ? (
@@ -2418,8 +2665,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                             Save name
                           </Button>
                         </div>
-                      ) : selectedId == null &&
-                        selectedArrowId == null ? (
+                      ) : selectedId == null && selectedArrowId == null ? (
                         <p className="text-[11px] text-panel-muted-foreground">
                           Select a node, arrow, or area to edit it.
                         </p>
@@ -2587,18 +2833,107 @@ export default function MyMapsWorkspacePage(): JSX.Element {
 
                   {canEdit && mode === "delete" ? (
                     <p className="text-[11px] leading-snug text-panel-muted-foreground">
-                      Click any node, edge, polygon, line, point, text, or
-                      arrow to delete it.
+                      Click any node, edge, polygon, line, point, text, or arrow
+                      to delete it.
                     </p>
+                  ) : null}
+
+                  {canEdit && mode === "radius" ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] leading-snug text-panel-muted-foreground">
+                        Circles around your placed nodes only (not path
+                        endpoints), in meters.
+                      </p>
+                      <label className="flex items-center gap-2 text-[11px] font-medium">
+                        <input
+                          type="checkbox"
+                          className="size-3.5 accent-[var(--brand-cta)]"
+                          checked={nodeRadiusEnabled}
+                          onChange={(e) =>
+                            setNodeRadiusEnabled(e.target.checked)
+                          }
+                          aria-label="Show node radius circles"
+                        />
+                        Show circles
+                      </label>
+                      <label className="flex items-center gap-2 text-[11px] font-medium">
+                        <input
+                          type="checkbox"
+                          className="size-3.5 accent-[var(--brand-cta)]"
+                          checked={nodeRadiusHighlightOverlap}
+                          disabled={!nodeRadiusEnabled}
+                          onChange={(e) =>
+                            setNodeRadiusHighlightOverlap(e.target.checked)
+                          }
+                          aria-label="Highlight overlapping radius circles"
+                        />
+                        Highlight overlaps
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={nodeRadiusInput}
+                          onChange={(e) =>
+                            setNodeRadiusInput(
+                              e.target.value.replace(/[^\d]/g, ""),
+                            )
+                          }
+                          onBlur={() => {
+                            const next = clampNodeRadiusMeters(
+                              Number(nodeRadiusInput),
+                            );
+                            setNodeRadiusMeters(next);
+                            setNodeRadiusInput(String(next));
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter") return;
+                            const next = clampNodeRadiusMeters(
+                              Number(nodeRadiusInput),
+                            );
+                            setNodeRadiusMeters(next);
+                            setNodeRadiusInput(String(next));
+                            (e.target as HTMLInputElement).blur();
+                          }}
+                          aria-label="Node radius in meters"
+                          className="h-8"
+                        />
+                        <span className="shrink-0 text-[11px] text-panel-muted-foreground">
+                          m
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {NODE_RADIUS_PRESETS_M.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => {
+                              setNodeRadiusMeters(m);
+                              setNodeRadiusInput(String(m));
+                              setNodeRadiusEnabled(true);
+                            }}
+                            className={[
+                              "rounded-lg border px-1 py-1.5 text-[11px] font-medium",
+                              nodeRadiusMeters === m
+                                ? "border-brand bg-brand text-brand-foreground"
+                                : "border-border bg-panel",
+                            ].join(" ")}
+                          >
+                            {m}m
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-panel-muted-foreground">
+                        {placedNodesForRadius.length} placed node
+                        {placedNodesForRadius.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
                   ) : null}
                 </div>
               </div>
             ) : null}
 
-            <div
-              ref={mapCaptureRef}
-              className="absolute inset-0 h-full w-full"
-            >
+            <div ref={mapCaptureRef} className="absolute inset-0 h-full w-full">
               {editorLoading ? (
                 <div
                   className="absolute inset-0 z-20 grid place-items-center bg-background/40"
@@ -2644,32 +2979,80 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                   canvasContextAttributes={{ preserveDrawingBuffer: true }}
                   onLoad={() => setMapReady(true)}
                   interactiveLayerIds={[
-                    ...(visibleElements.edges
+                    ...(visibleEdgesGeoJSON.features.length > 0
                       ? (["mymap-edges-bidir", "mymap-edges-oneway"] as const)
                       : []),
-                    ...(visibleElements.polygons
+                    ...(visiblePolyFeatures.length > 0
                       ? (["mymap-poly-fill", "mymap-poly-line"] as const)
                       : []),
-                    ...(visibleElements.lines
+                    ...(visibleLineFeatures.length > 0
                       ? (["mymap-drawn-lines"] as const)
                       : []),
                   ]}
                   onClick={onMapClick}
                 >
-                  {visibleElements.edges ? (
-                    <Source id="mymap-edges" type="geojson" data={edgesGeoJSON}>
+                  {visibleEdgesGeoJSON.features.length > 0 ? (
+                    <Source
+                      id="mymap-edges"
+                      type="geojson"
+                      data={visibleEdgesGeoJSON}
+                    >
                       <Layer {...edgeLayerBidir} />
                       <Layer {...edgeLayerOneWay} />
                     </Source>
                   ) : null}
 
-                  {visibleElements.polygons && polyFeatures.length > 0 ? (
+                  {nodeRadiusCirclesGeoJSON.features.length > 0 ? (
+                    <Source
+                      id="mymap-node-radius"
+                      type="geojson"
+                      data={nodeRadiusCirclesGeoJSON}
+                    >
+                      <Layer
+                        id="mymap-node-radius-fill"
+                        type="fill"
+                        paint={{
+                          "fill-color": [
+                            "coalesce",
+                            ["get", "color"],
+                            MYMAPS_DEFAULT_COLOR,
+                          ],
+                          "fill-opacity": [
+                            "case",
+                            ["==", ["get", "overlaps"], 1],
+                            0.28,
+                            0.14,
+                          ],
+                        }}
+                      />
+                      <Layer
+                        id="mymap-node-radius-line"
+                        type="line"
+                        paint={{
+                          "line-color": [
+                            "coalesce",
+                            ["get", "color"],
+                            MYMAPS_DEFAULT_COLOR,
+                          ],
+                          "line-width": [
+                            "case",
+                            ["==", ["get", "overlaps"], 1],
+                            2.5,
+                            2,
+                          ],
+                          "line-opacity": 0.9,
+                        }}
+                      />
+                    </Source>
+                  ) : null}
+
+                  {visiblePolyFeatures.length > 0 ? (
                     <Source
                       id="mymap-polys"
                       type="geojson"
                       data={{
                         type: "FeatureCollection",
-                        features: polyFeatures,
+                        features: visiblePolyFeatures,
                       }}
                     >
                       <Layer
@@ -2699,13 +3082,13 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     </Source>
                   ) : null}
 
-                  {visibleElements.lines && lineFeatures.length > 0 ? (
+                  {visibleLineFeatures.length > 0 ? (
                     <Source
                       id="mymap-lines"
                       type="geojson"
                       data={{
                         type: "FeatureCollection",
-                        features: lineFeatures,
+                        features: visibleLineFeatures,
                       }}
                     >
                       <Layer
@@ -2719,8 +3102,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     </Source>
                   ) : null}
 
-                  {visibleElements.points
-                    ? points.map((p) => (
+                  {visiblePoints.map((p) => (
                     <Marker
                       key={`pt-${p.id}`}
                       longitude={p.lng}
@@ -2760,11 +3142,9 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         title={p.name || `Point ${p.id}`}
                       />
                     </Marker>
-                  ))
-                    : null}
+                  ))}
 
-                  {visibleElements.nodes
-                    ? nodes.map((n) => (
+                  {visibleNodes.map((n) => (
                     <Marker
                       key={n.id}
                       longitude={n.lng}
@@ -2809,95 +3189,90 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         aria-label={`Node ${n.id}`}
                       />
                     </Marker>
-                  ))
-                    : null}
+                  ))}
 
-                  {visibleElements.edges
-                    ? oneWayArrows.map((a) => (
+                  {oneWayArrows
+                    .filter((a) => !hidden.edges.has(a.id))
+                    .map((a) => (
+                      <Marker
+                        key={`arr-${a.id}`}
+                        longitude={a.lng}
+                        latitude={a.lat}
+                        anchor="center"
+                        rotation={a.bearing}
+                        rotationAlignment="map"
+                        pitchAlignment="map"
+                      >
+                        <div
+                          className="pointer-events-none text-[10px] font-bold leading-none"
+                          style={{
+                            color: a.color,
+                            textShadow:
+                              "0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff",
+                          }}
+                        >
+                          ▲
+                        </div>
+                      </Marker>
+                    ))}
+
+                  {visibleArrows.map((a) => (
                     <Marker
-                      key={`arr-${a.id}`}
+                      key={`mymap-arrow-${a.id}`}
                       longitude={a.lng}
                       latitude={a.lat}
-                      anchor="center"
+                      anchor="top"
                       rotation={a.bearing}
                       rotationAlignment="map"
                       pitchAlignment="map"
+                      draggable={canEdit && mode === "select"}
+                      onDrag={(e) => {
+                        const { lat, lng } = e.lngLat;
+                        setArrows((prev) =>
+                          prev.map((row) =>
+                            row.id === a.id ? { ...row, lat, lng } : row,
+                          ),
+                        );
+                      }}
+                      onDragEnd={(e) => {
+                        void moveArrow(a.id, e.lngLat.lat, e.lngLat.lng);
+                      }}
+                      onClick={(e) => {
+                        e.originalEvent.stopPropagation();
+                        if (modeRef.current === "view") return;
+                        if (modeRef.current === "delete") {
+                          void deleteArrow(a.id);
+                          return;
+                        }
+                        if (modeRef.current === "color") {
+                          void recolorArrow(a.id);
+                          return;
+                        }
+                        setSelectedArrowId(a.id);
+                        setArrowBearingInput(String(Math.round(a.bearing)));
+                        setSelectedId(null);
+                        setSelectedTextId(null);
+                        setSelectedPolygonId(null);
+                        setSelectedLineId(null);
+                      }}
                     >
                       <div
-                        className="pointer-events-none text-[10px] font-bold leading-none"
-                        style={{
-                          color: a.color,
-                          textShadow:
-                            "0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff",
-                        }}
+                        className={[
+                          "pointer-events-auto",
+                          canEdit && mode === "select"
+                            ? "cursor-grab active:cursor-grabbing"
+                            : "",
+                        ].join(" ")}
                       >
-                        ▲
+                        <MapArrowIcon
+                          color={a.color || MYMAPS_DEFAULT_COLOR}
+                          size={a.size || MYMAPS_ARROW_SIZE_DEFAULT}
+                          selected={selectedArrowId === a.id}
+                          aria-label={`Arrow ${a.id}`}
+                        />
                       </div>
                     </Marker>
-                  ))
-                    : null}
-
-                  {visibleElements.arrows
-                    ? arrows.map((a) => (
-                        <Marker
-                          key={`mymap-arrow-${a.id}`}
-                          longitude={a.lng}
-                          latitude={a.lat}
-                          anchor="top"
-                          rotation={a.bearing}
-                          rotationAlignment="map"
-                          pitchAlignment="map"
-                          draggable={canEdit && mode === "select"}
-                          onDrag={(e) => {
-                            const { lat, lng } = e.lngLat;
-                            setArrows((prev) =>
-                              prev.map((row) =>
-                                row.id === a.id ? { ...row, lat, lng } : row,
-                              ),
-                            );
-                          }}
-                          onDragEnd={(e) => {
-                            void moveArrow(a.id, e.lngLat.lat, e.lngLat.lng);
-                          }}
-                          onClick={(e) => {
-                            e.originalEvent.stopPropagation();
-                            if (modeRef.current === "view") return;
-                            if (modeRef.current === "delete") {
-                              void deleteArrow(a.id);
-                              return;
-                            }
-                            if (modeRef.current === "color") {
-                              void recolorArrow(a.id);
-                              return;
-                            }
-                            setSelectedArrowId(a.id);
-                            setArrowBearingInput(
-                              String(Math.round(a.bearing)),
-                            );
-                            setSelectedId(null);
-                            setSelectedTextId(null);
-                            setSelectedPolygonId(null);
-                            setSelectedLineId(null);
-                          }}
-                        >
-                          <div
-                            className={[
-                              "pointer-events-auto",
-                              canEdit && mode === "select"
-                                ? "cursor-grab active:cursor-grabbing"
-                                : "",
-                            ].join(" ")}
-                          >
-                            <MapArrowIcon
-                              color={a.color || MYMAPS_DEFAULT_COLOR}
-                              size={a.size || MYMAPS_ARROW_SIZE_DEFAULT}
-                              selected={selectedArrowId === a.id}
-                              aria-label={`Arrow ${a.id}`}
-                            />
-                          </div>
-                        </Marker>
-                      ))
-                    : null}
+                  ))}
 
                   {arrowDraftStart &&
                   mode === "draw" &&
@@ -2915,8 +3290,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                     </Marker>
                   ) : null}
 
-                  {visibleElements.polygons && canEdit && mode === "select"
-                    ? polyFeatures.map((f) => {
+                  {canEdit && mode === "select"
+                    ? visiblePolyFeatures.map((f) => {
                         const polygonId = Number(f.properties?.polygonId);
                         if (!polygonId) return null;
                         const c = featureCentroid(f);
@@ -3013,8 +3388,8 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       })
                     : null}
 
-                  {visibleElements.lines && canEdit && mode === "select"
-                    ? lineFeatures.map((f) => {
+                  {canEdit && mode === "select"
+                    ? visibleLineFeatures.map((f) => {
                         const lineId = Number(f.properties?.lineId);
                         if (!lineId) return null;
                         const c = featureCentroid(f);
@@ -3109,8 +3484,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                       })
                     : null}
 
-                  {visibleElements.texts
-                    ? texts.map((t) => (
+                  {visibleTexts.map((t) => (
                     <Marker
                       key={`txt-${t.id}`}
                       longitude={t.lng}
@@ -3163,8 +3537,7 @@ export default function MyMapsWorkspacePage(): JSX.Element {
                         {t.text}
                       </div>
                     </Marker>
-                  ))
-                    : null}
+                  ))}
 
                   {mapReady &&
                   mode === "draw" &&
@@ -3213,6 +3586,36 @@ export default function MyMapsWorkspacePage(): JSX.Element {
           </>
         )}
       </main>
+
+      <ElementTreePanel
+        nodes={nodes}
+        edges={edges}
+        polygons={polygons}
+        lines={lines}
+        points={points}
+        texts={texts}
+        arrows={arrows}
+        hidden={hidden}
+        onHiddenChange={setHidden}
+        selected={treeSelected}
+        onSelect={selectFromTree}
+        disabled={selectedMapId == null}
+        open={elementsPanelOpen}
+        onOpenChange={setElementsPanelOpen}
+      />
+
+      {!elementsPanelOpen ? (
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className="absolute right-0 top-1/2 z-50 size-9 -translate-y-1/2 rounded-r-none shadow-md"
+          aria-label="Expand elements panel"
+          onClick={() => setElementsPanelOpen(true)}
+        >
+          <PanelRight size={16} />
+        </Button>
+      ) : null}
 
       {inviteMapId != null ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">

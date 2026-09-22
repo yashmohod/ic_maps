@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  distanceToPolylineMeters,
-  shouldPublishGpsUi,
-} from "@/lib/geo";
+import { distanceToPolylineMeters, shouldPublishGpsUi } from "@/lib/geo";
 
 describe("distanceToPolylineMeters", () => {
   it("is near zero on the segment", () => {
@@ -29,5 +26,10 @@ describe("shouldPublishGpsUi", () => {
     expect(shouldPublishGpsUi(0, 10)).toBe(true);
     expect(shouldPublishGpsUi(1000, 1200)).toBe(false);
     expect(shouldPublishGpsUi(1000, 1500)).toBe(true);
+  });
+
+  it("accepts a custom interval for live navigation", () => {
+    expect(shouldPublishGpsUi(1000, 2500, 2000)).toBe(false);
+    expect(shouldPublishGpsUi(1000, 3000, 2000)).toBe(true);
   });
 });

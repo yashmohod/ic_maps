@@ -21,7 +21,7 @@ export function cloneSatelliteStyle(): StyleSpecification {
 }
 
 export function useBasemap() {
-  const [basemap, setBasemapState] = useState<BasemapId>("map");
+  const [basemap, setBasemapState] = useState<BasemapId>("satellite");
 
   useEffect(() => {
     try {

@@ -15,6 +15,22 @@ export const MYMAPS_COLOR_PALETTE = [
   "#0f766e", // teal dark
 ] as const;
 
+export const MYMAPS_COLOR_LABELS: Record<string, string> = {
+  "#35D5A4": "Teal",
+  "#003C71": "Navy",
+  "#1A5276": "Steel",
+  "#DC2626": "Red",
+  "#EA580C": "Orange",
+  "#CA8A04": "Gold",
+  "#7C3AED": "Violet",
+  "#0F766E": "Pine",
+};
+
+export function colorSwatchLabel(hex: string): string {
+  const key = normalizeHexColor(hex).toUpperCase();
+  return MYMAPS_COLOR_LABELS[key] ?? key;
+}
+
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 
 export function isHexColor(v: unknown): v is string {
