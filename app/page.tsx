@@ -207,6 +207,8 @@ export default function NavigationMap(): JSX.Element {
     useState<FeatureCollection<Polygon> | null>(null);
 
   const mapRef = useRef<MapRef | null>(null);
+  // TEMP: zoom readout for satellite tile testing — remove when done
+  const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
   const pendingRouteStartRef = useRef(false);
   const watchIdRef = useRef<number | null>(null);
   const deviceHeadingRef = useRef<number | null>(null);
@@ -606,9 +608,7 @@ export default function NavigationMap(): JSX.Element {
         }
         curDestination = { ...curDestination, ...full };
         setDestinations((prev) =>
-          prev.map((d) =>
-            d.id === id ? { ...d, polygon: full.polygon } : d,
-          ),
+          prev.map((d) => (d.id === id ? { ...d, polygon: full.polygon } : d)),
         );
       }
 
@@ -692,7 +692,7 @@ export default function NavigationMap(): JSX.Element {
     routeCoordsRef.current = [];
     setRouteCoords([]);
     setRouteOutdoorSegments([]);
-      setRouteModeSegments([]);
+    setRouteModeSegments([]);
     setRoutePortals([]);
     setRouteEta(null);
     setTripParkingPoly(null);
@@ -1015,7 +1015,9 @@ export default function NavigationMap(): JSX.Element {
           : [],
     );
     setRouteModeSegments(
-      Array.isArray(resp.geometry?.modeSegments) ? resp.geometry.modeSegments : [],
+      Array.isArray(resp.geometry?.modeSegments)
+        ? resp.geometry.modeSegments
+        : [],
     );
     setRoutePortals(
       Array.isArray(resp.geometry?.portals) ? resp.geometry.portals : [],
@@ -1218,7 +1220,7 @@ export default function NavigationMap(): JSX.Element {
     routeCoordsRef.current = [];
     setRouteCoords([]);
     setRouteOutdoorSegments([]);
-      setRouteModeSegments([]);
+    setRouteModeSegments([]);
     setRoutePortals([]);
 
     setPath(PATH_RESET);
@@ -1378,7 +1380,7 @@ export default function NavigationMap(): JSX.Element {
         routeCoordsRef.current = [];
         setRouteCoords([]);
         setRouteOutdoorSegments([]);
-      setRouteModeSegments([]);
+        setRouteModeSegments([]);
         setRoutePortals([]);
         setRouteEta(null);
         setMapStage(MAP_STAGES.BUILDING);
@@ -1424,6 +1426,15 @@ export default function NavigationMap(): JSX.Element {
             onChange={setBasemap}
             className="h-11 min-h-[44px] w-11 shrink-0"
           />
+
+          {/* TEMP: zoom readout for satellite tile testing — remove when done */}
+          <div
+            className={`${mapHeaderChipClass} shrink-0 px-2 font-mono text-xs tabular-nums`}
+            aria-live="polite"
+            title="Temporary zoom readout"
+          >
+            z{mapZoom.toFixed(2)}
+          </div>
 
           {isSignedIn ? (
             <div className={`${mapHeaderChipClass} shrink-0 px-1`}>
@@ -1947,12 +1958,14 @@ export default function NavigationMap(): JSX.Element {
             initialViewState={defViewState}
             mapLib={maplibregl}
             mapStyle={resolvedMapStyle as any}
+            onMove={(e) => setMapZoom(e.viewState.zoom)}
             onLoad={() => {
               setMapReady(true);
               const map = mapRef.current?.getMap?.();
               map?.on("error", (e: any) => {
                 console.error("[maplibre error]", e?.error ?? e);
               });
+              if (map) setMapZoom(map.getZoom());
               const pending = pendingCenterRef.current;
               if (pending && map) {
                 pendingCenterRef.current = null;

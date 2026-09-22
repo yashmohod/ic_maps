@@ -56,5 +56,6 @@ next-env.d.ts
 # Ortho source, build scratch, and generated satellite XYZ tiles (rebuild locally)
 /IC_sat/
 /public/tiles/satellite/
+/public/tiles/satellite-6in/
 /.pydeps/
 /.mamba/
