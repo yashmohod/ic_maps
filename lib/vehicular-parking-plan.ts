@@ -67,3 +67,28 @@ export function expandVehicularLegs(
 
   return legs;
 }
+
+/** Arrival first, then other live pedestrian lot nodes, then remaining live lot nodes. */
+export function orderParkingWalkStarts(
+  arrivalNodeId: number,
+  lotNodeIds: number[],
+  isLivePedestrian: (id: number) => boolean,
+  isLive: (id: number) => boolean,
+): number[] {
+  const lotSet = new Set(lotNodeIds);
+  const ordered: number[] = [];
+  if (lotSet.has(arrivalNodeId) && isLive(arrivalNodeId)) {
+    ordered.push(arrivalNodeId);
+  }
+  for (const id of lotNodeIds) {
+    if (id === arrivalNodeId) continue;
+    if (!isLivePedestrian(id)) continue;
+    ordered.push(id);
+  }
+  for (const id of lotNodeIds) {
+    if (ordered.includes(id)) continue;
+    if (!isLive(id)) continue;
+    ordered.push(id);
+  }
+  return ordered;
+}

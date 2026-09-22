@@ -16,6 +16,7 @@ import {
   type NodeOutside,
 } from "@/db/schema";
 import { MinHeap } from "./minHeap";
+import { orderParkingWalkStarts } from "@/lib/vehicular-parking-plan";
 import {
   buildGraph,
   endNodeFromPath,
@@ -620,6 +621,65 @@ export type MixedModeRouteResult = {
   }>;
 };
 
+async function outdoorNodesForDestinations(
+  destIds: number[],
+): Promise<number[]> {
+  if (destIds.length === 0) return [];
+  const rows = await db.execute(sql`
+    SELECT DISTINCT node_outside_id AS id
+    FROM destination_node
+    WHERE destination_id IN (${sql.join(
+      destIds.map((id) => sql`${id}`),
+      sql`, `,
+    )});
+  `);
+  return (rows.rows as Array<{ id: number }>).map((r) => Number(r.id));
+}
+
+/**
+ * After parking: try walk from every lot outdoor node (arrival first), pick shortest.
+ * Fixes drive ending on a veh-only door that pedestrians cannot leave.
+ */
+async function navigateWalkFromParkingNodes(
+  arrivalNodeId: number,
+  parkingDestIds: number[],
+  buildingId: number,
+  walkNav: NavConditions,
+): Promise<{ startId: number; path: number[] } | null> {
+  const graph = await getGraph();
+  const lotNodeIds = await outdoorNodesForDestinations(parkingDestIds);
+  if (lotNodeIds.length === 0) return null;
+
+  const ordered = orderParkingWalkStarts(
+    arrivalNodeId,
+    lotNodeIds,
+    (id) => {
+      const n = graph.nodesOutside.get(id);
+      return Boolean(n && !n.is_dead && n.is_pedestrian);
+    },
+    (id) => {
+      const n = graph.nodesOutside.get(id);
+      return Boolean(n && !n.is_dead);
+    },
+  );
+
+  let best: { startId: number; path: number[]; distance: number } | null = null;
+  for (const startId of ordered) {
+    const path = await navigate(startId, buildingId, walkNav);
+    if (path == null) continue;
+    const distance = computePathMetrics(
+      graph,
+      startId,
+      path,
+      walkNav,
+    ).distanceMeters;
+    if (!best || distance < best.distance) {
+      best = { startId, path, distance };
+    }
+  }
+  return best ? { startId: best.startId, path: best.path } : null;
+}
+
 /**
  * Vehicular trip: drive to recommended parking (A* closest), then walk to buildings.
  * Multi-stop: stay pedestrian between buildings that share the active parking lot.
@@ -717,6 +777,19 @@ export async function navigateVehicularWithParking(
     if (snapped > 0) currentStart = snapped;
   };
 
+  const walkFromActiveParking = async (buildingId: number) => {
+    const walk = await navigateWalkFromParkingNodes(
+      currentStart,
+      [...activeParkingIds],
+      buildingId,
+      walkNav,
+    );
+    if (!walk) return false;
+    currentStart = walk.startId;
+    await appendLeg(buildingId, "pedestrian", "building", walk.path);
+    return true;
+  };
+
   for (const stopId of stopDestIds) {
     if (isParking.get(stopId)) {
       await ensureVehicularStart();
@@ -739,10 +812,8 @@ export async function navigateVehicularWithParking(
 
     const shared = lots.filter((id) => activeParkingIds.has(id));
     if (shared.length > 0) {
-      const path = await navigate(currentStart, stopId, walkNav);
-      if (path == null) return null;
-      await appendLeg(stopId, "pedestrian", "building", path);
       activeParkingIds = new Set(shared);
+      if (!(await walkFromActiveParking(stopId))) return null;
       continue;
     }
 
@@ -754,10 +825,8 @@ export async function navigateVehicularWithParking(
     );
     if (!closest) return null;
     await appendLeg(closest.destinationId, "vehicular", "parking", closest.path);
-    const walkPath = await navigate(currentStart, stopId, walkNav);
-    if (walkPath == null) return null;
-    await appendLeg(stopId, "pedestrian", "building", walkPath);
     activeParkingIds = new Set([closest.destinationId]);
+    if (!(await walkFromActiveParking(stopId))) return null;
   }
 
   return {
