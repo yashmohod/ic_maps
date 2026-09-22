@@ -29,6 +29,11 @@ import { DestinationStopsEditor } from "@/components/DestinationStopsEditor";
 import { DestinationSearchCombobox } from "@/components/DestinationSearchCombobox";
 import { TripStopMarkers } from "@/components/TripStopMarkers";
 import { RoutePathLayer } from "@/components/RoutePathLayer";
+import {
+  TripParkingHighlight,
+  featuresFromDestinationPolygon,
+} from "@/components/TripParkingHighlight";
+import type { FeatureCollection, Polygon } from "geojson";
 import Link from "next/link";
 import { useEffectiveSession } from "@/hooks/use-effective-session";
 import { useIsIcUser } from "@/hooks/use-is-ic-user";
@@ -199,6 +204,8 @@ export default function NavigationMap(): JSX.Element {
 
   const [curBuildingPoly, setCurBuildingPoly] =
     useState<GeoJSONFeatureCollection | null>(null);
+  const [tripParkingPoly, setTripParkingPoly] =
+    useState<FeatureCollection<Polygon> | null>(null);
 
   const mapRef = useRef<MapRef | null>(null);
   // TEMP: zoom readout for satellite tile testing — remove when done
@@ -663,6 +670,7 @@ export default function NavigationMap(): JSX.Element {
       setRouteModeSegments([]);
       setRoutePortals([]);
       setRouteEta(null);
+      setTripParkingPoly(null);
 
       setMapStage(MAP_STAGES.BUILDING);
     } catch (err) {
@@ -688,6 +696,7 @@ export default function NavigationMap(): JSX.Element {
     setRouteModeSegments([]);
     setRoutePortals([]);
     setRouteEta(null);
+    setTripParkingPoly(null);
     setMapStage(MAP_STAGES.IDLE);
     showCampusOverview();
   }
@@ -883,6 +892,59 @@ export default function NavigationMap(): JSX.Element {
 
   /** -------- Route actions -------- */
 
+  async function loadTripParkingPolys(legs: RouteLegMetrics[]) {
+    const parkingIds = [
+      ...new Set(
+        legs
+          .filter((l) => l.kind === "parking")
+          .map((l) => l.destinationId)
+          .filter((id) => id > 0),
+      ),
+    ];
+    if (parkingIds.length === 0) {
+      setTripParkingPoly(null);
+      return;
+    }
+
+    const features = [];
+    for (const id of parkingIds) {
+      let dest = destinations.find((d) => d.id === id);
+      if (!dest?.polygon) {
+        try {
+          const res = await fetch(
+            withBasePath(`/api/destination?id=${encodeURIComponent(id)}`),
+          );
+          if (!res.ok) continue;
+          const payload = await res.json().catch(() => null);
+          const full = Array.isArray(payload?.destinations)
+            ? (payload.destinations[0] as MapDestination | undefined)
+            : undefined;
+          if (!full?.polygon) continue;
+          dest = { ...(dest ?? full), ...full };
+          setDestinations((prev) => {
+            const exists = prev.some((d) => d.id === id);
+            if (exists) {
+              return prev.map((d) =>
+                d.id === id ? { ...d, polygon: full.polygon } : d,
+              );
+            }
+            return [...prev, dest!];
+          });
+        } catch {
+          continue;
+        }
+      }
+      if (!dest?.polygon) continue;
+      features.push(...featuresFromDestinationPolygon(dest.polygon, id));
+    }
+
+    setTripParkingPoly(
+      features.length > 0
+        ? { type: "FeatureCollection", features }
+        : null,
+    );
+  }
+
   async function getRoute(): Promise<Path> {
     const routeDestIds =
       destinationStops.filter((id) => id > 0).length > 0
@@ -971,8 +1033,12 @@ export default function NavigationMap(): JSX.Element {
         durationSeconds: resp.durationSeconds,
         legs: Array.isArray(resp.legs) ? resp.legs : [],
       });
+      void loadTripParkingPolys(
+        Array.isArray(resp.legs) ? resp.legs : [],
+      );
     } else {
       setRouteEta(null);
+      setTripParkingPoly(null);
     }
     setRouteSteps(Array.isArray(resp.steps) ? resp.steps : []);
     navProgress.resetProgress();
@@ -1994,6 +2060,8 @@ export default function NavigationMap(): JSX.Element {
                 />
               </Source>
             )}
+
+            <TripParkingHighlight data={tripParkingPoly} />
 
             {userPos && (
               <Marker

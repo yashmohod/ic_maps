@@ -69,6 +69,11 @@ import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner"
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
 import { RoutePathLayer } from "@/components/RoutePathLayer";
 import { AccuracyRingLayer } from "@/components/AccuracyRingLayer";
+import {
+  TripParkingHighlight,
+  featuresFromDestinationPolygon,
+} from "@/components/TripParkingHighlight";
+import type { FeatureCollection, Polygon } from "geojson";
 import type { NavStep } from "@/lib/navigation-types";
 import { useDistanceUnits } from "@/hooks/use-distance-units";
 
@@ -221,6 +226,8 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const { units: distanceUnits } = useDistanceUnits();
   const [destPos, setDestPos] = useState<LngLat | null>(null);
   const [parkingPos, setParkingPos] = useState<LngLat | null>(null);
+  const [tripParkingPoly, setTripParkingPoly] =
+    useState<FeatureCollection<Polygon> | null>(null);
 
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
   const watchIdRef = useRef<number | null>(null);
@@ -597,6 +604,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         setRouteSteps([]);
         setDestPos(null);
         setParkingPos(null);
+        setTripParkingPoly(null);
         toast.error(data?.error ?? "No path returned.");
         return;
       }
@@ -653,8 +661,41 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         } else {
           setParkingPos(null);
         }
+        try {
+          const lotRes = await fetch(
+            withBasePath(
+              `/api/destination?id=${encodeURIComponent(parkingLeg.destinationId)}`,
+            ),
+          );
+          if (reqId !== routeRequestIdRef.current) return;
+          const lotPayload = lotRes.ok
+            ? await lotRes.json().catch(() => null)
+            : null;
+          const lotDest = Array.isArray(lotPayload?.destinations)
+            ? lotPayload.destinations[0]
+            : null;
+          const polyStr =
+            typeof lotDest?.polygon === "string" ? lotDest.polygon : null;
+          if (polyStr) {
+            const features = featuresFromDestinationPolygon(
+              polyStr,
+              parkingLeg.destinationId,
+            );
+            setTripParkingPoly(
+              features.length > 0
+                ? { type: "FeatureCollection", features }
+                : null,
+            );
+          } else {
+            setTripParkingPoly(null);
+          }
+        } catch {
+          if (reqId !== routeRequestIdRef.current) return;
+          setTripParkingPoly(null);
+        }
       } else {
         setParkingPos(null);
+        setTripParkingPoly(null);
       }
     } catch (e) {
       if (reqId !== routeRequestIdRef.current) return;
@@ -668,6 +709,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       setRouteEta(null);
       setRouteSteps([]);
       setDestPos(null);
+      setTripParkingPoly(null);
       toast.error("Failed to load route.");
     } finally {
       if (reqId === routeRequestIdRef.current) {
@@ -768,6 +810,11 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 id="share-route"
               />
             )}
+
+            <TripParkingHighlight
+              data={tripParkingPoly}
+              sourceId="share-trip-parking"
+            />
 
             {parkingPos && (
               <Marker
@@ -939,6 +986,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                     }));
                     if (opt.id === "pedestrian") {
                       setParkingPos(null);
+                      setTripParkingPoly(null);
                     }
                   }}
                   disabled={routePending}

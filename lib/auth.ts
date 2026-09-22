@@ -38,6 +38,14 @@ export const auth = betterAuth({
 
   ...(microsoftProvider ? { socialProviders: microsoftProvider } : {}),
 
+  // Pre-seeded users (no account row yet) need this: Microsoft often omits
+  // emailVerified, so implicit linking fails without trusting the provider.
+  account: {
+    accountLinking: {
+      trustedProviders: ["microsoft"],
+    },
+  },
+
   user: {
     additionalFields: {
       isAdmin: {

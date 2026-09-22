@@ -1,5 +1,5 @@
 "use client";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { LoginForm } from "@/components/login-form";
 import Link from "next/link";
@@ -7,10 +7,21 @@ import { HomeLogo } from "@/components/home-logo";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Spinner } from "@/components/ui/spinner";
 import { toRouterPath } from "@/lib/base-path";
+import { toast } from "sonner";
 
 function LoginPageContent() {
   const searchParams = useSearchParams();
   const callbackUrl = toRouterPath(searchParams.get("callbackUrl") ?? "/");
+  const authError = searchParams.get("error");
+
+  useEffect(() => {
+    if (!authError) return;
+    toast.error(
+      authError === "account_not_linked"
+        ? "Could not link Microsoft account. Try signing in again."
+        : `Sign-in failed (${authError}).`,
+    );
+  }, [authError]);
 
   return (
     <main id="main-content" className="bg-background text-foreground flex min-h-svh flex-col w-full items-center justify-center gap-6 p-6 md:p-10">
