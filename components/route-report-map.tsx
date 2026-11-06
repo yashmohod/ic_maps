@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import type {
   GeoJSONFeatureCollection,
@@ -65,8 +66,8 @@ export function RouteReportMap({
 }: RouteReportMapProps) {
   const { mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
+  const { resolvedMapStyle, canRenderMap } = useBasemapStyle(baseStyle);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const canRenderMap = baseStyle != null;
 
   const fitTargets = useMemo(
     () => collectCoordinates(polygon, entrances),
@@ -140,7 +141,7 @@ export function RouteReportMap({
               zoom: DEFAULT_ZOOM,
             }}
             mapLib={maplibregl}
-            mapStyle={baseStyle as maplibregl.StyleSpecification}
+            mapStyle={resolvedMapStyle as maplibregl.StyleSpecification}
             style={{ width: "100%", height: "100%" }}
             onClick={handleMapClick}
           >

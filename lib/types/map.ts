@@ -70,6 +70,8 @@ export type MapDestination = {
   polygon?: string;
   isParkingLot: boolean;
   navigatableDestination?: boolean;
+  /** Recommended parking lot destination ids (buildings only). */
+  parkingLotIds?: number[];
 };
 
 export type OutsideNodeDetail = {

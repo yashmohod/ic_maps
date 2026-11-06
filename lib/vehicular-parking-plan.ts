@@ -9,6 +9,25 @@ export type ExpandedRouteLeg = {
   kind: "parking" | "building";
 };
 
+/**
+ * If the user picked a preferred lot and it is in the building's recommended
+ * list, route only through that lot. Otherwise keep the full recommended set
+ * (auto = closest).
+ */
+export function applyPreferredParkingLot(
+  recommendedLotIds: readonly number[],
+  preferredParkingLotId?: number | null,
+): number[] {
+  if (
+    preferredParkingLotId != null &&
+    preferredParkingLotId > 0 &&
+    recommendedLotIds.includes(preferredParkingLotId)
+  ) {
+    return [preferredParkingLotId];
+  }
+  return [...recommendedLotIds];
+}
+
 export function expandVehicularLegs(
   stopIds: number[],
   isParkingLot: (id: number) => boolean,

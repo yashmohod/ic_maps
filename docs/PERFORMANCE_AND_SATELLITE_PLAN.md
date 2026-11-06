@@ -70,8 +70,9 @@ User toggle: **Map** (current OSM-Bright + local PMTiles) ↔ **Satellite**, wit
 
 ### Shipped
 
-- `SATELLITE_STYLE` (Esri World Imagery) in `lib/map-constants.ts`
-- `useBasemap` / `useBasemapStyle` + `BasemapToggle` on home, share route, route editor, destination editor, and My Maps (workspace + public view); preference in `localStorage`
+- Dual-pyramid campus ortho in `lib/map-constants.ts` (`buildSatelliteStyle`): z≤18 from `public/tiles/satellite` (12″ 2023), z≥19 from `public/tiles/satellite-6in` (6″ 2012, built from `IC_sat/twn6`)
+- Fallback if detail pyramid missing: `bash scripts/link-satellite-6in.sh` (symlinks overview z19–21 so high zoom is not blank)
+- `useBasemap` / `useBasemapStyle` + `BasemapToggle` on home, share route, custom route, route editor, destination editor, My Maps, floorplan door map, and report outdoor maps; preference in `localStorage`
 - Satellite loads only after toggle; 3D extrusions are gone entirely
 - 2026-08-24: Esri registration of 86 building footprints found **no systematic campus-wide offset** (median ~1.5 m east, only ~10% of buildings agree). Outdoor node/edge coordinates left unchanged; editors can now visually snap against satellite.
 
@@ -79,9 +80,9 @@ User toggle: **Map** (current OSM-Bright + local PMTiles) ↔ **Satellite**, wit
 
 | Source | Notes |
 |--------|--------|
-| **Esri World Imagery** XYZ | Shipped default. Attribution required; verify terms for IC deploy. |
+| **Self-host NYS ortho XYZ** | Shipped default (12″ + detail path). |
+| **Esri World Imagery** XYZ | Earlier prototype; not the live dual-pyramid path. |
 | **EOX Sentinel-2 cloudless** | Free; softer at building zoom. |
-| **Self-host campus ortho (PMTiles)** | Best control/offline if IC has imagery; more pipeline work. |
 
 ---
 

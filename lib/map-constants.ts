@@ -4,12 +4,16 @@ export const DEFAULT_CENTER = { lng: -76.494131, lat: 42.422108 } as const;
 export const DEFAULT_ZOOM = 15.5;
 
 /**
- * Self-hosted NYS ortho:
- * - z ≤ 18: spring 2023 12" (`public/tiles/satellite`)
- * - z ≥ 19: spring 2012 6" / half-foot (`public/tiles/satellite-6in`)
+ * Self-hosted NYS ortho (option 2 — dual pyramid):
+ * - z ≤ 18: overview from `public/tiles/satellite` (12" spring 2023)
+ * - z ≥ 19: detail from `public/tiles/satellite-6in` (6" spring 2012)
+ *
+ * Rebuild detail: `python3 scripts/build-campus-ortho-tiles.py --src IC_sat/twn6
+ * --out public/tiles/satellite-6in --work IC_sat/work6 --minzoom 19 --maxzoom 21`
+ * Fallback if detail missing: `bash scripts/link-satellite-6in.sh`
  */
 export const SATELLITE_MAX_ZOOM = 21;
-/** First zoom that uses half-foot (6") tiles. Overview (12") shows below this. */
+/** First zoom that uses the detail (6in) tile pyramid. Overview shows below this. */
 export const SATELLITE_DETAIL_MIN_ZOOM = 19;
 
 /** Tile URL path (appended after basePath). Overridden at runtime via withBasePath. */

@@ -18,6 +18,8 @@ import maplibregl from "maplibre-gl";
 import { Button } from "@/components/ui/button";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import { IC_SSO_REQUIRED_MESSAGE } from "@/lib/auth-domains";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { HomeLogoLink } from "@/components/home-logo-link";
@@ -133,7 +135,8 @@ export default function CustomRoutesPage(): JSX.Element {
 
   const { isDark, mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
+  const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
+    useBasemapStyle(baseStyle);
 
   function ensureCenter(lng: number, lat: number, zoom = 18.5) {
     const map = mapRef.current?.getMap?.();
@@ -709,6 +712,11 @@ export default function CustomRoutesPage(): JSX.Element {
       >
         <HomeLogoLink className="h-12 px-3 py-2 shadow-xl backdrop-blur" />
         <ThemeToggleButton className="h-12 w-12 shadow-xl backdrop-blur" />
+        <BasemapToggle
+          basemap={basemap}
+          onChange={setBasemap}
+          className="h-12 w-12 shadow-xl backdrop-blur"
+        />
       </div>
 
       {/* Routes panel — mobile: bottom sheet style; desktop: left panel */}
@@ -1256,7 +1264,7 @@ export default function CustomRoutesPage(): JSX.Element {
             ref={mapRef}
             initialViewState={defViewState}
             mapLib={maplibregl}
-            mapStyle={baseStyle as any}
+            mapStyle={resolvedMapStyle as any}
             onLoad={() => {
               setMapReady(true);
               const map = mapRef.current?.getMap?.();

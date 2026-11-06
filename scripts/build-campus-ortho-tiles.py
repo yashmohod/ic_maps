@@ -10,6 +10,9 @@ Usage:
   python3 scripts/build-campus-ortho-tiles.py \\
     --src IC_sat/twn6 --out public/tiles/satellite-6in --work IC_sat/work6 \\
     --minzoom 19 --maxzoom 21
+
+  # Until twn6 exists, link overview z19–21 into the detail path:
+  bash scripts/link-satellite-6in.sh
 """
 from __future__ import annotations
 
@@ -40,10 +43,11 @@ F = 1 / 298.257222101
 E2 = F * (2 - F)
 EP2 = E2 / (1 - E2)
 
-# Prefer PATH / OPJ_DECOMPRESS; fall back to the bundled-on-server layout.
+# Prefer PATH / OPJ_DECOMPRESS; fall back to repo tools/ or /tmp unpack.
 _OPJ_CANDIDATES = [
     os.environ.get("OPJ_DECOMPRESS", ""),
     shutil.which("opj_decompress") or "",
+    str(ROOT / "tools" / "openjpeg-v2.5.3-linux-x86_64" / "bin" / "opj_decompress"),
     "/tmp/openjpeg-v2.5.3-linux-x86_64/bin/opj_decompress",
 ]
 OPJ = Path(next((p for p in _OPJ_CANDIDATES if p and Path(p).exists()), ""))

@@ -37,6 +37,8 @@ const navigateToSchema = z
   .object({
     destId: z.coerce.number().int().positive().optional(),
     viaDestIds: z.array(z.coerce.number().int().positive()).max(10).optional(),
+    /** When set, vehicular routes prefer this recommended parking lot. */
+    preferredParkingLotId: z.coerce.number().int().positive().optional(),
     lat: z.coerce.number().min(-90).max(90),
     lng: z.coerce.number().min(-180).max(180),
     navConditions: navConditionsSchema.optional(),
@@ -81,6 +83,7 @@ export async function POST(req: Request) {
     const {
       destId,
       viaDestIds,
+      preferredParkingLotId,
       lat,
       lng,
       navConditions: rawConditions,
@@ -104,6 +107,7 @@ export async function POST(req: Request) {
     console.log(`[API /api/map/navigateTo POST] called`, {
       destId,
       viaDestIds,
+      preferredParkingLotId,
       lat,
       lng,
       navConditions,
@@ -131,6 +135,7 @@ export async function POST(req: Request) {
         startNodeId,
         destIds,
         navConditions,
+        preferredParkingLotId ?? null,
       );
       if (!mixed) {
         return NextResponse.json({ error: "No route found" }, { status: 404 });

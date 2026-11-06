@@ -16,7 +16,10 @@ import {
   type NodeOutside,
 } from "@/db/schema";
 import { MinHeap } from "./minHeap";
-import { orderParkingWalkStarts } from "@/lib/vehicular-parking-plan";
+import {
+  applyPreferredParkingLot,
+  orderParkingWalkStarts,
+} from "@/lib/vehicular-parking-plan";
 import {
   buildGraph,
   endNodeFromPath,
@@ -683,11 +686,13 @@ async function navigateWalkFromParkingNodes(
 /**
  * Vehicular trip: drive to recommended parking (A* closest), then walk to buildings.
  * Multi-stop: stay pedestrian between buildings that share the active parking lot.
+ * Optional preferredParkingLotId forces a recommended lot when it is valid for the building.
  */
 export async function navigateVehicularWithParking(
   startOutdoorNodeId: number,
   stopDestIds: number[],
   baseNavConditions: NavConditions,
+  preferredParkingLotId?: number | null,
 ): Promise<MixedModeRouteResult | null> {
   if (stopDestIds.length === 0) {
     return {
@@ -800,7 +805,10 @@ export async function navigateVehicularWithParking(
       continue;
     }
 
-    const lots = recommended.get(stopId) ?? [];
+    const lots = applyPreferredParkingLot(
+      recommended.get(stopId) ?? [],
+      preferredParkingLotId,
+    );
     if (lots.length === 0) {
       await ensureVehicularStart();
       const path = await navigate(currentStart, stopId, driveNav);

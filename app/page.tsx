@@ -27,6 +27,7 @@ import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
 import { DestinationStopsEditor } from "@/components/DestinationStopsEditor";
 import { DestinationSearchCombobox } from "@/components/DestinationSearchCombobox";
+import ComboboxSelect from "@/components/ComboboxSelect";
 import { TripStopMarkers } from "@/components/TripStopMarkers";
 import { RoutePathLayer } from "@/components/RoutePathLayer";
 import {
@@ -268,6 +269,10 @@ export default function NavigationMap(): JSX.Element {
   const [chainNameInput, setChainNameInput] = useState("");
   const [showFavoriteTripSave, setShowFavoriteTripSave] = useState(false);
   const [stopsEditorOpen, setStopsEditorOpen] = useState(false);
+  /** null = auto (closest recommended lot). */
+  const [preferredParkingLotId, setPreferredParkingLotId] = useState<
+    number | null
+  >(null);
 
   const favoriteIdSet = useMemo(
     () => new Set(favorites.map((f) => f.id)),
@@ -316,6 +321,36 @@ export default function NavigationMap(): JSX.Element {
   const selectedBuilding = useMemo(() => {
     return destinations.find((b) => `${b.id}` === `${selectedDest}`) ?? null;
   }, [destinations, selectedDest]);
+
+  const routeDestinationIds = useMemo(() => {
+    const stops = destinationStops.filter((id) => id > 0);
+    if (stops.length > 0) return stops;
+    return selectedDest > 0 ? [selectedDest] : [];
+  }, [destinationStops, selectedDest]);
+
+  const recommendedParkingLotIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const destId of routeDestinationIds) {
+      const dest = destinations.find((d) => Number(d.id) === destId);
+      if (!dest || dest.isParkingLot) continue;
+      for (const lotId of dest.parkingLotIds ?? []) {
+        if (lotId > 0) ids.add(lotId);
+      }
+    }
+    return [...ids];
+  }, [routeDestinationIds, destinations]);
+
+  const parkingLotSelectItems = useMemo(
+    () => [
+      { value: 0, label: "Closest parking (auto)" },
+      ...recommendedParkingLotIds.map((id) => ({
+        value: id,
+        label:
+          destinations.find((d) => Number(d.id) === id)?.name ?? `Lot ${id}`,
+      })),
+    ],
+    [recommendedParkingLotIds, destinations],
+  );
 
   const { isDark, mapStyle } = useMapStyle();
 
@@ -684,6 +719,7 @@ export default function NavigationMap(): JSX.Element {
     if (tracking) stopTracking();
     setSelectedDest(-1);
     setDestinationStops([]);
+    setPreferredParkingLotId(null);
     setStopsEditorOpen(false);
     setDestPos(null);
     setBuildingNodes(new Set());
@@ -963,6 +999,10 @@ export default function NavigationMap(): JSX.Element {
       return PATH_RESET;
     }
 
+    const preferredLot =
+      curNavConditions.is_vehicular && preferredParkingLotId != null
+        ? preferredParkingLotId
+        : undefined;
     const payload =
       routeDestIds.length > 1
         ? {
@@ -970,12 +1010,18 @@ export default function NavigationMap(): JSX.Element {
             lat: pos.lat,
             lng: pos.lng,
             navConditions: curNavConditions,
+            ...(preferredLot != null
+              ? { preferredParkingLotId: preferredLot }
+              : {}),
           }
         : {
             destId: routeDestIds[0],
             lat: pos.lat,
             lng: pos.lng,
             navConditions: curNavConditions,
+            ...(preferredLot != null
+              ? { preferredParkingLotId: preferredLot }
+              : {}),
           };
 
     const reqId = ++routeRequestIdRef.current;
@@ -1084,6 +1130,31 @@ export default function NavigationMap(): JSX.Element {
     }, 300);
     return () => window.clearTimeout(t);
   }, [destinationStopsKey, navigating]);
+
+  useEffect(() => {
+    if (preferredParkingLotId == null) return;
+    if (!recommendedParkingLotIds.includes(preferredParkingLotId)) {
+      setPreferredParkingLotId(null);
+    }
+  }, [recommendedParkingLotIds, preferredParkingLotId]);
+
+  const prevPreferredParkingLotIdRef = useRef(preferredParkingLotId);
+  useEffect(() => {
+    const prev = prevPreferredParkingLotIdRef.current;
+    prevPreferredParkingLotIdRef.current = preferredParkingLotId;
+    if (!navigating || tracking) return;
+    if (!curNavConditions.is_vehicular) return;
+    if (prev === preferredParkingLotId) return;
+    const t = window.setTimeout(() => {
+      void showRouteRef.current();
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [
+    preferredParkingLotId,
+    navigating,
+    tracking,
+    curNavConditions.is_vehicular,
+  ]);
 
   async function recalcRouteForNavMode(nextNavConditions: NavConditions) {
     try {
@@ -1693,6 +1764,31 @@ export default function NavigationMap(): JSX.Element {
           </div>
         }
       >
+        {curNavConditions.is_vehicular &&
+        !tracking &&
+        recommendedParkingLotIds.length > 1 ? (
+          <div
+            className={`mx-auto mt-3 mb-2 w-full max-w-md rounded-2xl border px-3 py-3 ${borderMutedClass} ${surfaceSubtleClass}`}
+          >
+            <p className="mb-2 text-center text-sm font-semibold">
+              Parking lot
+            </p>
+            <ComboboxSelect
+              placeholder="Choose parking lot"
+              value={preferredParkingLotId ?? 0}
+              items={parkingLotSelectItems}
+              onChange={(value) => {
+                setPreferredParkingLotId(value === 0 ? null : value);
+              }}
+              widthClassName="w-full"
+              searchPlaceholder="Search parking…"
+            />
+            <p className="mt-2 text-center text-xs text-panel-muted-foreground">
+              Changing the lot recalculates drive then walk to your building.
+            </p>
+          </div>
+        ) : null}
+
         {curNavConditions.is_pedestrian && !tracking ? (
           <details
             className={`mx-auto mt-3 mb-4 w-full max-w-md rounded-2xl border ${borderMutedClass} ${surfaceSubtleClass}`}

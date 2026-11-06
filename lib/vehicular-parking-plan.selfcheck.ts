@@ -1,4 +1,7 @@
-import { expandVehicularLegs } from "@/lib/vehicular-parking-plan";
+import {
+  applyPreferredParkingLot,
+  expandVehicularLegs,
+} from "@/lib/vehicular-parking-plan";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -31,6 +34,24 @@ function selfCheck() {
       fallback[0]?.mode === "vehicular" &&
       fallback[0].kind === "building",
     "no lots → direct drive",
+  );
+
+  const preferred = applyPreferredParkingLot([100, 101], 101);
+  assert(preferred.length === 1 && preferred[0] === 101, "preferred lot pinned");
+  const preferredMiss = applyPreferredParkingLot([100, 101], 999);
+  assert(preferredMiss.length === 2, "unknown preferred → keep all");
+  const preferredAuto = applyPreferredParkingLot([100, 101], null);
+  assert(preferredAuto.length === 2, "null preferred → keep all");
+
+  const preferredLegs = expandVehicularLegs(
+    [1],
+    isLot,
+    (id) => applyPreferredParkingLot(recommended(id), 101),
+    pickFirst,
+  );
+  assert(
+    preferredLegs[0]?.destinationId === 101 && preferredLegs[0].kind === "parking",
+    "preferred expands to lot 101",
   );
 
   console.log("vehicular-parking-plan self-check ok");

@@ -69,6 +69,7 @@ import ComboboxSelect, { type ComboboxItem } from "@/components/ComboboxSelect";
 import { HomeLogoLink } from "@/components/home-logo-link";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
+import { useBasemapStyle } from "@/hooks/use-basemap";
 import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/lib/map-constants";
 import { withBasePath } from "@/lib/base-path";
 import {
@@ -550,7 +551,7 @@ function FloorPlanInner() {
   // Map style (dark/light) and view state; when a door is selected we pan to its outside node lat/lng.
   const { isDark, mapStyle } = useMapStyle();
   const { baseStyle } = usePmtilesStyle({ stylePath: mapStyle });
-  const canRenderMap = !!baseStyle;
+  const { resolvedMapStyle, canRenderMap } = useBasemapStyle(baseStyle);
 
   /** Selected indoor feature node (door, stairs, elevator, ramp). */
   const selectedFeatureNode = useMemo(() => {
@@ -1869,7 +1870,7 @@ function FloorPlanInner() {
                   })
                 }
                 mapLib={maplibregl}
-                mapStyle={baseStyle as any}
+                mapStyle={resolvedMapStyle as any}
                 style={{ width: "100%", height: "100%" }}
               >
                 {entranceMarkers.map((entrance) => {
