@@ -69,15 +69,15 @@ export function DestinationSearchCombobox({
   }
 
   return (
-    <div className={cn(mapSearchShellClass, "gap-1 pr-1")}>
-      <Popover open={open} onOpenChange={setOpen}>
-        <div className="flex min-w-0 flex-1 items-center">
-          <Search
-            className="ml-1.5 shrink-0 text-panel-muted-foreground"
-            size={18}
-            aria-hidden="true"
-          />
-          <PopoverAnchor asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className={cn(mapSearchShellClass, "gap-1 pr-1")}>
+          <div className="flex min-w-0 flex-1 items-center">
+            <Search
+              className="ml-1.5 shrink-0 text-panel-muted-foreground"
+              size={18}
+              aria-hidden="true"
+            />
             <input
               id="search-dest"
               type="search"
@@ -95,79 +95,82 @@ export function DestinationSearchCombobox({
                 setOpen(true);
               }}
               onFocus={() => setOpen(true)}
-              className="min-w-0 flex-1 bg-transparent px-2 py-2.5 text-sm font-medium outline-none placeholder:text-panel-muted-foreground"
+              className="min-w-0 flex-1 bg-transparent px-2 py-2.5 text-base font-medium outline-none placeholder:text-panel-muted-foreground md:text-sm"
               disabled={disabled || loading}
             />
-          </PopoverAnchor>
-          {value > 0 && !open ? (
-            <button
-              type="button"
-              onClick={handleClear}
-              aria-label="Clear selected building"
-              className={`mr-1 shrink-0 rounded-full p-1.5 text-panel-muted-foreground transition hover:bg-panel-muted hover:text-foreground ${touchTargetClass}`}
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
-          ) : null}
+            {value > 0 && !open ? (
+              <button
+                type="button"
+                onClick={handleClear}
+                aria-label="Clear selected building"
+                className={`mr-1 shrink-0 rounded-full p-1.5 text-panel-muted-foreground transition hover:bg-panel-muted hover:text-foreground ${touchTargetClass}`}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onAddStop}
+            aria-label={
+              stopCount > 1
+                ? `Edit ${stopCount} stops on this trip`
+                : "Add stops to this trip"
+            }
+            title="Add or edit trip stops"
+            className={cn(
+              "relative grid h-9 w-9 shrink-0 place-items-center rounded-xl",
+              "bg-panel-muted text-panel-foreground transition hover:bg-panel",
+              touchTargetClass,
+            )}
+          >
+            <Plus size={20} strokeWidth={2.25} aria-hidden="true" />
+            {stopCount > 1 ? (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-cta px-1 text-[10px] font-bold text-brand-cta-foreground">
+                {stopCount}
+              </span>
+            ) : null}
+          </button>
         </div>
-        <PopoverContent
-          className="w-[var(--radix-popover-anchor-width)] p-0"
-          align="start"
-          sideOffset={8}
-          onOpenAutoFocus={(e) => e.preventDefault()}
-        >
-          <Command shouldFilter={false}>
-            <CommandList id="destination-search-list">
-              <CommandEmpty>No buildings found.</CommandEmpty>
-              <CommandGroup>
-                {filtered.map((d) => {
-                  const id = Number(d.id);
-                  const isSelected = value === id;
-                  return (
-                    <CommandItem
-                      key={id}
-                      value={d.name}
-                      onSelect={() => handleSelect(id)}
-                    >
-                      <span className="truncate">{d.name}</span>
-                      <Check
-                        className={cn(
-                          "ml-auto shrink-0",
-                          isSelected ? "opacity-100" : "opacity-0",
-                        )}
-                        aria-hidden="true"
-                      />
-                    </CommandItem>
-                  );
-                })}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-
-      <button
-        type="button"
-        onClick={onAddStop}
-        aria-label={
-          stopCount > 1
-            ? `Edit ${stopCount} stops on this trip`
-            : "Add stops to this trip"
-        }
-        title="Add or edit trip stops"
-        className={cn(
-          "relative grid h-9 w-9 shrink-0 place-items-center rounded-xl",
-          "bg-panel-muted text-panel-foreground transition hover:bg-panel",
-          touchTargetClass,
-        )}
+      </PopoverAnchor>
+      <PopoverContent
+        className="w-[var(--radix-popover-anchor-width)] max-w-[calc(100vw-1.5rem)] p-0"
+        align="start"
+        sideOffset={8}
+        onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <Plus size={20} strokeWidth={2.25} aria-hidden="true" />
-        {stopCount > 1 ? (
-          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-cta px-1 text-[10px] font-bold text-brand-cta-foreground">
-            {stopCount}
-          </span>
-        ) : null}
-      </button>
-    </div>
+        <Command shouldFilter={false}>
+          <CommandList
+            id="destination-search-list"
+            className="max-h-[min(50dvh,18rem)]"
+          >
+            <CommandEmpty>No buildings found.</CommandEmpty>
+            <CommandGroup>
+              {filtered.map((d) => {
+                const id = Number(d.id);
+                const isSelected = value === id;
+                return (
+                  <CommandItem
+                    key={id}
+                    value={d.name}
+                    onSelect={() => handleSelect(id)}
+                    className="min-h-11 py-2 text-base"
+                  >
+                    <span className="truncate">{d.name}</span>
+                    <Check
+                      className={cn(
+                        "ml-auto shrink-0",
+                        isSelected ? "opacity-100" : "opacity-0",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

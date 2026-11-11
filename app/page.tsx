@@ -14,14 +14,12 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useMapStyle } from "@/hooks/use-map-style";
 import { usePmtilesStyle } from "@/hooks/use-pmtiles-style";
 import { useBasemapStyle } from "@/hooks/use-basemap";
-import { BasemapToggle } from "@/components/basemap-toggle";
 import {
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
   CAMPUS_BOUNDS,
 } from "@/lib/map-constants";
 import { EditorToolsMenu } from "@/components/EditorToolsMenu";
-import ProfileOptions from "@/components/profileOptions";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
@@ -35,7 +33,6 @@ import {
   featuresFromDestinationPolygon,
 } from "@/components/TripParkingHighlight";
 import type { FeatureCollection, Polygon } from "geojson";
-import Link from "next/link";
 import { useEffectiveSession } from "@/hooks/use-effective-session";
 import { useIsIcUser } from "@/hooks/use-is-ic-user";
 import {
@@ -43,7 +40,6 @@ import {
   CheckIcon,
   Footprints,
   ListOrdered,
-  LogIn,
   Maximize2,
   Minimize2,
   Navigation,
@@ -72,6 +68,7 @@ import {
   mapModeRowOffsetClass,
   mapFavoritesRowOffsetClass,
   mapPageClass,
+  mapChromeClass,
   mapHeaderChipClass,
   mapModeChipClass,
   mapFloatingActionClass,
@@ -209,7 +206,7 @@ export default function NavigationMap(): JSX.Element {
     useState<FeatureCollection<Polygon> | null>(null);
 
   const mapRef = useRef<MapRef | null>(null);
-  // TEMP: zoom readout for satellite tile testing — remove when done
+  const showZoomReadout = process.env.NODE_ENV !== "production";
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
   const pendingRouteStartRef = useRef(false);
   const watchIdRef = useRef<number | null>(null);
@@ -1494,6 +1491,9 @@ export default function NavigationMap(): JSX.Element {
             isIcUser={isIcUser}
             isSignedIn={isSignedIn}
             devMode={devMode}
+            userName={realSession?.user.name}
+            basemap={basemap}
+            onBasemapChange={setBasemap}
           />
 
           <DestinationSearchCombobox
@@ -1505,36 +1505,27 @@ export default function NavigationMap(): JSX.Element {
             loading={destinationsFirstLoadPending && destinations.length === 0}
           />
 
-          <BasemapToggle
-            basemap={basemap}
-            onChange={setBasemap}
-            className="h-11 min-h-[44px] w-11 shrink-0"
-          />
-
-          {/* TEMP: zoom readout for satellite tile testing — remove when done */}
-          <div
-            className={`${mapHeaderChipClass} shrink-0 px-2 font-mono text-xs tabular-nums`}
-            aria-live="polite"
-            title="Temporary zoom readout"
-          >
-            z{mapZoom.toFixed(2)}
-          </div>
-
-          {isSignedIn ? (
-            <div className={`${mapHeaderChipClass} shrink-0 px-1`}>
-              <ProfileOptions session={realSession!} />
-            </div>
-          ) : (
-            <Link
-              href="/account/login"
-              aria-label="Log in to your account"
-              className={`${mapHeaderChipClass} shrink-0 px-2`}
+          {showZoomReadout ? (
+            <div
+              className={`${mapChromeClass} hidden min-h-11 shrink-0 items-center justify-center rounded-2xl px-2 font-mono text-xs tabular-nums sm:inline-flex`}
+              aria-live="polite"
+              title="Zoom readout"
             >
-              <LogIn className="size-8 shrink-0" aria-hidden="true" />
-            </Link>
-          )}
+              z{mapZoom.toFixed(2)}
+            </div>
+          ) : null}
         </div>
       </div>
+
+      {showZoomReadout ? (
+        <div
+          className={`${mapHeaderChipClass} pointer-events-none absolute right-3 z-20 top-[calc(env(safe-area-inset-top,0px)+8.75rem)] px-2 font-mono text-[11px] tabular-nums sm:hidden`}
+          aria-live="polite"
+          title="Zoom readout"
+        >
+          z{mapZoom.toFixed(2)}
+        </div>
+      ) : null}
 
       {isSignedIn && (favorites.length > 0 || chains.length > 0) ? (
         <div
@@ -2067,14 +2058,28 @@ export default function NavigationMap(): JSX.Element {
             initialViewState={defViewState}
             mapLib={maplibregl}
             mapStyle={resolvedMapStyle as any}
-            onMove={(e) => setMapZoom(e.viewState.zoom)}
+            onMove={
+              showZoomReadout
+                ? (e) => setMapZoom(e.viewState.zoom)
+                : undefined
+            }
             onLoad={() => {
               setMapReady(true);
               const map = mapRef.current?.getMap?.();
               map?.on("error", (e: any) => {
                 console.error("[maplibre error]", e?.error ?? e);
               });
-              if (map) setMapZoom(map.getZoom());
+              if (map && showZoomReadout) setMapZoom(map.getZoom());
+              const attrib = map
+                ?.getContainer?.()
+                ?.querySelector?.(".maplibregl-ctrl-attrib");
+              if (
+                attrib &&
+                (map?.getCanvasContainer?.()?.offsetWidth ?? 0) <= 640
+              ) {
+                attrib.classList.remove("maplibregl-compact-show");
+                attrib.removeAttribute("open");
+              }
               const pending = pendingCenterRef.current;
               if (pending && map) {
                 pendingCenterRef.current = null;

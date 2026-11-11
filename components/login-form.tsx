@@ -129,7 +129,7 @@ export function LoginForm({
                   <Button
                     variant="outline"
                     type="button"
-                    className="w-full"
+                    className="w-full min-h-11"
                     disabled={microsoftLoading || loading}
                     aria-busy={microsoftLoading}
                     onClick={() => void handleMicrosoftSignIn()}
@@ -231,7 +231,7 @@ export function LoginForm({
                     type="submit"
                     disabled={loading || microsoftLoading}
                     aria-busy={loading}
-                    className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
+                    className="w-full min-h-11 bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
                   >
                     {loading ? (
                       <>
@@ -256,10 +256,6 @@ export function LoginForm({
           </Form>
         </CardContent>
       </Card>
-      <FieldDescription className="px-6 text-center">
-        By clicking continue, you agree to our <a href="#">Terms of Service</a>{" "}
-        and <a href="#">Privacy Policy</a>.
-      </FieldDescription>
     </div>
   );
 }

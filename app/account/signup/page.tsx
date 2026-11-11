@@ -6,7 +6,7 @@ import { HomeLogo } from "@/components/home-logo";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 export default function SignupPage() {
   return (
-    <main id="main-content" className="bg-background text-foreground flex w-full min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
+    <main id="main-content" className="bg-background text-foreground flex min-h-svh w-full flex-col items-center justify-center gap-6 p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 md:p-10">
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="flex items-center justify-between gap-3">
           <Link href="/" className="flex items-center gap-2 font-medium">
@@ -15,7 +15,7 @@ export default function SignupPage() {
             </span>
             <h1 className="text-base font-medium">Ithaca College Map</h1>
           </Link>
-          <ThemeToggleButton className="h-10 w-10" />
+          <ThemeToggleButton className="h-11 w-11" />
         </div>
         <SignupForm />
       </div>

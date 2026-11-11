@@ -151,7 +151,7 @@ export function SignupForm({
             <Button
               variant="outline"
               type="button"
-              className="w-full"
+              className="w-full min-h-11"
               disabled={microsoftLoading}
               aria-busy={microsoftLoading}
               onClick={() => void handleMicrosoftSignIn()}
@@ -239,7 +239,7 @@ export function SignupForm({
                 {!requiresMicrosoftSso ? (
                   <>
                     <Field>
-                      <Field className="grid grid-cols-2 gap-4">
+                      <Field className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field>
                           <FormField
                             control={form.control}
@@ -305,7 +305,7 @@ export function SignupForm({
                     type="submit"
                     disabled={loading || microsoftLoading}
                     aria-busy={loading}
-                    className="w-full bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
+                    className="w-full min-h-11 bg-brand-cta text-brand-cta-foreground uppercase font-semibold tracking-wide hover:bg-brand-cta/90"
                   >
                     {loading ? (
                       <>
@@ -332,10 +332,6 @@ export function SignupForm({
           </Form>
         </CardContent>
       </Card>
-      <FieldDescription className="px-6 text-center">
-        By clicking continue, you agree to our <a href="#">Terms of Service</a>{" "}
-        and <a href="#">Privacy Policy</a>.
-      </FieldDescription>
     </div>
   );
 }

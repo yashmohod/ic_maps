@@ -2,25 +2,34 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Accessibility,
   Building2,
   ClipboardList,
   Flag,
   Layers,
+  LogIn,
+  LogOut,
   Map as MapIcon,
   Route,
+  Settings,
   Share,
 } from "lucide-react";
+import { BasemapToggle } from "@/components/basemap-toggle";
 import { HomeLogo } from "@/components/home-logo";
+import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import type { BasemapId } from "@/hooks/use-basemap";
+import { authClient } from "@/lib/auth-client";
 import {
   borderMutedClass,
   mapHeaderChipClass,
@@ -33,6 +42,9 @@ type EditorToolsMenuProps = {
   isSignedIn?: boolean;
   devMode?: boolean;
   chipClassName?: string;
+  userName?: string | null;
+  basemap: BasemapId;
+  onBasemapChange: (id: BasemapId) => void;
 };
 
 type ToolLink = {
@@ -104,25 +116,33 @@ function ToolLinkButton({
   label,
   description,
   icon,
+  compact = false,
   className = "",
-}: Omit<ToolLink, "show"> & { className?: string }) {
+}: Omit<ToolLink, "show"> & { compact?: boolean; className?: string }) {
   return (
     <Link
       href={href}
       className={[
-        "flex min-h-11 items-center gap-3 rounded-2xl border px-4 py-3 text-left transition",
+        compact
+          ? "flex h-9 items-center gap-2 rounded-xl border px-3 text-left text-sm transition"
+          : "flex min-h-11 items-center gap-3 rounded-2xl border px-4 py-3 text-left transition",
+        "cursor-pointer",
         borderMutedClass,
         surfacePanelClass,
-        "hover:bg-panel",
+        "hover:bg-panel-muted",
         className,
       ].join(" ")}
     >
       <span className="text-brand-cta">{icon}</span>
       <span className="min-w-0">
-        <span className="block text-sm font-semibold">{label}</span>
-        <span className="block text-xs text-panel-muted-foreground">
-          {description}
+        <span className={compact ? "block font-semibold" : "block text-sm font-semibold"}>
+          {label}
         </span>
+        {compact ? null : (
+          <span className="block text-xs text-panel-muted-foreground">
+            {description}
+          </span>
+        )}
       </span>
     </Link>
   );
@@ -133,8 +153,8 @@ function ReportButton() {
     <Link
       href="/report"
       className={[
-        "flex min-h-11 w-full items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left transition",
-        "border-orange-500/70 bg-orange-500/10 hover:bg-orange-500/15",
+        "flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left transition",
+        "border-orange-500/70 bg-orange-500/10 hover:bg-orange-500/20",
         "ring-1 ring-orange-500/20",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/50",
       ].join(" ")}
@@ -159,8 +179,8 @@ function AccessibilityReportButton() {
     <Link
       href="/report/accessibility"
       className={[
-        "flex min-h-11 w-full items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left transition",
-        "border-brand-cta/70 bg-brand-cta/10 hover:bg-brand-cta/15",
+        "flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left transition",
+        "border-brand-cta/70 bg-brand-cta/10 hover:bg-brand-cta/20",
         "ring-1 ring-brand-cta/20",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cta/50",
       ].join(" ")}
@@ -186,10 +206,20 @@ export function EditorToolsMenu({
   isSignedIn = false,
   devMode = false,
   chipClassName = mapHeaderChipClass,
+  userName = null,
+  basemap,
+  onBasemapChange,
 }: EditorToolsMenuProps) {
+  const router = useRouter();
   const links = useToolLinks(isAdmin, isIcUser, isSignedIn, devMode);
 
   const chipClass = `${chipClassName} shrink-0 px-2`;
+
+  async function signOut() {
+    await authClient.signOut();
+    router.replace("/");
+    router.refresh();
+  }
 
   return (
     <Sheet>
@@ -204,9 +234,9 @@ export function EditorToolsMenu({
       </SheetTrigger>
       <SheetContent
         side="left"
-        className="w-[min(100vw-2rem,20rem)] rounded-r-2xl border-r"
+        className="w-[min(100vw-2rem,20rem)] gap-0 overflow-hidden rounded-r-2xl border-r [&_a]:cursor-pointer [&_button]:cursor-pointer"
       >
-        <SheetHeader className="text-left">
+        <SheetHeader className="shrink-0 text-left">
           <SheetTitle>IC Maps</SheetTitle>
           <SheetDescription>
             Campus navigation and editor tools
@@ -214,17 +244,67 @@ export function EditorToolsMenu({
         </SheetHeader>
         <nav
           aria-label="Editor tools"
-          className="flex flex-col gap-2 px-4 pb-4"
+          className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4"
         >
           {links.map((link) => (
             <ToolLinkButton key={link.href} {...link} />
           ))}
-          {links.length > 0 ? (
-            <div className="my-1 border-t border-border" aria-hidden="true" />
+          <BasemapToggle
+            variant="menu"
+            basemap={basemap}
+            onChange={onBasemapChange}
+          />
+          <ThemeToggleButton variant="menu" />
+          {isSignedIn ? (
+            <ToolLinkButton
+              compact
+              href="/account/setting"
+              label="Settings"
+              description="Profile, favorites, and account"
+              icon={<Settings size={16} aria-hidden="true" />}
+            />
           ) : null}
+          <div className="my-1 border-t border-border" aria-hidden="true" />
           <ReportButton />
           <AccessibilityReportButton />
         </nav>
+        <SheetFooter className="shrink-0 border-t pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {isSignedIn ? (
+            <>
+              {userName ? (
+                <p className="truncate text-sm text-panel-muted-foreground">
+                  Signed in as {userName}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className={[
+                  "flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                  borderMutedClass,
+                  surfacePanelClass,
+                  "hover:bg-panel-muted",
+                ].join(" ")}
+              >
+                <LogOut size={18} aria-hidden="true" />
+                Sign out
+              </button>
+            </>
+          ) : (
+            <Link
+              href="/account/login"
+              className={[
+                "flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                borderMutedClass,
+                surfacePanelClass,
+                "hover:bg-panel-muted",
+              ].join(" ")}
+            >
+              <LogIn size={18} aria-hidden="true" />
+              Sign in
+            </Link>
+          )}
+        </SheetFooter>
       </SheetContent>
     </Sheet>
   );
