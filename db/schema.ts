@@ -393,6 +393,29 @@ export const routeParkingLotRelations = relations(
   }),
 );
 
+/** Named campus gate. One outdoor node, no indoor door. */
+export const campus_entrance = pgTable("campus_entrance", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+  node_outside_id: integer("node_outside_id")
+    .notNull()
+    .unique()
+    .references(() => nodeOutside.id, { onDelete: "cascade" }),
+});
+
+export const route_campus_entrance = pgTable(
+  "route_campus_entrance",
+  {
+    route_id: integer("route_id")
+      .notNull()
+      .references(() => route.id, { onDelete: "cascade" }),
+    campus_entrance_id: integer("campus_entrance_id")
+      .notNull()
+      .references(() => campus_entrance.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.route_id, t.campus_entrance_id] })],
+);
+
 export const user_favorite_destination = pgTable(
   "user_favorite_destination",
   {
@@ -671,6 +694,8 @@ export const schema = {
   route_destination,
   route_parking_lot,
   destination_parking_lot,
+  campus_entrance,
+  route_campus_entrance,
   destinationNode,
   user_favorite_destination,
   destination_chain,

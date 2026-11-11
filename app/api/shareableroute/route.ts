@@ -4,7 +4,11 @@ import {
   route,
   route_destination,
   route_parking_lot,
+  route_campus_entrance,
+  campus_entrance,
+  nodeOutside,
   destination,
+  destination_parking_lot,
 } from "@/db/schema";
 import { eq, asc, and, inArray } from "drizzle-orm";
 
@@ -13,6 +17,38 @@ import { requireIthacaEduSession } from "@/lib/auth-guards";
 import { parseId, isNonEmptyString } from "@/lib/utils";
 
 const ROUTE = "/api/shareableroute";
+
+function parseIdList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((id) => parseId(id))
+        .filter((id): id is number => id != null),
+    ),
+  ];
+}
+
+async function replaceRouteEntrances(routeId: number, ids: number[]) {
+  await db
+    .delete(route_campus_entrance)
+    .where(eq(route_campus_entrance.route_id, routeId));
+  if (ids.length === 0) return null;
+  const rows = await db
+    .select({ id: campus_entrance.id })
+    .from(campus_entrance)
+    .where(inArray(campus_entrance.id, ids));
+  if (rows.length !== ids.length) {
+    return "All campusEntranceIds must reference campus entrances";
+  }
+  await db.insert(route_campus_entrance).values(
+    ids.map((campus_entrance_id) => ({
+      route_id: routeId,
+      campus_entrance_id,
+    })),
+  );
+  return null;
+}
 
 /** GET: single route by id (unauthenticated, for share links) */
 export async function GET(req: Request) {
@@ -75,6 +111,42 @@ export async function GET(req: Request) {
       lng: p.lng,
     }));
 
+    const entranceRows = await db
+      .select({
+        id: campus_entrance.id,
+        name: campus_entrance.name,
+        nodeId: campus_entrance.node_outside_id,
+        lat: nodeOutside.lat,
+        lng: nodeOutside.lng,
+      })
+      .from(route_campus_entrance)
+      .innerJoin(
+        campus_entrance,
+        eq(campus_entrance.id, route_campus_entrance.campus_entrance_id),
+      )
+      .innerJoin(
+        nodeOutside,
+        eq(nodeOutside.id, campus_entrance.node_outside_id),
+      )
+      .where(eq(route_campus_entrance.route_id, routeId));
+
+    const primary = destinations.find((d) => !d.isParkingLot) ?? destinations[0];
+    const recommendedRows = primary
+      ? await db
+          .select({
+            id: destination.id,
+            name: destination.name,
+            lat: destination.lat,
+            lng: destination.lng,
+          })
+          .from(destination_parking_lot)
+          .innerJoin(
+            destination,
+            eq(destination.id, destination_parking_lot.parking_lot_id),
+          )
+          .where(eq(destination_parking_lot.building_id, primary.id))
+      : [];
+
     return NextResponse.json(
       {
         id: r.id,
@@ -82,6 +154,8 @@ export async function GET(req: Request) {
         description: r.description ?? undefined,
         destinations,
         parkingLots,
+        campusEntrances: entranceRows,
+        recommendedParkingLots: recommendedRows,
       },
       { status: 200 },
     );
@@ -102,12 +176,14 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => null);
     if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
-    const { name, description, destinationIds, parkingLotIds } = body as {
-      name: unknown;
-      description?: unknown;
-      destinationIds?: unknown;
-      parkingLotIds?: unknown;
-    };
+    const { name, description, destinationIds, parkingLotIds, campusEntranceIds } =
+      body as {
+        name: unknown;
+        description?: unknown;
+        destinationIds?: unknown;
+        parkingLotIds?: unknown;
+        campusEntranceIds?: unknown;
+      };
 
     console.log(`[API ${ROUTE} POST] called`, {
       name,
@@ -175,6 +251,14 @@ export async function POST(req: Request) {
       );
     }
 
+    const entranceError = await replaceRouteEntrances(
+      inserted.id,
+      parseIdList(campusEntranceIds),
+    );
+    if (entranceError) {
+      return NextResponse.json({ error: entranceError }, { status: 400 });
+    }
+
     return NextResponse.json(
       { id: inserted.id, message: "Route created" },
       { status: 201 },
@@ -196,14 +280,21 @@ export async function PUT(req: Request) {
     const body = await req.json().catch(() => null);
     if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
-    const { routeId, name, description, destinationIds, parkingLotIds } =
-      body as {
-        routeId: unknown;
-        name?: unknown;
-        description?: unknown;
-        destinationIds?: unknown;
-        parkingLotIds?: unknown;
-      };
+    const {
+      routeId,
+      name,
+      description,
+      destinationIds,
+      parkingLotIds,
+      campusEntranceIds,
+    } = body as {
+      routeId: unknown;
+      name?: unknown;
+      description?: unknown;
+      destinationIds?: unknown;
+      parkingLotIds?: unknown;
+      campusEntranceIds?: unknown;
+    };
 
     console.log(`[API ${ROUTE} PUT] called`, {
       routeId,
@@ -287,6 +378,16 @@ export async function PUT(req: Request) {
             destination_id,
           })),
         );
+      }
+    }
+
+    if (Array.isArray(campusEntranceIds)) {
+      const entranceError = await replaceRouteEntrances(
+        rId,
+        parseIdList(campusEntranceIds),
+      );
+      if (entranceError) {
+        return NextResponse.json({ error: entranceError }, { status: 400 });
       }
     }
 

@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronUp,
   Circle,
-  Clock,
   GripVertical,
   Plus,
   Star,
@@ -37,6 +36,9 @@ export type DestinationStopsEditorProps = {
   favorites: FavoriteLite[];
   stops: number[];
   onStopsChange: (stops: number[]) => void;
+  /** Place the trip starts at. Shown as the first row and reorders with the stops. */
+  startPlaceId?: number | null;
+  onStartPlaceChange?: (id: number) => void;
   onPickDestination: (id: number, stopIndex: number) => void;
   onDone: () => void;
   canFavoriteTrip?: boolean;
@@ -49,22 +51,18 @@ export type DestinationStopsEditorProps = {
 };
 
 function StopTimelineIcon({
-  index,
-  total,
-  isAddRow,
+  marker,
 }: {
-  index: number;
-  total: number;
-  isAddRow?: boolean;
+  marker: "origin" | "add" | number;
 }) {
-  if (isAddRow) {
+  if (marker === "add") {
     return (
       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-panel-muted-foreground text-panel-muted-foreground">
         <Plus size={12} strokeWidth={2.5} aria-hidden="true" />
       </span>
     );
   }
-  if (index === 0) {
+  if (marker === "origin") {
     return (
       <Circle
         size={18}
@@ -76,7 +74,7 @@ function StopTimelineIcon({
   }
   return (
     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border-2 border-panel-foreground text-[10px] font-bold leading-none">
-      {index + 1}
+      {marker}
     </span>
   );
 }
@@ -88,6 +86,8 @@ export function DestinationStopsEditor({
   favorites,
   stops,
   onStopsChange,
+  startPlaceId = null,
+  onStartPlaceChange,
   onPickDestination,
   onDone,
   canFavoriteTrip = false,
@@ -121,14 +121,47 @@ export function DestinationStopsEditor({
     return map;
   }, [legEtas]);
 
+  const originId =
+    startPlaceId != null && startPlaceId > 0 ? startPlaceId : null;
+  const hasStart = originId != null;
+  const displayRows: number[] =
+    originId != null
+      ? [originId, ...stops.filter((id) => id !== originId)]
+      : stops;
+
   const filteredDestinations = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return destinations;
-    return destinations.filter((d) => d.name.toLowerCase().includes(q));
-  }, [destinations, searchQuery]);
+    const rows: number[] =
+      startPlaceId != null && startPlaceId > 0
+        ? [startPlaceId, ...stops.filter((id) => id !== startPlaceId)]
+        : stops;
+    const taken = new Set(
+      rows.filter((_, index) => index !== editingStopIndex),
+    );
+    return destinations.filter((d) => {
+      if (taken.has(Number(d.id))) return false;
+      if (!q) return true;
+      return d.name.toLowerCase().includes(q);
+    });
+  }, [destinations, editingStopIndex, searchQuery, startPlaceId, stops]);
 
   const filledStops = stops.filter((id) => id > 0);
   const canDone = filledStops.length >= 1;
+  const editingStart = hasStart && editingStopIndex === 0;
+
+  function commitRows(next: number[]) {
+    const ids = next.filter((id) => id > 0);
+    if (!hasStart) {
+      onStopsChange(ids);
+      return;
+    }
+    if (ids.length < 2 || new Set(ids).size !== ids.length) return;
+    const [startId, ...rest] = ids;
+    if (startId !== startPlaceId) onStartPlaceChange?.(startId!);
+    const stopsSame =
+      rest.length === stops.length && rest.every((id, index) => id === stops[index]);
+    if (!stopsSame) onStopsChange(rest);
+  }
 
   function openSearchForIndex(index: number) {
     setEditingStopIndex(index);
@@ -142,20 +175,20 @@ export function DestinationStopsEditor({
 
   function assignStop(destId: number) {
     if (editingStopIndex == null) return;
-    const next = [...stops];
+    const next = [...displayRows];
     if (editingStopIndex < next.length) {
       next[editingStopIndex] = destId;
     } else {
       next.push(destId);
     }
-    onStopsChange(next.filter((id) => id > 0));
+    commitRows(next);
     onPickDestination(destId, editingStopIndex);
     closeSearch();
   }
 
   function removeStop(index: number) {
-    const next = stops.filter((_, i) => i !== index);
-    onStopsChange(next);
+    if (displayRows.length <= 2) return;
+    commitRows(displayRows.filter((_, i) => i !== index));
     if (editingStopIndex === index) closeSearch();
   }
 
@@ -164,15 +197,15 @@ export function DestinationStopsEditor({
       from === to ||
       from < 0 ||
       to < 0 ||
-      from >= stops.length ||
-      to >= stops.length
+      from >= displayRows.length ||
+      to >= displayRows.length
     ) {
       return;
     }
-    const next = [...stops];
+    const next = [...displayRows];
     const [item] = next.splice(from, 1);
     next.splice(to, 0, item!);
-    onStopsChange(next);
+    commitRows(next);
   }
 
   function handleDone() {
@@ -197,7 +230,9 @@ export function DestinationStopsEditor({
         safeAreaBottomClass,
       ].join(" ")}
       role="dialog"
-      aria-label={isSearchMode ? "Add a stop" : "Add stops"}
+      aria-label={
+        isSearchMode ? (editingStart ? "Choose start" : "Add a stop") : "Trip stops"
+      }
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
         {isSearchMode ? (
@@ -213,7 +248,11 @@ export function DestinationStopsEditor({
           <span className="w-10 shrink-0" aria-hidden="true" />
         )}
         <h2 className="flex-1 text-center text-base font-semibold">
-          {isSearchMode ? "Add a stop" : "Add stops"}
+          {isSearchMode
+            ? editingStart
+              ? "Choose start"
+              : "Add a stop"
+            : "Trip stops"}
         </h2>
         {isSearchMode ? (
           <span className="w-10 shrink-0" aria-hidden="true" />
@@ -247,7 +286,7 @@ export function DestinationStopsEditor({
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Where to?"
+                placeholder={editingStart ? "Where from?" : "Where to?"}
                 autoFocus
                 className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-panel-muted-foreground"
                 aria-label="Search campus buildings"
@@ -255,13 +294,19 @@ export function DestinationStopsEditor({
             </div>
           </div>
 
-          {favorites.length > 0 && !searchQuery.trim() ? (
+          {favorites.some((fav) =>
+            filteredDestinations.some((d) => Number(d.id) === fav.id),
+          ) && !searchQuery.trim() ? (
             <div className="shrink-0 px-4 pt-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
                 Favorites
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                {favorites.map((fav) => (
+                {favorites
+                  .filter((fav) =>
+                    filteredDestinations.some((d) => Number(d.id) === fav.id),
+                  )
+                  .map((fav) => (
                   <button
                     key={fav.id}
                     type="button"
@@ -287,7 +332,7 @@ export function DestinationStopsEditor({
           <ul className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             {filteredDestinations.length === 0 ? (
               <li className="px-3 py-6 text-center text-sm text-panel-muted-foreground">
-                No buildings match your search.
+                No matches
               </li>
             ) : (
               filteredDestinations.map((dest) => {
@@ -298,28 +343,19 @@ export function DestinationStopsEditor({
                       type="button"
                       onClick={() => assignStop(Number(dest.id))}
                       className={[
-                        "flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-panel-muted",
+                        "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-panel-muted",
                         touchTargetClass,
                       ].join(" ")}
                     >
-                      <span className="mt-0.5 text-panel-muted-foreground">
-                        {isFav ? (
-                          <Star
-                            size={18}
-                            className="text-brand-cta"
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <Clock size={18} aria-hidden="true" />
-                        )}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold">
-                          {dest.name}
-                        </span>
-                        <span className="block text-xs text-panel-muted-foreground">
-                          Campus building
-                        </span>
+                      {isFav ? (
+                        <Star
+                          size={18}
+                          className="shrink-0 text-brand-cta"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      <span className="min-w-0 truncate text-sm font-semibold">
+                        {dest.name}
                       </span>
                     </button>
                   </li>
@@ -338,10 +374,12 @@ export function DestinationStopsEditor({
                 surfaceSubtleClass,
               ].join(" ")}
             >
-              {stops.map((stopId, index) => {
+              {displayRows.map((stopId, index) => {
+                const isOrigin = hasStart && index === 0;
                 const name =
                   destinationById.get(stopId)?.name ?? "Unknown building";
-                const legEta = legEtaByDestId.get(stopId);
+                const legEta = isOrigin ? undefined : legEtaByDestId.get(stopId);
+                const rowLabel = isOrigin ? "start" : `stop ${hasStart ? index : index + 1}`;
 
                 return (
                   <div
@@ -356,13 +394,13 @@ export function DestinationStopsEditor({
                     }}
                   >
                     <div className="relative flex w-6 shrink-0 flex-col items-center self-stretch">
-                      <StopTimelineIcon index={index} total={stops.length} />
-                      {index < stops.length ? (
-                        <span
-                          className="mt-1 w-0.5 flex-1 min-h-4 bg-panel-muted-foreground/35"
-                          aria-hidden="true"
-                        />
-                      ) : null}
+                      <StopTimelineIcon
+                        marker={isOrigin || index === 0 ? "origin" : hasStart ? index : index + 1}
+                      />
+                      <span
+                        className="mt-1 w-0.5 flex-1 min-h-4 bg-panel-muted-foreground/35"
+                        aria-hidden="true"
+                      />
                     </div>
 
                     <button
@@ -373,6 +411,11 @@ export function DestinationStopsEditor({
                         touchTargetClass,
                       ].join(" ")}
                     >
+                      {isOrigin ? (
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-panel-muted-foreground">
+                          Start
+                        </span>
+                      ) : null}
                       <span className="block truncate">{name}</span>
                       {legEta ? (
                         <span className="mt-0.5 block text-xs font-medium text-brand-cta">
@@ -387,26 +430,26 @@ export function DestinationStopsEditor({
                           type="button"
                           disabled={index === 0}
                           onClick={() => moveStop(index, index - 1)}
-                          aria-label={`Move stop ${index + 1} up`}
+                          aria-label={`Move ${rowLabel} up`}
                           className={`rounded p-1 text-panel-muted-foreground disabled:opacity-30 ${touchTargetClass}`}
                         >
                           <ChevronUp size={16} aria-hidden="true" />
                         </button>
                         <button
                           type="button"
-                          disabled={index === stops.length - 1}
+                          disabled={index === displayRows.length - 1}
                           onClick={() => moveStop(index, index + 1)}
-                          aria-label={`Move stop ${index + 1} down`}
+                          aria-label={`Move ${rowLabel} down`}
                           className={`rounded p-1 text-panel-muted-foreground disabled:opacity-30 ${touchTargetClass}`}
                         >
                           <ChevronDown size={16} aria-hidden="true" />
                         </button>
                       </div>
-                      {stops.length > 1 ? (
+                      {displayRows.length > 2 ? (
                         <button
                           type="button"
                           onClick={() => removeStop(index)}
-                          aria-label={`Remove stop ${index + 1}`}
+                          aria-label={`Remove ${rowLabel}`}
                           className={`rounded-lg p-2 text-panel-muted-foreground hover:bg-panel hover:text-foreground ${touchTargetClass}`}
                         >
                           <X size={16} aria-hidden="true" />
@@ -417,7 +460,7 @@ export function DestinationStopsEditor({
                         draggable
                         onDragStart={() => setDragFromIndex(index)}
                         onDragEnd={() => setDragFromIndex(null)}
-                        aria-label={`Reorder stop ${index + 1}`}
+                        aria-label={`Reorder ${rowLabel}`}
                         className={`hidden cursor-grab rounded-lg p-2 text-panel-muted-foreground active:cursor-grabbing md:block ${touchTargetClass}`}
                       >
                         <GripVertical size={18} aria-hidden="true" />
@@ -429,15 +472,11 @@ export function DestinationStopsEditor({
 
               <div className="relative flex items-center gap-3 py-2">
                 <div className="flex w-6 shrink-0 justify-center self-start pt-0.5">
-                  <StopTimelineIcon
-                    index={stops.length}
-                    total={stops.length}
-                    isAddRow
-                  />
+                  <StopTimelineIcon marker="add" />
                 </div>
                 <button
                   type="button"
-                  onClick={() => openSearchForIndex(stops.length)}
+                  onClick={() => openSearchForIndex(displayRows.length)}
                   className={[
                     "min-w-0 flex-1 rounded-xl px-2 py-2 text-left text-sm text-panel-muted-foreground transition hover:bg-panel",
                     touchTargetClass,

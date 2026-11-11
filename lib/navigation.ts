@@ -18,8 +18,12 @@ import {
 import { MinHeap } from "./minHeap";
 import {
   applyPreferredParkingLot,
+  driveHandoffAtLot,
   orderParkingWalkStarts,
+  pedestrianLotIds,
+  type LotDoor,
 } from "@/lib/vehicular-parking-plan";
+import { pickNearestMatchingNode } from "@/lib/trip-end";
 import {
   buildGraph,
   endNodeFromPath,
@@ -58,6 +62,66 @@ export async function closestNode(
     )
     .then((cur) => cur.rows[0] as { id: number } | undefined);
   return row?.id ?? -1;
+}
+
+export function outdoorNodeMatchesNav(
+  node: NodeOutside,
+  navConditions: NavConditions,
+): boolean {
+  if (node.is_dead) return false;
+  if (navConditions.is_vehicular) return Boolean(node.is_vehicular);
+  if (!node.is_pedestrian) return false;
+  if (navConditions.is_avoid_stairs && node.is_stairs) return false;
+  if (
+    navConditions.is_incline_limit &&
+    (node.incline ?? 0) > navConditions.max_incline
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Nearest linked door that matches the mode. -1 when the place has none. */
+export async function startNodeForDestination(
+  destinationId: number,
+  target: { lat: number; lng: number },
+  navConditions: NavConditions,
+): Promise<number> {
+  const rows = await db.execute(sql`
+    SELECT no.id, no.lat, no.lng, no.is_pedestrian, no.is_vehicular,
+           no.is_dead, no.is_stairs, no.incline
+    FROM destination_node dn
+    INNER JOIN node_outside no ON no.id = dn.node_outside_id
+    WHERE dn.destination_id = ${destinationId}
+  `);
+  const mode = navConditions.is_vehicular ? "vehicular" : "pedestrian";
+  const nodes = (
+    rows.rows as Array<{
+      id: number;
+      lat: number;
+      lng: number;
+      is_pedestrian: boolean;
+      is_vehicular: boolean;
+      is_dead: boolean;
+      is_stairs: boolean;
+      incline: number;
+    }>
+  ).map((row) => ({
+    id: Number(row.id),
+    lat: Number(row.lat),
+    lng: Number(row.lng),
+    pedestrian:
+      !row.is_dead &&
+      Boolean(row.is_pedestrian) &&
+      !(navConditions.is_avoid_stairs && row.is_stairs) &&
+      !(
+        navConditions.is_incline_limit &&
+        Number(row.incline ?? 0) > navConditions.max_incline
+      ),
+    vehicular: !row.is_dead && Boolean(row.is_vehicular),
+  }));
+  // ponytail: straight-line nearest door, not shortest path. Upgrade: multi-source A*.
+  return pickNearestMatchingNode(nodes, target, mode) ?? -1;
 }
 
 ///////////////////////////////// --  Graph -- ////////////////////////////////////////
@@ -276,6 +340,28 @@ async function navigateToDestination(
     path: reconstructEdgePath(graph, start, astar.endNodeId, astar.pathTree),
     endNodeId: astar.endNodeId,
   };
+}
+
+/** Path that ends on one outdoor node (a campus entrance or a GPS snap). */
+export async function navigateToNode(
+  start: number,
+  endNodeId: number,
+  navConditions: NavConditions,
+): Promise<number[] | null> {
+  const graph = await getGraph();
+  const startNode = graph.nodesOutside.get(start);
+  const endNode = graph.nodesOutside.get(endNodeId);
+  if (!startNode || !endNode) return null;
+  if (start === endNodeId) return [];
+  const astar = await aStar(
+    graph,
+    start,
+    { lat: endNode.lat, lng: endNode.lng },
+    new Set([endNodeId]),
+    navConditions,
+  );
+  if (!astar) return null;
+  return reconstructEdgePath(graph, start, astar.endNodeId, astar.pathTree);
 }
 
 function reconstructEdgePath(
@@ -683,8 +769,125 @@ async function navigateWalkFromParkingNodes(
   return best ? { startId: best.startId, path: best.path } : null;
 }
 
+async function navigateToClosestNodes(
+  start: number,
+  nodeIds: number[],
+  navConditions: NavConditions,
+): Promise<{ path: number[]; endNodeId: number } | null> {
+  const graph = await getGraph();
+  const startNode = graph.nodesOutside.get(start);
+  if (!startNode) return null;
+  const ends = new Set<number>();
+  let sumLat = 0;
+  let sumLng = 0;
+  for (const id of nodeIds) {
+    if (ends.has(id)) continue;
+    const node = graph.nodesOutside.get(id);
+    if (!node || node.is_dead) continue;
+    ends.add(id);
+    sumLat += node.lat;
+    sumLng += node.lng;
+  }
+  if (ends.size === 0) return null;
+  if (ends.has(start)) return { path: [], endNodeId: start };
+  const astar = await aStar(
+    graph,
+    start,
+    { lat: sumLat / ends.size, lng: sumLng / ends.size },
+    ends,
+    navConditions,
+  );
+  if (!astar) return null;
+  return {
+    path: reconstructEdgePath(graph, start, astar.endNodeId, astar.pathTree),
+    endNodeId: astar.endNodeId,
+  };
+}
+
+async function recommendedLotDoors(buildingId: number): Promise<{
+  hasLots: boolean;
+  doors: LotDoor[];
+}> {
+  const rows = await db.execute(sql`
+    SELECT dpl.parking_lot_id AS lot_id, no.id, no.lat, no.lng,
+           no.is_pedestrian, no.is_vehicular
+    FROM destination_parking_lot dpl
+    LEFT JOIN destination_node dn ON dn.destination_id = dpl.parking_lot_id
+    LEFT JOIN node_outside no ON no.id = dn.node_outside_id AND no.is_dead = false
+    WHERE dpl.building_id = ${buildingId}
+  `);
+  const doors: LotDoor[] = [];
+  for (const row of rows.rows as Array<{
+    lot_id: number;
+    id: number | null;
+    lat: number | null;
+    lng: number | null;
+    is_pedestrian: boolean | null;
+    is_vehicular: boolean | null;
+  }>) {
+    if (row.id == null || row.lat == null || row.lng == null) continue;
+    doors.push({
+      id: Number(row.id),
+      lotId: Number(row.lot_id),
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      pedestrian: Boolean(row.is_pedestrian),
+      vehicular: Boolean(row.is_vehicular),
+    });
+  }
+  return { hasLots: rows.rows.length > 0, doors };
+}
+
+/** Walk to the start building's nearest recommended lot, then hand off to a drive door. */
+async function walkToOriginParking(
+  startNodeId: number,
+  buildingId: number,
+  walkNav: NavConditions,
+): Promise<{ lotId: number; path: number[]; driveNodeId: number } | null> {
+  const { hasLots, doors } = await recommendedLotDoors(buildingId);
+  if (!hasLots) return null;
+  const lotIds = pedestrianLotIds(doors);
+  if (lotIds.length === 0) return null;
+  const closest = await navigateToClosestDestination(
+    startNodeId,
+    lotIds,
+    walkNav,
+  );
+  if (!closest) return null;
+  const graph = await getGraph();
+  let path = closest.path;
+  const arrival = endNodeFromPath(graph, startNodeId, path);
+  const handoff = driveHandoffAtLot(arrival, doors);
+  if ("driveNodeId" in handoff) {
+    return { lotId: closest.destinationId, path, driveNodeId: handoff.driveNodeId };
+  }
+  const retarget = await navigateToClosestNodes(
+    startNodeId,
+    handoff.retargetNodeIds,
+    walkNav,
+  );
+  if (retarget) {
+    return {
+      lotId: closest.destinationId,
+      path: retarget.path,
+      driveNodeId: retarget.endNodeId,
+    };
+  }
+  // ponytail: straight-line nearest drive door of this lot when the walk-and-drive door is unreachable. Upgrade: route along lot edges.
+  const vehOnly = doors.map((door) =>
+    door.pedestrian && door.vehicular ? { ...door, pedestrian: false } : door,
+  );
+  const snapped = driveHandoffAtLot(arrival, vehOnly);
+  return {
+    lotId: closest.destinationId,
+    path,
+    driveNodeId: "driveNodeId" in snapped ? snapped.driveNodeId : -1,
+  };
+}
+
 /**
  * Vehicular trip: drive to recommended parking (A* closest), then walk to buildings.
+ * A start building with no vehicular door walks to its nearest recommended lot first.
  * Multi-stop: stay pedestrian between buildings that share the active parking lot.
  * Optional preferredParkingLotId forces a recommended lot when it is valid for the building.
  */
@@ -693,8 +896,14 @@ export async function navigateVehicularWithParking(
   stopDestIds: number[],
   baseNavConditions: NavConditions,
   preferredParkingLotId?: number | null,
+  /** When set, every building uses this list instead of destination_parking_lot. */
+  parkingLotIds?: readonly number[] | null,
+  /** Set when the start place has no vehicular door. */
+  originBuildingId?: number | null,
+  /** Drive here after the start walk. Used for an entrance or GPS end. */
+  goalNodeId?: number | null,
 ): Promise<MixedModeRouteResult | null> {
-  if (stopDestIds.length === 0) {
+  if (stopDestIds.length === 0 && goalNodeId == null && originBuildingId == null) {
     return {
       path: [],
       legPaths: [],
@@ -705,34 +914,36 @@ export async function navigateVehicularWithParking(
     };
   }
 
-  const meta = await db.execute(sql`
-    SELECT id, is_parking_lot FROM destination
-    WHERE id IN (${sql.join(
-      stopDestIds.map((id) => sql`${id}`),
-      sql`, `,
-    )});
-  `);
   const isParking = new Map<number, boolean>();
-  for (const row of meta.rows as Array<{ id: number; is_parking_lot: boolean }>) {
-    isParking.set(Number(row.id), Boolean(row.is_parking_lot));
-  }
-
-  const linkRows = await db.execute(sql`
-    SELECT building_id, parking_lot_id FROM destination_parking_lot
-    WHERE building_id IN (${sql.join(
-      stopDestIds.map((id) => sql`${id}`),
-      sql`, `,
-    )});
-  `);
   const recommended = new Map<number, number[]>();
-  for (const row of linkRows.rows as Array<{
-    building_id: number;
-    parking_lot_id: number;
-  }>) {
-    const bid = Number(row.building_id);
-    const list = recommended.get(bid) ?? [];
-    list.push(Number(row.parking_lot_id));
-    recommended.set(bid, list);
+  if (stopDestIds.length > 0) {
+    const meta = await db.execute(sql`
+      SELECT id, is_parking_lot FROM destination
+      WHERE id IN (${sql.join(
+        stopDestIds.map((id) => sql`${id}`),
+        sql`, `,
+      )});
+    `);
+    for (const row of meta.rows as Array<{ id: number; is_parking_lot: boolean }>) {
+      isParking.set(Number(row.id), Boolean(row.is_parking_lot));
+    }
+
+    const linkRows = await db.execute(sql`
+      SELECT building_id, parking_lot_id FROM destination_parking_lot
+      WHERE building_id IN (${sql.join(
+        stopDestIds.map((id) => sql`${id}`),
+        sql`, `,
+      )});
+    `);
+    for (const row of linkRows.rows as Array<{
+      building_id: number;
+      parking_lot_id: number;
+    }>) {
+      const bid = Number(row.building_id);
+      const list = recommended.get(bid) ?? [];
+      list.push(Number(row.parking_lot_id));
+      recommended.set(bid, list);
+    }
   }
 
   const graph = await getGraph();
@@ -795,6 +1006,41 @@ export async function navigateVehicularWithParking(
     return true;
   };
 
+  const finish = (): MixedModeRouteResult => ({
+    path: fullPath,
+    legPaths,
+    legs,
+    distanceMeters: totalDistance,
+    durationSeconds: totalDuration,
+    modeSegments,
+  });
+
+  if (originBuildingId != null) {
+    const originNode = graph.nodesOutside.get(currentStart);
+    if (originNode && !originNode.is_vehicular) {
+      const parked = await walkToOriginParking(
+        currentStart,
+        originBuildingId,
+        walkNav,
+      );
+      if (!parked) return null;
+      if (parked.path.length > 0) {
+        await appendLeg(parked.lotId, "pedestrian", "parking", parked.path);
+      }
+      activeParkingIds = new Set([parked.lotId]);
+      if (parked.driveNodeId > 0) currentStart = parked.driveNodeId;
+      else await ensureVehicularStart();
+    }
+  }
+
+  if (goalNodeId != null) {
+    await ensureVehicularStart();
+    const path = await navigateToNode(currentStart, goalNodeId, driveNav);
+    if (path == null) return null;
+    await appendLeg(0, "vehicular", "building", path);
+    return finish();
+  }
+
   for (const stopId of stopDestIds) {
     if (isParking.get(stopId)) {
       await ensureVehicularStart();
@@ -806,7 +1052,7 @@ export async function navigateVehicularWithParking(
     }
 
     const lots = applyPreferredParkingLot(
-      recommended.get(stopId) ?? [],
+      parkingLotIds != null ? parkingLotIds : (recommended.get(stopId) ?? []),
       preferredParkingLotId,
     );
     if (lots.length === 0) {
@@ -837,12 +1083,5 @@ export async function navigateVehicularWithParking(
     if (!(await walkFromActiveParking(stopId))) return null;
   }
 
-  return {
-    path: fullPath,
-    legPaths,
-    legs,
-    distanceMeters: totalDistance,
-    durationSeconds: totalDuration,
-    modeSegments,
-  };
+  return finish();
 }

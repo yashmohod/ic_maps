@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { db } from "@/db";
+import { campus_entrance } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import {
   closestNode,
   navigate,
   navigateMulti,
+  navigateToNode,
   navigateVehicularWithParking,
+  outdoorNodeMatchesNav,
+  startNodeForDestination,
   getGraph,
   pathToRouteGeometry,
   endNodeFromPath,
@@ -39,12 +45,57 @@ const navigateToSchema = z
     viaDestIds: z.array(z.coerce.number().int().positive()).max(10).optional(),
     /** When set, vehicular routes prefer this recommended parking lot. */
     preferredParkingLotId: z.coerce.number().int().positive().optional(),
-    lat: z.coerce.number().min(-90).max(90),
-    lng: z.coerce.number().min(-180).max(180),
+    /** Replaces each building's saved recommended lots for this request. */
+    parkingLotIds: z.array(z.coerce.number().int().positive()).max(20).optional(),
+    lat: z.coerce.number().min(-90).max(90).optional(),
+    lng: z.coerce.number().min(-180).max(180).optional(),
+    gpsAt: z.enum(["start", "end"]).optional(),
+    startDestId: z.coerce.number().int().positive().optional(),
+    startNodeId: z.coerce.number().int().positive().optional(),
+    endNodeId: z.coerce.number().int().positive().optional(),
     navConditions: navConditionsSchema.optional(),
   })
-  .refine((data) => data.destId != null || (data.viaDestIds?.length ?? 0) > 0, {
-    message: "destId or viaDestIds is required",
+  .superRefine((data, ctx) => {
+    const starts = [
+      data.startNodeId != null,
+      data.startDestId != null,
+      data.gpsAt === "start",
+    ].filter(Boolean).length;
+    if (starts !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Choose exactly one start",
+      });
+    }
+    const hasPlaces =
+      data.destId != null || (data.viaDestIds?.length ?? 0) > 0;
+    const ends = [
+      data.endNodeId != null,
+      hasPlaces,
+      data.gpsAt === "end",
+    ].filter(Boolean).length;
+    if (ends !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Choose exactly one destination",
+      });
+    }
+    if ((data.gpsAt === "start" || data.gpsAt === "end") && (data.lat == null || data.lng == null)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "lat and lng are required for a GPS end",
+      });
+    }
+    if (
+      data.startNodeId != null &&
+      data.endNodeId != null &&
+      data.startNodeId === data.endNodeId
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Start and destination are the same",
+      });
+    }
   });
 
 export async function POST(req: Request) {
@@ -84,8 +135,13 @@ export async function POST(req: Request) {
       destId,
       viaDestIds,
       preferredParkingLotId,
+      parkingLotIds,
       lat,
       lng,
+      gpsAt,
+      startDestId,
+      startNodeId: requestedStartNodeId,
+      endNodeId: requestedEndNodeId,
       navConditions: rawConditions,
     } = parsed.data;
     const navConditions = {
@@ -108,20 +164,97 @@ export async function POST(req: Request) {
       destId,
       viaDestIds,
       preferredParkingLotId,
+      parkingLotIds,
       lat,
       lng,
+      gpsAt,
+      startDestId,
+      requestedStartNodeId,
+      requestedEndNodeId,
       navConditions,
     });
 
-    const startNodeId = await closestNode(lat, lng, navConditions);
-    if (startNodeId < 0) {
-      return NextResponse.json(
-        { error: "No nearby routing node found" },
-        { status: 404 },
-      );
+    const graph = await getGraph();
+
+    let goalNodeId = requestedEndNodeId ?? null;
+    if (gpsAt === "end") {
+      goalNodeId = await closestNode(lat!, lng!, navConditions);
+      if (goalNodeId < 0) {
+        return NextResponse.json(
+          { error: "No nearby routing node found" },
+          { status: 404 },
+        );
+      }
     }
 
-    const graph = await getGraph();
+    let target = { lat: lat ?? 0, lng: lng ?? 0 };
+    if (goalNodeId != null) {
+      const goal = graph.nodesOutside.get(goalNodeId);
+      if (!goal) {
+        return NextResponse.json(
+          { error: "Destination node not found" },
+          { status: 404 },
+        );
+      }
+      target = { lat: goal.lat, lng: goal.lng };
+    } else if (destIds[0] != null) {
+      const destRow = await db
+        .execute(
+          sql`SELECT lat, lng FROM destination WHERE id = ${destIds[0]}`,
+        )
+        .then(
+          (res) => res.rows[0] as { lat: number; lng: number } | undefined,
+        );
+      if (!destRow) {
+        return NextResponse.json(
+          { error: "Destination not found" },
+          { status: 404 },
+        );
+      }
+      target = { lat: Number(destRow.lat), lng: Number(destRow.lng) };
+    }
+
+    let startNodeId = -1;
+    let originBuildingId: number | null = null;
+    if (requestedStartNodeId != null) {
+      const node = graph.nodesOutside.get(requestedStartNodeId);
+      if (!node || !outdoorNodeMatchesNav(node, navConditions)) {
+        return NextResponse.json(
+          { error: "That entrance is not available for this mode" },
+          { status: 404 },
+        );
+      }
+      startNodeId = requestedStartNodeId;
+    } else if (startDestId != null) {
+      startNodeId = await startNodeForDestination(
+        startDestId,
+        target,
+        navConditions,
+      );
+      if (startNodeId < 0 && navConditions.is_vehicular) {
+        startNodeId = await startNodeForDestination(startDestId, target, {
+          ...navConditions,
+          is_pedestrian: true,
+          is_vehicular: false,
+        });
+        if (startNodeId > 0) originBuildingId = startDestId;
+      }
+      if (startNodeId < 0) {
+        return NextResponse.json(
+          { error: "This place has no entrance for this mode" },
+          { status: 404 },
+        );
+      }
+    } else {
+      startNodeId = await closestNode(lat!, lng!, navConditions);
+      if (startNodeId < 0) {
+        return NextResponse.json(
+          { error: "No nearby routing node found" },
+          { status: 404 },
+        );
+      }
+    }
+
     const startNode = graph.nodesOutside.get(startNodeId);
     if (!startNode) {
       return NextResponse.json(
@@ -130,12 +263,87 @@ export async function POST(req: Request) {
       );
     }
 
+    if (goalNodeId != null) {
+      const goalNode = graph.nodesOutside.get(goalNodeId);
+      if (!goalNode || !outdoorNodeMatchesNav(goalNode, navConditions)) {
+        return NextResponse.json(
+          { error: "That entrance is not available for this mode" },
+          { status: 404 },
+        );
+      }
+      if (originBuildingId == null) {
+        const nodePath = await navigateToNode(
+        startNodeId,
+        goalNodeId,
+        navConditions,
+      );
+      if (!nodePath || nodePath.length === 0) {
+        return NextResponse.json({ error: "No route found" }, { status: 404 });
+      }
+      const geometry = pathToRouteGeometry(graph, nodePath, startNodeId);
+      const lastNodeId = endNodeFromPath(graph, startNodeId, nodePath);
+      const pathMetrics = computePathMetrics(
+        graph,
+        startNodeId,
+        nodePath,
+        navConditions,
+      );
+      const [entrance] = requestedEndNodeId
+        ? await db
+            .select({ name: campus_entrance.name })
+            .from(campus_entrance)
+            .where(eq(campus_entrance.node_outside_id, requestedEndNodeId))
+            .limit(1)
+        : [];
+      const endLabel = entrance?.name ?? "your location";
+      const steps = buildRouteDirections(
+        graph,
+        nodePath,
+        startNodeId,
+        navConditions,
+        new Map(),
+        { finalDestinationName: endLabel },
+      );
+      return NextResponse.json(
+        {
+          path: nodePath,
+          geometry,
+          firstNodeId: startNodeId,
+          lastNodeId,
+          startNode: {
+            id: startNodeId,
+            lat: startNode.lat,
+            lng: startNode.lng,
+          },
+          distanceMeters: pathMetrics.distanceMeters,
+          durationSeconds: pathMetrics.durationSeconds,
+          legs: [
+            {
+              destinationId: requestedEndNodeId ?? 0,
+              distanceMeters: pathMetrics.distanceMeters,
+              durationSeconds: pathMetrics.durationSeconds,
+              mode: navConditions.is_vehicular
+                ? ("vehicular" as const)
+                : ("pedestrian" as const),
+              kind: "building" as const,
+            },
+          ],
+          steps,
+        },
+        { status: 200 },
+      );
+      }
+    }
+
     if (navConditions.is_vehicular) {
       const mixed = await navigateVehicularWithParking(
         startNodeId,
         destIds,
         navConditions,
         preferredParkingLotId ?? null,
+        parkingLotIds ?? null,
+        originBuildingId,
+        originBuildingId != null ? goalNodeId : null,
       );
       if (!mixed) {
         return NextResponse.json({ error: "No route found" }, { status: 404 });

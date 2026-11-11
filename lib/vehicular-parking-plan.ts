@@ -3,6 +3,8 @@
  * `pickLot` stands in for A* “closest recommended parking” during tests.
  */
 
+import { calcDistance } from "@/lib/geo";
+
 export type ExpandedRouteLeg = {
   destinationId: number;
   mode: "vehicular" | "pedestrian";
@@ -110,4 +112,54 @@ export function orderParkingWalkStarts(
     ordered.push(id);
   }
   return ordered;
+}
+
+/** A door of a recommended parking lot. Dead doors are omitted by the caller. */
+export type LotDoor = {
+  id: number;
+  lotId: number;
+  lat: number;
+  lng: number;
+  pedestrian: boolean;
+  vehicular: boolean;
+};
+
+/** Lot ids a pedestrian can walk to. Empty when none of the doors are pedestrian. */
+export function pedestrianLotIds(doors: readonly LotDoor[]): number[] {
+  const ids: number[] = [];
+  for (const door of doors) {
+    if (!door.pedestrian || ids.includes(door.lotId)) continue;
+    ids.push(door.lotId);
+  }
+  return ids;
+}
+
+/**
+ * The walk already arrived at `arrivalNodeId`. Stay there when that door can
+ * drive. Otherwise retarget a same-lot door that is both walk and drive, or
+ * the straight-line nearest vehicular door of that lot.
+ */
+export function driveHandoffAtLot(
+  arrivalNodeId: number,
+  doors: readonly LotDoor[],
+): { retargetNodeIds: number[] } | { driveNodeId: number } {
+  const arrival = doors.find((door) => door.id === arrivalNodeId);
+  if (!arrival) return { driveNodeId: -1 };
+  if (arrival.vehicular) return { driveNodeId: arrival.id };
+
+  const sameLot = doors.filter((door) => door.lotId === arrival.lotId);
+  const dual = sameLot.filter((door) => door.pedestrian && door.vehicular);
+  if (dual.length > 0) return { retargetNodeIds: dual.map((door) => door.id) };
+
+  let best: LotDoor | null = null;
+  let bestDistance = Infinity;
+  for (const door of sameLot) {
+    if (!door.vehicular) continue;
+    const distance = calcDistance(arrival.lat, arrival.lng, door.lat, door.lng);
+    if (distance < bestDistance) {
+      best = door;
+      bestDistance = distance;
+    }
+  }
+  return { driveNodeId: best?.id ?? -1 };
 }

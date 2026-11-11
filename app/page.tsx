@@ -24,7 +24,7 @@ import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
 import { DestinationStopsEditor } from "@/components/DestinationStopsEditor";
-import { DestinationSearchCombobox } from "@/components/DestinationSearchCombobox";
+import { TripEndsFields } from "@/components/TripEndsFields";
 import ComboboxSelect from "@/components/ComboboxSelect";
 import { TripStopMarkers } from "@/components/TripStopMarkers";
 import { RoutePathLayer } from "@/components/RoutePathLayer";
@@ -40,6 +40,7 @@ import {
   CheckIcon,
   Footprints,
   ListOrdered,
+  LocateFixed,
   Maximize2,
   Minimize2,
   Navigation,
@@ -65,6 +66,7 @@ import {
   borderMutedClass,
   touchTargetClass,
   safeAreaTopClass,
+  mapBarActionClass,
   mapModeRowOffsetClass,
   mapFavoritesRowOffsetClass,
   mapPageClass,
@@ -92,6 +94,13 @@ import {
 import type { NavStep } from "@/lib/navigation-types";
 import { useDistanceUnits } from "@/hooks/use-distance-units";
 import { useNavigationProgress } from "@/hooks/use-navigation-progress";
+import {
+  buildNavigatePayload,
+  sameTripEnd,
+  tripEndNeedsGps,
+  type CampusEntrance,
+  type TripEnd,
+} from "@/lib/trip-end";
 
 type FavoriteRow = {
   id: number;
@@ -155,6 +164,35 @@ const MAX_INCLINE = 45;
 const HOME_SHEET_PEEK = 0.85;
 const HOME_SHEET_SNAP_POINTS = [0, HOME_SHEET_PEEK];
 
+function storedPolygonFeatures(
+  polygon: string,
+): GeoJSONFeatureCollection["features"] {
+  try {
+    const parsed = JSON.parse(polygon) as {
+      type?: string;
+      features?: GeoJSONFeatureCollection["features"];
+    };
+    if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
+      return parsed.features;
+    }
+    if (parsed?.type === "Feature") {
+      return [parsed as GeoJSONFeatureCollection["features"][number]];
+    }
+    if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
+      return [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: parsed as GeoJSONFeatureCollection["features"][number]["geometry"],
+        },
+      ];
+    }
+  } catch {
+    /* skip a bad polygon */
+  }
+  return [];
+}
+
 export default function NavigationMap(): JSX.Element {
   const defViewState = {
     longitude: DEFAULT_CENTER.lng,
@@ -174,6 +212,14 @@ export default function NavigationMap(): JSX.Element {
   const [[swLng, swLat], [neLng, neLat]] = CAMPUS_BOUNDS;
 
   const [selectedDest, setSelectedDest] = useState<number>(0);
+  const [tripFrom, setTripFrom] = useState<TripEnd | null>({ kind: "gps" });
+  const [tripTo, setTripTo] = useState<TripEnd | null>(null);
+  const [campusEntrances, setCampusEntrances] = useState<CampusEntrance[]>([]);
+  const [gpsFieldStatus, setGpsFieldStatus] = useState<
+    "unknown" | "ready" | "unavailable"
+  >("unknown");
+  const [locatingSelf, setLocatingSelf] = useState(false);
+  const [tripSearchOpen, setTripSearchOpen] = useState(false);
   const [destinations, setDestinations] = useState<MapDestination[]>([]);
   const [destinationsFirstLoadPending, setDestinationsFirstLoadPending] =
     useState(true);
@@ -200,7 +246,9 @@ export default function NavigationMap(): JSX.Element {
 
   const [mapStage, setMapStage] = useState<MapStage>(MAP_STAGES.IDLE);
 
-  const [curBuildingPoly, setCurBuildingPoly] =
+  const [routeDestPoly, setRouteDestPoly] =
+    useState<GeoJSONFeatureCollection | null>(null);
+  const [startBuildingPoly, setStartBuildingPoly] =
     useState<GeoJSONFeatureCollection | null>(null);
   const [tripParkingPoly, setTripParkingPoly] =
     useState<FeatureCollection<Polygon> | null>(null);
@@ -208,7 +256,7 @@ export default function NavigationMap(): JSX.Element {
   const mapRef = useRef<MapRef | null>(null);
   const showZoomReadout = process.env.NODE_ENV !== "production";
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
-  const pendingRouteStartRef = useRef(false);
+  const skipParkingRecalcRef = useRef(false);
   const watchIdRef = useRef<number | null>(null);
   const deviceHeadingRef = useRef<number | null>(null);
   const compassHandlerRef = useRef<
@@ -234,6 +282,10 @@ export default function NavigationMap(): JSX.Element {
   trackingRef.current = tracking;
   const userPosRef = useRef<UserPos | null>(null);
   userPosRef.current = userPos;
+  const tripFromRef = useRef(tripFrom);
+  const tripToRef = useRef(tripTo);
+  tripFromRef.current = tripFrom;
+  tripToRef.current = tripTo;
   const lastGpsUiAtRef = useRef(0);
   const [routeEta, setRouteEta] = useState<{
     distanceMeters: number;
@@ -339,7 +391,7 @@ export default function NavigationMap(): JSX.Element {
 
   const parkingLotSelectItems = useMemo(
     () => [
-      { value: 0, label: "Closest parking (auto)" },
+      { value: 0, label: "Closest recommended" },
       ...recommendedParkingLotIds.map((id) => ({
         value: id,
         label:
@@ -378,13 +430,6 @@ export default function NavigationMap(): JSX.Element {
     void loadFavorites();
     void loadChains();
   }, [isSignedIn, signedInUserId, error]);
-
-  useEffect(() => {
-    if (!pendingRouteStartRef.current) return;
-    if (!userPos || !selectedDest) return;
-    pendingRouteStartRef.current = false;
-    void showRoute();
-  }, [userPos, selectedDest]);
 
   const stageDetails =
     STAGE_DETAILS[mapStage] ?? STAGE_DETAILS[MAP_STAGES.IDLE];
@@ -575,6 +620,7 @@ export default function NavigationMap(): JSX.Element {
 
       if (insideCampus || forceCenter) {
         setUserPos({ lng: longitude, lat: latitude, accuracy });
+        setGpsFieldStatus("ready");
         ensureCenter(longitude, latitude, 16);
         setMapStage((stage) => {
           if (stage === MAP_STAGES.ROUTE) return MAP_STAGES.ROUTE;
@@ -645,18 +691,12 @@ export default function NavigationMap(): JSX.Element {
         );
       }
 
-      let curDestinationPoly: GeoJSONFeatureCollection | null = null;
       try {
-        if (curDestination.polygon) {
-          curDestinationPoly = JSON.parse(
-            curDestination.polygon,
-          ) as GeoJSONFeatureCollection;
-        }
+        if (curDestination.polygon) JSON.parse(curDestination.polygon);
       } catch {
         toast.error("Building has no boundary data.");
       }
       if (reqId !== buildingSelectRequestIdRef.current) return;
-      setCurBuildingPoly(curDestinationPoly);
 
       const req = await fetch(
         withBasePath(
@@ -714,7 +754,10 @@ export default function NavigationMap(): JSX.Element {
 
   function handleClearDestination() {
     if (tracking) stopTracking();
-    setSelectedDest(-1);
+    setTripFrom({ kind: "gps" });
+    setTripTo(null);
+    setGpsFieldStatus(userPosRef.current ? "ready" : "unknown");
+    setSelectedDest(0);
     setDestinationStops([]);
     setPreferredParkingLotId(null);
     setStopsEditorOpen(false);
@@ -744,6 +787,7 @@ export default function NavigationMap(): JSX.Element {
       setPath(PATH_RESET);
       setNavigating(false);
     }
+    setTripTo({ kind: "place", id });
     setSheetPosition(0);
     setSelectedDest(id);
     if (!stopsEditorOpen) {
@@ -841,6 +885,7 @@ export default function NavigationMap(): JSX.Element {
     if (!chain.destinationIds.length) return;
     setDestinationStops(chain.destinationIds);
     const lastId = chain.destinationIds[chain.destinationIds.length - 1]!;
+    setTripTo({ kind: "place", id: lastId });
     setSelectedDest(lastId);
     await showBuilding(lastId);
     setStopsEditorOpen(true);
@@ -978,48 +1023,33 @@ export default function NavigationMap(): JSX.Element {
     );
   }
 
-  async function getRoute(): Promise<Path> {
-    const routeDestIds =
-      destinationStops.filter((id) => id > 0).length > 0
-        ? destinationStops.filter((id) => id > 0)
-        : selectedDest > 0
-          ? [selectedDest]
-          : [];
-
-    if (routeDestIds.length === 0) {
-      toast.error("Please select a destination before starting route.");
-      return PATH_RESET;
+  async function getRoute(
+    gpsOverride?: { lat: number; lng: number },
+  ): Promise<Path | null | "stale"> {
+    const from = gpsOverride ? ({ kind: "gps" } as const) : tripFromRef.current;
+    const to = tripToRef.current;
+    const pos = gpsOverride ?? userPosRef.current;
+    const built = buildNavigatePayload({
+      from,
+      to,
+      viaPlaceIds: destinationStops,
+      gps: pos,
+      navConditions: curNavConditions,
+      preferredParkingLotId,
+    });
+    if (!built.ok) {
+      if (built.reason === "same") {
+        toast.error("Start and destination are the same.");
+      } else if (built.reason === "gps") {
+        toast.error(
+          "Location unavailable. Pick a place or a campus entrance instead.",
+        );
+      } else {
+        toast.error("Choose a start and a destination.");
+      }
+      return null;
     }
-    const pos = userPosRef.current;
-    if (!pos) {
-      toast.error("Tap Locate Me before looking for a route.");
-      return PATH_RESET;
-    }
-
-    const preferredLot =
-      curNavConditions.is_vehicular && preferredParkingLotId != null
-        ? preferredParkingLotId
-        : undefined;
-    const payload =
-      routeDestIds.length > 1
-        ? {
-            viaDestIds: routeDestIds,
-            lat: pos.lat,
-            lng: pos.lng,
-            navConditions: curNavConditions,
-            ...(preferredLot != null
-              ? { preferredParkingLotId: preferredLot }
-              : {}),
-          }
-        : {
-            destId: routeDestIds[0],
-            lat: pos.lat,
-            lng: pos.lng,
-            navConditions: curNavConditions,
-            ...(preferredLot != null
-              ? { preferredParkingLotId: preferredLot }
-              : {}),
-          };
+    const payload = built.body;
 
     const reqId = ++routeRequestIdRef.current;
     const req = await fetch(withBasePath("/api/map/navigateTo"), {
@@ -1027,18 +1057,18 @@ export default function NavigationMap(): JSX.Element {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (reqId !== routeRequestIdRef.current) return PATH_RESET;
+    if (reqId !== routeRequestIdRef.current) return "stale";
     const resp = (await req.json().catch(() => ({}))) as NavigateToResponse & {
       error?: string;
     };
-    if (reqId !== routeRequestIdRef.current) return PATH_RESET;
+    if (reqId !== routeRequestIdRef.current) return "stale";
     if (req.status !== 200) {
       toast.error(resp?.error ?? "Failed to build route.");
-      throw new Error("Navigate request failed");
+      return null;
     }
     if (!Array.isArray(resp?.path) || resp.path.length === 0) {
       toast.error("No route found for that selection.");
-      return PATH_RESET;
+      return null;
     }
     const orderedPath = resp.path;
     const pnids: Set<number> = new Set(orderedPath);
@@ -1046,7 +1076,7 @@ export default function NavigationMap(): JSX.Element {
     const lastNodeId = resp.lastNodeId ?? orderedPath[orderedPath.length - 1];
     if (!lastNodeId || !firstNodeId || pnids.size === 0) {
       toast.error("No route found for that selection.");
-      return PATH_RESET;
+      return null;
     }
     const coords = resp.geometry?.coordinates ?? [];
     routeCoordsRef.current = coords;
@@ -1096,18 +1126,27 @@ export default function NavigationMap(): JSX.Element {
     };
   }
 
-  async function showRoute() {
+  async function showRoute(gpsOverride?: {
+    lat: number;
+    lng: number;
+  }): Promise<boolean> {
     try {
-      const curPath = await getRoute();
+      const curPath = await getRoute(gpsOverride);
+      if (curPath === "stale") return true;
+      if (!curPath) return false;
       setPath(curPath);
       setNavigating(true);
-      setTracking(false);
-      setMapStage(MAP_STAGES.ROUTE);
-      setSheetPosition(effectiveSheetPeek);
+      if (!trackingRef.current) {
+        setTracking(false);
+        setMapStage(MAP_STAGES.ROUTE);
+        setSheetPosition(effectiveSheetPeek);
+      }
       setZoomed(true);
+      return true;
     } catch (err) {
       console.error("Route lookup failed", err);
       toast.error("Failed to build route. Please try again.");
+      return false;
     }
   }
 
@@ -1139,11 +1178,21 @@ export default function NavigationMap(): JSX.Element {
   useEffect(() => {
     const prev = prevPreferredParkingLotIdRef.current;
     prevPreferredParkingLotIdRef.current = preferredParkingLotId;
+    if (skipParkingRecalcRef.current) {
+      skipParkingRecalcRef.current = false;
+      return;
+    }
     if (!navigating || tracking) return;
     if (!curNavConditions.is_vehicular) return;
     if (prev === preferredParkingLotId) return;
     const t = window.setTimeout(() => {
-      void showRouteRef.current();
+      void (async () => {
+        const ok = await showRouteRef.current();
+        if (!ok) {
+          skipParkingRecalcRef.current = true;
+          setPreferredParkingLotId(prev);
+        }
+      })();
     }, 200);
     return () => window.clearTimeout(t);
   }, [
@@ -1153,24 +1202,136 @@ export default function NavigationMap(): JSX.Element {
     curNavConditions.is_vehicular,
   ]);
 
-  async function recalcRouteForNavMode(nextNavConditions: NavConditions) {
-    try {
-      const curPath = await getRoute();
-      setPath(curPath);
-      setNavigating(true);
-      setTracking(false);
-      setMapStage(MAP_STAGES.ROUTE);
-    } catch (err) {
-      console.error("Recalc route failed", err);
-      toast.error("Failed to recalculate route.");
+  const startPlaceId = tripFrom?.kind === "place" ? tripFrom.id : 0;
+  const startPolygonRaw =
+    destinations.find((d) => Number(d.id) === startPlaceId)?.polygon ?? "";
+  useEffect(() => {
+    if (!startPlaceId) {
+      setStartBuildingPoly(null);
+      return;
     }
+    if (startPolygonRaw) {
+      try {
+        setStartBuildingPoly(
+          JSON.parse(startPolygonRaw) as GeoJSONFeatureCollection,
+        );
+      } catch {
+        setStartBuildingPoly(null);
+      }
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          withBasePath(
+            `/api/destination?id=${encodeURIComponent(startPlaceId)}`,
+          ),
+        );
+        if (!res.ok || cancelled) return;
+        const payload = await res.json().catch(() => null);
+        const full = Array.isArray(payload?.destinations)
+          ? (payload.destinations[0] as MapDestination | undefined)
+          : undefined;
+        if (!full?.polygon || cancelled) return;
+        setDestinations((prev) =>
+          prev.map((d) =>
+            Number(d.id) === startPlaceId ? { ...d, polygon: full.polygon } : d,
+          ),
+        );
+        setStartBuildingPoly(
+          JSON.parse(full.polygon) as GeoJSONFeatureCollection,
+        );
+      } catch {
+        if (!cancelled) setStartBuildingPoly(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [startPlaceId, startPolygonRaw]);
+
+  const routeHighlightKey = routeDestinationIds
+    .filter((id) => id > 0 && id !== startPlaceId)
+    .map((id) => {
+      const polygon = destinations.find((d) => Number(d.id) === id)?.polygon;
+      return `${id}:${polygon ? "1" : "0"}`;
+    })
+    .join(",");
+  useEffect(() => {
+    const ids = routeHighlightKey
+      .split(",")
+      .filter(Boolean)
+      .map((part) => Number(part.split(":")[0]))
+      .filter((id) => id > 0);
+    if (ids.length === 0) {
+      setRouteDestPoly(null);
+      return;
+    }
+    const features = ids.flatMap((id) => {
+      const polygon = destinations.find((d) => Number(d.id) === id)?.polygon;
+      return polygon ? storedPolygonFeatures(polygon) : [];
+    });
+    setRouteDestPoly(
+      features.length > 0
+        ? { type: "FeatureCollection", features }
+        : null,
+    );
+    const missing = ids.filter(
+      (id) => !destinations.find((d) => Number(d.id) === id)?.polygon,
+    );
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const id of missing) {
+        if (cancelled) return;
+        try {
+          const res = await fetch(
+            withBasePath(`/api/destination?id=${encodeURIComponent(id)}`),
+          );
+          if (!res.ok || cancelled) continue;
+          const payload = await res.json().catch(() => null);
+          const full = Array.isArray(payload?.destinations)
+            ? (payload.destinations[0] as MapDestination | undefined)
+            : undefined;
+          if (!full?.polygon || cancelled) continue;
+          setDestinations((prev) =>
+            prev.map((d) =>
+              Number(d.id) === id ? { ...d, polygon: full.polygon } : d,
+            ),
+          );
+        } catch {
+          /* the next change retries */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [destinations, routeHighlightKey]);
+
+  async function recalcRouteForNavMode() {
+    const ok = await showRoute();
+    if (ok) return;
+    setNavigating(false);
+    setPath(PATH_RESET);
+    routeCoordsRef.current = [];
+    setRouteCoords([]);
+    setRouteOutdoorSegments([]);
+    setRouteModeSegments([]);
+    setRoutePortals([]);
+    setRouteEta(null);
+    setRouteSteps([]);
+    setMapStage(
+      selectedDest > 0 ? MAP_STAGES.BUILDING : MAP_STAGES.IDLE,
+    );
   }
 
   async function startTracking() {
-    if (!selectedDest || selectedDest <= 0)
-      return toast.error("Please select a destination first.");
+    if (path.firstNodeId < 0)
+      return toast.error("Show a route before live navigation.");
     if (!userPos)
-      return toast.error("Tap Locate Me first so I know where you are.");
+      return toast.error("Allow location to follow the route live.");
 
     const firstNode =
       path.startNode ??
@@ -1260,7 +1421,7 @@ export default function NavigationMap(): JSX.Element {
               OFF_ROUTE_DEBOUNCE_MS
             ) {
               offRouteSinceRef.current = null;
-              void showRoute();
+              void showRoute({ lat: latitude, lng: longitude });
             }
           } else {
             offRouteSinceRef.current = null;
@@ -1269,7 +1430,7 @@ export default function NavigationMap(): JSX.Element {
       },
       (err) => {
         toast.error(err.message || "Tracking error");
-        stopTracking();
+        endLiveFollow();
       },
       {
         enableHighAccuracy: true,
@@ -1282,6 +1443,22 @@ export default function NavigationMap(): JSX.Element {
     watchIdRef.current = id;
     setTracking(true);
     setMapStage(MAP_STAGES.TRACKING);
+  }
+
+  function endLiveFollow() {
+    if (watchIdRef.current != null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setTracking(false);
+    setNavigating(true);
+    setMapStage(MAP_STAGES.ROUTE);
+    disableCompass();
+    const map = mapRef.current?.getMap?.();
+    map?.easeTo({ bearing: 0, pitch: 0, duration: 400, essential: true });
+    if (routeCoordsRef.current.length >= 2) {
+      fitToUserAndDest(routeCoordsRef.current, { duration: 600 });
+    }
   }
 
   function stopTracking() {
@@ -1335,6 +1512,12 @@ export default function NavigationMap(): JSX.Element {
   useEffect(() => {
     getBuildings();
     locateOnceRobust();
+    void fetch(withBasePath("/api/map/campusEntrance"))
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data?.entrances)) setCampusEntrances(data.entrances);
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -1343,9 +1526,14 @@ export default function NavigationMap(): JSX.Element {
       mapStage === MAP_STAGES.ROUTE && navigating && !tracking;
 
     if (!isViewingRoute) return;
-    if (!selectedDest || !userPos) return;
+    const from = tripFromRef.current;
+    const to = tripToRef.current;
+    if (!from || !to) return;
+    if ((tripEndNeedsGps(from) || tripEndNeedsGps(to)) && !userPosRef.current) {
+      return;
+    }
 
-    void recalcRouteForNavMode(curNavConditions);
+    void recalcRouteForNavMode();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curNavConditions]);
 
@@ -1430,47 +1618,197 @@ export default function NavigationMap(): JSX.Element {
         setZoomed(true);
         return;
       } else {
-        locateOnceRobust();
-        setZoomed(true);
+        showCampusOverview();
+        setZoomed(false);
         return;
       }
     }
   }
 
-  async function handelTheButton() {
-    if (!selectedDest)
-      return toast.error("Please select a destination before starting route.");
-    if (!userPos) {
-      pendingRouteStartRef.current = true;
-      await locateOnceRobust(true);
+  function requestGpsFix(): Promise<UserPos | null> {
+    return new Promise((resolve) => {
+      if (!("geolocation" in navigator) || !window.isSecureContext) {
+        resolve(null);
+        return;
+      }
+      let settled = false;
+      const finish = (pos: UserPos | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(pos);
+      };
+      const timer = window.setTimeout(() => finish(null), 8000);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { longitude, latitude, accuracy } = position.coords;
+          finish({ lng: longitude, lat: latitude, accuracy });
+        },
+        () => finish(null),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
+      );
+    });
+  }
+
+  async function locateMe() {
+    if (locatingSelf) return;
+    setLocatingSelf(true);
+    const existing = userPosRef.current;
+    if (existing) ensureCenter(existing.lng, existing.lat, 16);
+    try {
+      const fix = await requestGpsFix();
+      if (!fix) {
+        toast.error("Could not get your location.");
+        return;
+      }
+      setUserPos(fix);
+      userPosRef.current = fix;
+      setGpsFieldStatus("ready");
+      ensureCenter(fix.lng, fix.lat, 16);
+    } finally {
+      setLocatingSelf(false);
+    }
+  }
+
+  function dropRoutePreview(nextStage?: MapStage) {
+    if (watchIdRef.current != null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setTracking(false);
+    setNavigating(false);
+    setPath(PATH_RESET);
+    routeCoordsRef.current = [];
+    setRouteCoords([]);
+    setRouteOutdoorSegments([]);
+    setRouteModeSegments([]);
+    setRoutePortals([]);
+    setRouteEta(null);
+    setRouteSteps([]);
+    navProgress.resetProgress();
+    disableCompass();
+    setMapStage(
+      nextStage ??
+        (selectedDest > 0 ? MAP_STAGES.BUILDING : MAP_STAGES.IDLE),
+    );
+  }
+
+  function focusEntrance(end: Extract<TripEnd, { kind: "entrance" }>) {
+    const row = campusEntrances.find((item) => item.id === end.id);
+    if (!row) return;
+    setDestPos({ lat: row.lat, lng: row.lng });
+    ensureCenter(row.lng, row.lat, 16);
+  }
+
+  function onFromChange(end: TripEnd | null) {
+    dropRoutePreview();
+    setTripFrom(end);
+    if (!end || end.kind === "gps") return;
+    if (end.kind === "place") {
+      const place = destinations.find((d) => Number(d.id) === end.id);
+      if (place) ensureCenter(place.lng, place.lat, 16);
       return;
     }
+    focusEntrance(end);
+  }
 
+  function onToChange(end: TripEnd | null) {
+    if (!end) {
+      dropRoutePreview(MAP_STAGES.IDLE);
+      setTripTo(null);
+      setSelectedDest(0);
+      setDestinationStops([]);
+      setPreferredParkingLotId(null);
+      setDestPos(null);
+      setBuildingNodes(new Set());
+      setBuildingMarkers([]);
+      return;
+    }
+    if (tripFrom && sameTripEnd(tripFrom, end)) {
+      toast.error("Start and destination are the same.");
+      return;
+    }
+    if (end.kind === "place") {
+      void handleDestinationChange(end.id);
+      return;
+    }
+    dropRoutePreview(MAP_STAGES.BUILDING);
+    setTripTo(end);
+    setSelectedDest(0);
+    setDestinationStops([]);
+    setPreferredParkingLotId(null);
+    setSheetPosition(0);
+    setZoomed(true);
+    if (end.kind === "entrance") focusEntrance(end);
+  }
+
+  function swapEnds() {
+    const nextFrom = tripTo;
+    const nextTo = tripFrom;
+    if (nextFrom && nextTo && sameTripEnd(nextFrom, nextTo)) return;
+    setTripFrom(nextFrom);
+    if (nextTo?.kind === "place") {
+      void handleDestinationChange(nextTo.id);
+      return;
+    }
+    dropRoutePreview(nextTo ? MAP_STAGES.BUILDING : MAP_STAGES.IDLE);
+    setTripTo(nextTo);
+    setSelectedDest(0);
+    setDestinationStops([]);
+    setPreferredParkingLotId(null);
+    if (nextTo?.kind === "entrance") {
+      setSheetPosition(0);
+      focusEntrance(nextTo);
+      return;
+    }
+    setDestPos(null);
+    setBuildingNodes(new Set());
+    setBuildingMarkers([]);
+  }
+
+  async function handelTheButton() {
     if (!navigating && !tracking) {
-      showRoute();
+      if (!tripFrom || !tripTo) {
+        toast.error("Choose a start and a destination.");
+        return;
+      }
+      if (sameTripEnd(tripFrom, tripTo)) {
+        toast.error("Start and destination are the same.");
+        return;
+      }
+      if (
+        (tripEndNeedsGps(tripFrom) || tripEndNeedsGps(tripTo)) &&
+        !userPosRef.current
+      ) {
+        const fix = await requestGpsFix();
+        if (!fix) {
+          setGpsFieldStatus("unavailable");
+          toast.error(
+            "Location unavailable. Pick a place or a campus entrance instead.",
+          );
+          return;
+        }
+        setUserPos(fix);
+        userPosRef.current = fix;
+        setGpsFieldStatus("ready");
+      }
+      await showRoute();
       return;
     }
 
     if (navigating) {
       if (tracking) {
         setSheetPosition(0);
-        stopTracking();
-        setTracking(false);
-        setNavigating(false);
-        setPath(PATH_RESET);
-        routeCoordsRef.current = [];
-        setRouteCoords([]);
-        setRouteOutdoorSegments([]);
-        setRouteModeSegments([]);
-        setRoutePortals([]);
-        setRouteEta(null);
-        setMapStage(MAP_STAGES.BUILDING);
+        endLiveFollow();
       } else {
         setSheetPosition(effectiveSheetPeek);
         startTracking();
       }
     }
   }
+
+  const sheetVisible =
+    selectedDest > 0 || navigating || tripTo != null;
 
   /** ---------------- Render ---------------- */
 
@@ -1483,26 +1821,44 @@ export default function NavigationMap(): JSX.Element {
 
       {/* Top brand + search bar */}
       <div
-        className={`absolute inset-x-3 top-0 z-30 ${safeAreaTopClass} md:left-1/2 md:w-[720px] md:-translate-x-1/2`}
+        className={`absolute inset-x-3 top-0 ${tripSearchOpen ? "z-40" : "z-30"} ${safeAreaTopClass} md:left-1/2 md:w-[720px] md:-translate-x-1/2`}
       >
         <div className="flex w-full items-stretch gap-2">
-          <EditorToolsMenu
-            isAdmin={isAdmin}
-            isIcUser={isIcUser}
-            isSignedIn={isSignedIn}
-            devMode={devMode}
-            userName={realSession?.user.name}
-            basemap={basemap}
-            onBasemapChange={setBasemap}
-          />
-
-          <DestinationSearchCombobox
-            destinations={destinations}
-            value={selectedDest > 0 ? selectedDest : 0}
-            onChange={(id) => void handleDestinationChange(id)}
-            onAddStop={openStopsEditor}
+          <TripEndsFields
+            from={tripFrom}
+            to={tripTo}
+            places={destinations.map((d) => ({
+              id: Number(d.id),
+              name: d.name,
+            }))}
+            entrances={campusEntrances}
+            onFromChange={onFromChange}
+            onToChange={onToChange}
+            onSwap={swapEnds}
+            gpsStatus={gpsFieldStatus}
+            onRetryGps={() => void locateMe()}
+            showAddStop={
+              tripFrom?.kind === "place" && tripTo?.kind === "place"
+            }
             stopCount={destinationStops.length}
-            loading={destinationsFirstLoadPending && destinations.length === 0}
+            onAddStop={openStopsEditor}
+            disabled={
+              destinationsFirstLoadPending && destinations.length === 0
+            }
+            onSearchOpenChange={setTripSearchOpen}
+            leading={
+              <EditorToolsMenu
+                isAdmin={isAdmin}
+                isIcUser={isIcUser}
+                isSignedIn={isSignedIn}
+                devMode={devMode}
+                userName={realSession?.user.name}
+                basemap={basemap}
+                onBasemapChange={setBasemap}
+                chipLabel="Menu"
+                chipClassName={`${mapBarActionClass} border-r border-border`}
+              />
+            }
           />
 
           {showZoomReadout ? (
@@ -1519,7 +1875,7 @@ export default function NavigationMap(): JSX.Element {
 
       {showZoomReadout ? (
         <div
-          className={`${mapHeaderChipClass} pointer-events-none absolute right-3 z-20 top-[calc(env(safe-area-inset-top,0px)+8.75rem)] px-2 font-mono text-[11px] tabular-nums sm:hidden`}
+          className={`${mapHeaderChipClass} pointer-events-none absolute right-3 z-20 top-[calc(env(safe-area-inset-top,0px)+15.75rem)] px-2 font-mono text-[11px] tabular-nums sm:hidden`}
           aria-live="polite"
           title="Zoom readout"
         >
@@ -1585,14 +1941,14 @@ export default function NavigationMap(): JSX.Element {
         </div>
       ) : null}
 
-      {!tracking ? (
+      {!tracking && !tripSearchOpen ? (
         <div
           className={`absolute inset-x-3 z-30 ${mapModeRowOffsetClass} space-y-2 md:left-1/2 md:w-[720px] md:-translate-x-1/2`}
         >
           <div
             role="radiogroup"
             aria-label="Navigation mode"
-            className="flex justify-center gap-2 overflow-x-auto pb-1 no-scrollbar mt-5 "
+            className="flex justify-center gap-2 overflow-x-auto pb-1 no-scrollbar"
           >
             <button
               role="radio"
@@ -1646,8 +2002,26 @@ export default function NavigationMap(): JSX.Element {
         </div>
       ) : null}
 
+      <button
+        type="button"
+        className={`fixed right-3 z-40 ${mapFloatingActionClass} disabled:opacity-60`}
+        style={{
+          bottom: sheetVisible
+              ? `calc((1 - ${sheetPosition}) * (100dvh - max(4.75rem, env(safe-area-inset-top) + 3.5rem)) + 4.75rem)`
+              : "calc(env(safe-area-inset-bottom, 0px) + 1rem)",
+        }}
+        onClick={() => void locateMe()}
+        disabled={locatingSelf}
+        aria-label="Locate me"
+      >
+        <LocateFixed
+          className={locatingSelf ? "animate-pulse" : undefined}
+          size={22}
+        />
+      </button>
+
       <MapBottomSheet
-        hidden={!selectedDest}
+        hidden={!sheetVisible}
         height="calc(100dvh - max(4.75rem, env(safe-area-inset-top) + 3.5rem))"
         position={sheetPosition}
         onPositionChange={setSheetPosition}
@@ -1691,6 +2065,15 @@ export default function NavigationMap(): JSX.Element {
                 ) : null}
               </>
             )
+          ) : tripTo ? (
+            <p className="w-full truncate text-center text-lg font-semibold">
+              {tripTo.kind === "gps"
+                ? "Current location"
+                : tripTo.kind === "entrance"
+                  ? (campusEntrances.find((row) => row.id === tripTo.id)?.name ??
+                    "Campus entrance")
+                  : "Destination"}
+            </p>
           ) : null
         }
         toolbar={
@@ -1757,13 +2140,21 @@ export default function NavigationMap(): JSX.Element {
       >
         {curNavConditions.is_vehicular &&
         !tracking &&
-        recommendedParkingLotIds.length > 1 ? (
+        recommendedParkingLotIds.length > 0 ? (
           <div
             className={`mx-auto mt-3 mb-2 w-full max-w-md rounded-2xl border px-3 py-3 ${borderMutedClass} ${surfaceSubtleClass}`}
           >
             <p className="mb-2 text-center text-sm font-semibold">
-              Parking lot
+              {recommendedParkingLotIds.length === 1
+                ? `Parking lot: ${
+                    destinations.find(
+                      (d) => Number(d.id) === recommendedParkingLotIds[0],
+                    )?.name ?? "Recommended lot"
+                  }`
+                : "Parking lot"}
             </p>
+            {recommendedParkingLotIds.length > 1 ? (
+            <>
             <ComboboxSelect
               placeholder="Choose parking lot"
               value={preferredParkingLotId ?? 0}
@@ -1777,6 +2168,8 @@ export default function NavigationMap(): JSX.Element {
             <p className="mt-2 text-center text-xs text-panel-muted-foreground">
               Changing the lot recalculates drive then walk to your building.
             </p>
+            </>
+            ) : null}
           </div>
         ) : null}
 
@@ -1984,7 +2377,9 @@ export default function NavigationMap(): JSX.Element {
               </div>
             ) : null}
 
-            {destinationStops.length > 1 ? (
+            {destinationStops.length > 1 &&
+            tripFrom?.kind === "place" &&
+            tripTo?.kind === "place" ? (
               <button
                 type="button"
                 onClick={openStopsEditor}
@@ -2019,14 +2414,20 @@ export default function NavigationMap(): JSX.Element {
         destinations={destinations}
         favorites={favorites}
         stops={destinationStops}
+        startPlaceId={tripFrom?.kind === "place" ? tripFrom.id : null}
+        onStartPlaceChange={(id) => onFromChange({ kind: "place", id })}
         onStopsChange={(next) => {
           setDestinationStops(next);
           if (next.length > 0) {
             const lastId = next[next.length - 1]!;
             setSelectedDest(lastId);
+            setTripTo({ kind: "place", id: lastId });
           }
         }}
-        onPickDestination={(id) => void handleStopPick(id)}
+        onPickDestination={(id, index) => {
+          if (tripFrom?.kind === "place" && index === 0) return;
+          void handleStopPick(id);
+        }}
         onDone={() => {
           if (destinationStops.length > 1) {
             toast.success(`${destinationStops.length} stops ready for routing`);
@@ -2137,14 +2538,41 @@ export default function NavigationMap(): JSX.Element {
               <AccuracyRingLayer data={accuracyGeoJSON} isDark={isDark} />
             )}
 
-            {selectedDest && curBuildingPoly && (
+            {startPlaceId > 0 &&
+            startPlaceId !== selectedDest &&
+            startBuildingPoly ? (
               <Source
-                id="boundary"
+                id="start-boundary"
                 type="geojson"
-                data={curBuildingPoly as any}
+                data={startBuildingPoly as any}
               >
                 <Layer
-                  id="boundary-fill"
+                  id="start-boundary-fill"
+                  type="fill"
+                  paint={{
+                    "fill-color": "#FFB81C",
+                    "fill-opacity": 0.35,
+                  }}
+                />
+                <Layer
+                  id="start-boundary-outline"
+                  type="line"
+                  paint={{
+                    "line-color": "#FFB81C",
+                    "line-width": 2,
+                  }}
+                />
+              </Source>
+            ) : null}
+
+            {routeDestPoly ? (
+              <Source
+                id="route-dest-boundaries"
+                type="geojson"
+                data={routeDestPoly as any}
+              >
+                <Layer
+                  id="route-dest-boundaries-fill"
                   type="fill"
                   paint={{
                     "fill-color": "#35D5A4",
@@ -2152,7 +2580,7 @@ export default function NavigationMap(): JSX.Element {
                   }}
                 />
                 <Layer
-                  id="boundary-outline"
+                  id="route-dest-boundaries-outline"
                   type="line"
                   paint={{
                     "line-color": "#35D5A4",
@@ -2160,7 +2588,7 @@ export default function NavigationMap(): JSX.Element {
                   }}
                 />
               </Source>
-            )}
+            ) : null}
 
             <TripParkingHighlight data={tripParkingPoly} />
 

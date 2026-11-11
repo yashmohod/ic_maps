@@ -64,6 +64,8 @@ import {
 } from "@/lib/distance-display";
 import { useNavigationProgress } from "@/hooks/use-navigation-progress";
 
+import { TripEndsFields } from "@/components/TripEndsFields";
+import ComboboxSelect from "@/components/ComboboxSelect";
 import { MapBottomSheet } from "@/components/MapBottomSheet";
 import { NavigationNextTurnBanner } from "@/components/NavigationNextTurnBanner";
 import { NavigationStepsPanel } from "@/components/NavigationStepsPanel";
@@ -76,6 +78,13 @@ import {
 import type { FeatureCollection, Polygon } from "geojson";
 import type { NavStep } from "@/lib/navigation-types";
 import { useDistanceUnits } from "@/hooks/use-distance-units";
+import {
+  buildNavigatePayload,
+  sameTripEnd,
+  tripEndNeedsGps,
+  type CampusEntrance,
+  type TripEnd,
+} from "@/lib/trip-end";
 
 const MAX_INCLINE = 45;
 const SHARE_SHEET_PEEK = 0.7;
@@ -109,19 +118,36 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   const { basemap, setBasemap, resolvedMapStyle, canRenderMap } =
     useBasemapStyle(baseStyle);
 
+  type LotChoice = {
+    id: number;
+    name: string;
+    lat?: number;
+    lng?: number;
+  };
+
   type RouteInfo = {
     name: string;
     destinationId: number;
-    parkingLots: Array<{
-      id: number;
-      name: string;
-      lat?: number;
-      lng?: number;
-    }>;
+    destinationName: string;
+    parkingLots: LotChoice[];
+    campusEntrances: CampusEntrance[];
+    recommendedParkingLots: LotChoice[];
   } | null;
 
   const [routeInfo, setRouteInfo] = useState<RouteInfo>(null);
   const [routeLoadPending, setRouteLoadPending] = useState(true);
+  const [tripFrom, setTripFrom] = useState<TripEnd | null>({ kind: "gps" });
+  const [tripTo, setTripTo] = useState<TripEnd | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<
+    "unknown" | "ready" | "unavailable"
+  >("unknown");
+  const [preferredParkingLotId, setPreferredParkingLotId] = useState<
+    number | null
+  >(null);
+  const tripFromRef = useRef(tripFrom);
+  const tripToRef = useRef(tripTo);
+  tripFromRef.current = tripFrom;
+  tripToRef.current = tripTo;
 
   const [curNavConditions, setCurNavConditions] = useState<NavConditions>({
     is_pedestrian: true,
@@ -159,21 +185,45 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         setRouteInfo(null);
         return;
       }
+      const mapLots = (
+        rows: Array<{ id: number; name: string; lat?: number; lng?: number }>,
+      ) =>
+        rows.map((p) => ({
+          id: Number(p.id),
+          name: String(p.name),
+          lat: p.lat != null ? Number(p.lat) : undefined,
+          lng: p.lng != null ? Number(p.lng) : undefined,
+        }));
       const parkingLots = Array.isArray(data.parkingLots)
-        ? data.parkingLots.map(
-            (p: { id: number; name: string; lat?: number; lng?: number }) => ({
-              id: Number(p.id),
-              name: String(p.name),
-              lat: p.lat != null ? Number(p.lat) : undefined,
-              lng: p.lng != null ? Number(p.lng) : undefined,
+        ? mapLots(data.parkingLots)
+        : [];
+      const recommendedParkingLots = Array.isArray(data.recommendedParkingLots)
+        ? mapLots(data.recommendedParkingLots)
+        : [];
+      const campusEntrances: CampusEntrance[] = Array.isArray(
+        data.campusEntrances,
+      )
+        ? data.campusEntrances.map(
+            (row: CampusEntrance) => ({
+              id: Number(row.id),
+              name: String(row.name),
+              nodeId: Number(row.nodeId),
+              lat: Number(row.lat),
+              lng: Number(row.lng),
             }),
           )
         : [];
+      const destinationId = Number(firstDest.id);
       setRouteInfo({
         name: data.name ?? "Route",
-        destinationId: Number(firstDest.id),
+        destinationId,
+        destinationName: String(firstDest.name ?? data.name ?? "Destination"),
         parkingLots,
+        campusEntrances,
+        recommendedParkingLots,
       });
+      setTripTo({ kind: "place", id: destinationId });
+      setPreferredParkingLotId(null);
     } catch (e) {
       console.error(e);
       toast.error("Failed to load route.");
@@ -200,7 +250,6 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   );
 
   const [userPos, setUserPos] = useState<UserPos | null>(null);
-  const [locating, setLocating] = useState(false);
   const [tracking, setTracking] = useState(false);
   const [isZoomed, setZoomed] = useState(false);
   const [sheetPosition, setSheetPosition] = useState(SHARE_SHEET_PEEK);
@@ -231,7 +280,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   const routeCoordsRef = useRef<Array<[number, number]>>([]);
   const watchIdRef = useRef<number | null>(null);
-  const pendingRouteStartRef = useRef(false);
+  const skipParkingRecalcRef = useRef(false);
   const routeRequestIdRef = useRef(0);
   const offRouteSinceRef = useRef<number | null>(null);
   const routePendingRef = useRef(false);
@@ -267,42 +316,64 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
   }
 
-  async function locateOnce() {
-    if (!("geolocation" in navigator)) {
-      toast.error("Geolocation not supported.");
-      return;
-    }
-    if (!window.isSecureContext) {
-      toast.error("Location requires HTTPS (or localhost).");
-      return;
-    }
+  function locateOnce(): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!("geolocation" in navigator)) {
+        toast.error("Geolocation not supported.");
+        resolve(false);
+        return;
+      }
+      if (!window.isSecureContext) {
+        toast.error("Location requires HTTPS (or localhost).");
+        resolve(false);
+        return;
+      }
 
-    setLocating(true);
-    const applyFix = (longitude: number, latitude: number, accuracy?: number) => {
-      setUserPos({ lng: longitude, lat: latitude, accuracy });
-      ensureCenter(longitude, latitude, 16);
-      setLocating(false);
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { longitude, latitude, accuracy } = position.coords;
-        applyFix(longitude, latitude, accuracy);
-      },
-      () => {},
-      { enableHighAccuracy: false, timeout: 1500, maximumAge: 60_000 },
-    );
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { longitude, latitude, accuracy } = position.coords;
-        applyFix(longitude, latitude, accuracy);
-      },
-      () => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(ok);
+      };
+      const timer = window.setTimeout(() => {
         toast.error("Could not get your location.");
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
-    );
+        finish(false);
+      }, 8000);
+
+      const applyFix = (
+        longitude: number,
+        latitude: number,
+        accuracy?: number,
+      ) => {
+        const next = { lng: longitude, lat: latitude, accuracy };
+        userPosRef.current = next;
+        setUserPos(next);
+        setGpsStatus("ready");
+        ensureCenter(longitude, latitude, 16);
+        finish(true);
+      };
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { longitude, latitude, accuracy } = position.coords;
+          applyFix(longitude, latitude, accuracy);
+        },
+        () => {},
+        { enableHighAccuracy: false, timeout: 1500, maximumAge: 60_000 },
+      );
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { longitude, latitude, accuracy } = position.coords;
+          applyFix(longitude, latitude, accuracy);
+        },
+        () => {
+          if (!settled) toast.error("Could not get your location.");
+          finish(false);
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
+      );
+    });
   }
 
   const accuracyGeoJSON = useMemo<GeoJSONFeatureCollection | null>(() => {
@@ -394,7 +465,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
 
   function startTracking() {
     if (!userPos) {
-      toast.error("Tap Locate Me first so I know where you are.");
+      toast.error("Allow location to follow the route live.");
       return;
     }
     if (routeCoordsRef.current.length < 2) {
@@ -480,7 +551,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               OFF_ROUTE_DEBOUNCE_MS
             ) {
               offRouteSinceRef.current = null;
-              void refreshRoute({ lat: latitude, lng: longitude });
+              void refreshRoute({ fromGps: { lat: latitude, lng: longitude } });
             }
           } else {
             offRouteSinceRef.current = null;
@@ -532,12 +603,28 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       toast.error("Route not loaded.");
       return;
     }
-    if (!userPos) {
-      pendingRouteStartRef.current = true;
-      await locateOnce();
-      return;
-    }
     if (!navigating && !tracking) {
+      if (!tripFrom || !tripTo) {
+        toast.error("Choose a start and a destination.");
+        return;
+      }
+      if (sameTripEnd(tripFrom, tripTo)) {
+        toast.error("Start and destination are the same.");
+        return;
+      }
+      if (
+        (tripEndNeedsGps(tripFrom) || tripEndNeedsGps(tripTo)) &&
+        !userPosRef.current
+      ) {
+        const ok = await locateOnce();
+        if (!ok) {
+          setGpsStatus("unavailable");
+          toast.error(
+            "Location unavailable. Pick a campus entrance instead.",
+          );
+          return;
+        }
+      }
       await refreshRoute();
       setSheetPosition(effectiveSheetPeek);
       setZoomed(true);
@@ -555,58 +642,72 @@ export default function ShareRouteNavigatePage(): JSX.Element {
     }
   }
 
-  const canNavigate = !!userPos && !!routeInfo?.destinationId;
-
-  async function refreshRoute(overridePos?: { lat: number; lng: number }) {
-    const pos = overridePos ?? userPosRef.current;
-    if (
-      !routeIdRaw ||
-      !pos ||
-      !routeInfo?.destinationId ||
-      routePendingRef.current
-    )
-      return;
+  async function refreshRoute(options?: {
+    keepOnFailure?: boolean;
+    fromGps?: { lat: number; lng: number };
+  }) {
+    if (!routeIdRaw || !routeInfo?.destinationId || routePendingRef.current) {
+      return false;
+    }
+    const built = buildNavigatePayload({
+      from: options?.fromGps ? { kind: "gps" } : tripFromRef.current,
+      to: tripToRef.current,
+      gps: options?.fromGps ?? userPosRef.current,
+      navConditions: curNavConditions,
+      preferredParkingLotId,
+      parkingLotIds:
+        routeInfo.parkingLots.length > 0
+          ? routeInfo.parkingLots.map((lot) => lot.id)
+          : null,
+    });
+    if (!built.ok) {
+      if (built.reason === "same") {
+        toast.error("Start and destination are the same.");
+      } else if (built.reason === "gps") {
+        toast.error(
+          "Location unavailable. Pick a campus entrance instead.",
+        );
+      } else {
+        toast.error("Choose a start and a destination.");
+      }
+      return false;
+    }
     const reqId = ++routeRequestIdRef.current;
     setRoutePending(true);
     routePendingRef.current = true;
     try {
-      const body: Record<string, unknown> = {
-        lat: pos.lat,
-        lng: pos.lng,
-        navConditions: curNavConditions,
-      };
-
-      // Server expands vehicular trips via building recommended parking lots.
-      body.destId = routeInfo.destinationId;
+      const body = built.body;
 
       const res = await fetch(withBasePath("/api/map/navigateTo"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (reqId !== routeRequestIdRef.current) return;
+      if (reqId !== routeRequestIdRef.current) return true;
 
       const data = (await res
         .json()
         .catch(() => ({}))) as NavigateToResponse & {
         error?: string;
       };
-      if (reqId !== routeRequestIdRef.current) return;
+      if (reqId !== routeRequestIdRef.current) return true;
 
       if (!res.ok || !Array.isArray(data.path) || data.path.length === 0) {
-        setRouteCoords([]);
-        setRouteOutdoorSegments([]);
-      setRouteModeSegments([]);
-        setRoutePortals([]);
-        routeCoordsRef.current = [];
-        routeStartNodeRef.current = null;
-        setRouteEta(null);
-        setRouteSteps([]);
-        setDestPos(null);
-        setParkingPos(null);
-        setTripParkingPoly(null);
+        if (!options?.keepOnFailure) {
+          setRouteCoords([]);
+          setRouteOutdoorSegments([]);
+          setRouteModeSegments([]);
+          setRoutePortals([]);
+          routeCoordsRef.current = [];
+          routeStartNodeRef.current = null;
+          setRouteEta(null);
+          setRouteSteps([]);
+          setDestPos(null);
+          setParkingPos(null);
+          setTripParkingPoly(null);
+        }
         toast.error(data?.error ?? "No path returned.");
-        return;
+        return false;
       }
 
       const coords = data.geometry?.coordinates ?? [];
@@ -667,7 +768,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
               `/api/destination?id=${encodeURIComponent(parkingLeg.destinationId)}`,
             ),
           );
-          if (reqId !== routeRequestIdRef.current) return;
+          if (reqId !== routeRequestIdRef.current) return true;
           const lotPayload = lotRes.ok
             ? await lotRes.json().catch(() => null)
             : null;
@@ -690,27 +791,31 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             setTripParkingPoly(null);
           }
         } catch {
-          if (reqId !== routeRequestIdRef.current) return;
+          if (reqId !== routeRequestIdRef.current) return true;
           setTripParkingPoly(null);
         }
       } else {
         setParkingPos(null);
         setTripParkingPoly(null);
       }
+      return true;
     } catch (e) {
-      if (reqId !== routeRequestIdRef.current) return;
+      if (reqId !== routeRequestIdRef.current) return true;
       console.error(e);
-      setRouteCoords([]);
-      setRouteOutdoorSegments([]);
-      setRouteModeSegments([]);
-      setRoutePortals([]);
-      routeCoordsRef.current = [];
-      routeStartNodeRef.current = null;
-      setRouteEta(null);
-      setRouteSteps([]);
-      setDestPos(null);
-      setTripParkingPoly(null);
+      if (!options?.keepOnFailure) {
+        setRouteCoords([]);
+        setRouteOutdoorSegments([]);
+        setRouteModeSegments([]);
+        setRoutePortals([]);
+        routeCoordsRef.current = [];
+        routeStartNodeRef.current = null;
+        setRouteEta(null);
+        setRouteSteps([]);
+        setDestPos(null);
+        setTripParkingPoly(null);
+      }
       toast.error("Failed to load route.");
+      return false;
     } finally {
       if (reqId === routeRequestIdRef.current) {
         setRoutePending(false);
@@ -731,18 +836,34 @@ export default function ShareRouteNavigatePage(): JSX.Element {
   }, [routeIdRaw]);
 
   useEffect(() => {
-    if (!canNavigate) return;
+    if (routeCoordsRef.current.length < 2) return;
     void refreshRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeInfo?.destinationId, curNavConditions]);
+  }, [curNavConditions]);
 
+  const prevParkingLotRef = useRef(preferredParkingLotId);
   useEffect(() => {
-    if (!pendingRouteStartRef.current) return;
-    if (!userPos || !canNavigate) return;
-    pendingRouteStartRef.current = false;
-    void refreshRoute();
+    const prev = prevParkingLotRef.current;
+    prevParkingLotRef.current = preferredParkingLotId;
+    if (skipParkingRecalcRef.current) {
+      skipParkingRecalcRef.current = false;
+      return;
+    }
+    if (routeCoordsRef.current.length < 2 || tracking) return;
+    if (!curNavConditions.is_vehicular) return;
+    if (prev === preferredParkingLotId) return;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        const ok = await refreshRoute({ keepOnFailure: true });
+        if (!ok) {
+          skipParkingRecalcRef.current = true;
+          setPreferredParkingLotId(prev);
+        }
+      })();
+    }, 200);
+    return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPos, canNavigate]);
+  }, [preferredParkingLotId, tracking, curNavConditions.is_vehicular]);
 
   useEffect(() => {
     setSheetPosition((pos) =>
@@ -757,6 +878,27 @@ export default function ShareRouteNavigatePage(): JSX.Element {
       }
     };
   }, []);
+
+  function clearSharePreview() {
+    setRouteCoords([]);
+    setRouteOutdoorSegments([]);
+    setRouteModeSegments([]);
+    setRoutePortals([]);
+    routeCoordsRef.current = [];
+    routeStartNodeRef.current = null;
+    setRouteEta(null);
+    setRouteSteps([]);
+    setParkingPos(null);
+    setTripParkingPoly(null);
+    if (tracking) stopTracking();
+  }
+
+  const shareParkingLots =
+    routeInfo == null
+      ? []
+      : routeInfo.parkingLots.length > 0
+        ? routeInfo.parkingLots
+        : routeInfo.recommendedParkingLots;
 
   return (
     <div className="relative h-[100dvh] w-full bg-background text-foreground">
@@ -942,7 +1084,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 type="button"
                 className={`pointer-events-auto shrink-0 ${mapFloatingActionClass}`}
                 onClick={() => void handleNavButton()}
-                disabled={routePending || locating}
+                disabled={routePending}
                 aria-label={
                   !tracking && !navigating
                     ? "Show route"
@@ -967,7 +1109,42 @@ export default function ShareRouteNavigatePage(): JSX.Element {
         }
       >
         <div className="mt-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
+          {routeInfo ? (
+            <TripEndsFields
+              from={tripFrom}
+              to={tripTo}
+              places={[
+                {
+                  id: routeInfo.destinationId,
+                  name: routeInfo.destinationName,
+                },
+              ]}
+              entrances={routeInfo.campusEntrances}
+              onFromChange={(end) => {
+                clearSharePreview();
+                setTripFrom(end);
+              }}
+              onToChange={(end) => {
+                if (end && tripFrom && sameTripEnd(tripFrom, end)) {
+                  toast.error("Start and destination are the same.");
+                  return;
+                }
+                clearSharePreview();
+                setTripTo(end);
+              }}
+              onSwap={() => {
+                const nextFrom = tripTo;
+                const nextTo = tripFrom;
+                if (nextFrom && nextTo && sameTripEnd(nextFrom, nextTo)) return;
+                clearSharePreview();
+                setTripFrom(nextFrom);
+                setTripTo(nextTo);
+              }}
+              gpsStatus={gpsStatus}
+              onRetryGps={() => void locateOnce()}
+            />
+          ) : null}
+          <span className="mt-4 block text-xs font-semibold uppercase tracking-wide text-panel-muted-foreground">
             Mode
           </span>
           <div className="mt-2 flex gap-2">
@@ -1004,6 +1181,44 @@ export default function ShareRouteNavigatePage(): JSX.Element {
             })}
           </div>
         </div>
+
+        {curNavConditions.is_vehicular &&
+        !tracking &&
+        tripTo?.kind === "place" &&
+        shareParkingLots.length > 0 ? (
+          <div
+            className={`mt-4 rounded-2xl border px-3 py-3 ${borderMutedClass} ${surfaceSubtleClass}`}
+          >
+            <p className="mb-2 text-center text-sm font-semibold">
+              {shareParkingLots.length === 1
+                ? `Parking lot: ${shareParkingLots[0]?.name ?? "Recommended lot"}`
+                : "Parking lot"}
+            </p>
+            {shareParkingLots.length > 1 ? (
+              <>
+                <ComboboxSelect
+                  placeholder="Choose parking lot"
+                  value={preferredParkingLotId ?? 0}
+                  items={[
+                    { value: 0, label: "Closest recommended" },
+                    ...shareParkingLots.map((lot) => ({
+                      value: lot.id,
+                      label: lot.name,
+                    })),
+                  ]}
+                  onChange={(value) => {
+                    setPreferredParkingLotId(value === 0 ? null : value);
+                  }}
+                  widthClassName="w-full"
+                  searchPlaceholder="Search parking…"
+                />
+                <p className="mt-2 text-center text-xs text-panel-muted-foreground">
+                  Changing the lot recalculates drive then walk.
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {curNavConditions.is_pedestrian ? (
           <details
@@ -1164,7 +1379,7 @@ export default function ShareRouteNavigatePage(): JSX.Element {
                 : "Follow the teal path on the map. Tap the navigation button for live tracking."
               : userPos
                   ? "Tap the route button above to build your path."
-                  : "Allow location to build your route."}
+                  : "Choose a start and a destination, then tap the route button."}
         </p>
       </MapBottomSheet>
     </div>

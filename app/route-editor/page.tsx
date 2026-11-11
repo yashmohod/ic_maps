@@ -92,6 +92,29 @@ export default function RouteEditor(): JSX.Element {
   const [curDestinationNodes, setCurDestinationNodes] = useState<Set<number>>(
     () => new Set(),
   );
+  const [destTarget, setDestTarget] = useState<"building" | "entrance">(
+    "building",
+  );
+  const destTargetRef = useRef(destTarget);
+  destTargetRef.current = destTarget;
+  type CampusEntranceRow = {
+    id: number;
+    name: string;
+    nodeId: number;
+    lat: number;
+    lng: number;
+  };
+  const [campusEntrances, setCampusEntrances] = useState<CampusEntranceRow[]>(
+    [],
+  );
+  const [entranceName, setEntranceName] = useState("");
+  const [editingEntranceId, setEditingEntranceId] = useState<number | null>(
+    null,
+  );
+  const editingEntranceIdRef = useRef(editingEntranceId);
+  const entranceNameRef = useRef(entranceName);
+  editingEntranceIdRef.current = editingEntranceId;
+  entranceNameRef.current = entranceName;
 
   type NavModeKey = 0 | 1 | 3 | 4 | 5;
 
@@ -712,7 +735,12 @@ export default function RouteEditor(): JSX.Element {
     e.stopPropagation();
 
     if (modeRef.current === "delete") return void deleteNode(id);
-    if (modeRef.current === "destination") return void addToBuildingGroup(id);
+    if (modeRef.current === "destination") {
+      if (destTargetRef.current === "entrance") {
+        return void toggleCampusEntrance(id);
+      }
+      return void addToBuildingGroup(id);
+    }
     if (modeRef.current === "navMode") return void setNavModeNode(id);
     if (modeRef.current === "deadMapFeature")
       return void toggleDeadMapFeatureNode(id);
@@ -826,6 +854,101 @@ export default function RouteEditor(): JSX.Element {
     }
   }
 
+  async function loadCampusEntrances() {
+    try {
+      const req = await fetch(withBasePath("/api/map/campusEntrance"));
+      if (!req.ok) {
+        toast.error("Campus entrances did not load.");
+        return;
+      }
+      const resp = await req.json();
+      setCampusEntrances(
+        Array.isArray(resp.entrances) ? resp.entrances : [],
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("Campus entrances did not load.");
+    }
+  }
+
+  async function toggleCampusEntrance(nodeId: number) {
+    const rows = campusEntrances;
+    const onNode = rows.find((row) => row.nodeId === nodeId);
+    const editingId = editingEntranceIdRef.current;
+    const editing = rows.find((row) => row.id === editingId) ?? null;
+
+    try {
+      if (editing && editing.nodeId === nodeId) {
+        const req = await fetch(withBasePath("/api/map/campusEntrance"), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: editing.id }),
+        });
+        if (!req.ok) return toast.error("Could not remove that entrance.");
+        setEditingEntranceId(null);
+        setEntranceName("");
+        await loadCampusEntrances();
+        return;
+      }
+      if (onNode && (!editing || onNode.id !== editing.id)) {
+        return toast.error("That node is already a campus entrance.");
+      }
+      if (editing) {
+        const name = entranceNameRef.current.trim() || editing.name;
+        const req = await fetch(withBasePath("/api/map/campusEntrance"), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: editing.id, name, nodeId }),
+        });
+        const data = await req.json().catch(() => ({}));
+        if (!req.ok) {
+          return toast.error(data?.error ?? "Could not move that entrance.");
+        }
+        await loadCampusEntrances();
+        return;
+      }
+      const name = entranceNameRef.current.trim();
+      if (!name) return toast.error("Name the entrance first.");
+      const req = await fetch(withBasePath("/api/map/campusEntrance"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, nodeId }),
+      });
+      const data = await req.json().catch(() => ({}));
+      if (!req.ok) {
+        return toast.error(data?.error ?? "Could not save that entrance.");
+      }
+      if (typeof data.id === "number") setEditingEntranceId(data.id);
+      await loadCampusEntrances();
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not update campus entrances.");
+    }
+  }
+
+  async function commitEntranceName() {
+    const id = editingEntranceIdRef.current;
+    const name = entranceNameRef.current.trim();
+    if (id == null || !name) return;
+    const current = campusEntrances.find((row) => row.id === id);
+    if (current && current.name === name) return;
+    try {
+      const req = await fetch(withBasePath("/api/map/campusEntrance"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
+      if (!req.ok) {
+        toast.error("Could not rename that entrance.");
+        return;
+      }
+      await loadCampusEntrances();
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not rename that entrance.");
+    }
+  }
+
   // Selected edge id used for delete clicks on the edge layer
   useEffect(() => {
     if (selectedId === null) return;
@@ -836,6 +959,7 @@ export default function RouteEditor(): JSX.Element {
   useEffect(() => {
     void getAllFeature();
     void getBuildingsList();
+    void loadCampusEntrances();
     return () => {
       const map = mapRef.current?.getMap?.();
       if (!map) return;
@@ -1070,18 +1194,84 @@ export default function RouteEditor(): JSX.Element {
           <div
             className={`rounded-xl px-3 py-2 flex flex-wrap items-center gap-3 ${panelClass}`}
           >
-            <ComboboxSelect
-              label="Current Building"
-              placeholder="Select building..."
-              items={destinationItems}
-              value={currentDestination?.name ?? ""}
-              onChange={(v) => void handelBuildingSelect(Number(v))}
-              widthClassName="w-[320px]"
-            />
+            <div className="flex rounded-lg border border-border p-0.5">
+              <button
+                type="button"
+                className={`rounded-md px-2 py-1 text-xs ${destTarget === "building" ? "bg-brand-cta text-brand-cta-foreground" : ""}`}
+                onClick={() => setDestTarget("building")}
+              >
+                Building doors
+              </button>
+              <button
+                type="button"
+                className={`rounded-md px-2 py-1 text-xs ${destTarget === "entrance" ? "bg-brand-cta text-brand-cta-foreground" : ""}`}
+                onClick={() => setDestTarget("entrance")}
+              >
+                Campus entrances
+              </button>
+            </div>
+            {destTarget === "building" ? (
+              <ComboboxSelect
+                label="Current Building"
+                placeholder="Select building..."
+                items={destinationItems}
+                value={currentDestination?.name ?? ""}
+                onChange={(v) => void handelBuildingSelect(Number(v))}
+                widthClassName="w-[320px]"
+              />
+            ) : (
+              <>
+                <input
+                  className="h-9 w-48 rounded-md border border-border bg-background px-2 text-sm"
+                  placeholder="Entrance name"
+                  value={entranceName}
+                  onChange={(e) => setEntranceName(e.target.value)}
+                  onBlur={() => void commitEntranceName()}
+                />
+                <select
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                  value={editingEntranceId ?? ""}
+                  onChange={(e) => {
+                    const next = e.target.value ? Number(e.target.value) : null;
+                    setEditingEntranceId(next);
+                    const row = campusEntrances.find((item) => item.id === next);
+                    setEntranceName(row?.name ?? "");
+                  }}
+                >
+                  <option value="">New entrance</option>
+                  {campusEntrances.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground disabled:opacity-50"
+                  disabled={editingEntranceId == null}
+                  onClick={() => {
+                    if (editingEntranceId == null) return;
+                    const row = campusEntrances.find(
+                      (item) => item.id === editingEntranceId,
+                    );
+                    if (row) void toggleCampusEntrance(row.nodeId);
+                  }}
+                >
+                  Remove
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  Name it, then click a node. Click that node again to detach.
+                </span>
+              </>
+            )}
 
             <button
               className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground disabled:opacity-50"
-              disabled={!currentDestination || curDestinationNodes.size === 0}
+              disabled={
+                destTarget !== "building" ||
+                !currentDestination ||
+                curDestinationNodes.size === 0
+              }
               onClick={clearAllBuildingNodes}
               title="Detach all nodes from current building"
             >
@@ -1152,8 +1342,14 @@ export default function RouteEditor(): JSX.Element {
             </Source>
 
             {markers.map((m) => {
+              const isCampusEntrance =
+                mode === "destination" &&
+                destTarget === "entrance" &&
+                campusEntrances.some((row) => row.nodeId === m.id);
               const isBuildingSel =
-                mode === "destination" && curDestinationNodes.has(m.id);
+                mode === "destination" &&
+                destTarget === "building" &&
+                curDestinationNodes.has(m.id);
               const isNavModeSet =
                 mode === "navMode" && Boolean(m[navModes[curNavMode].param]);
               const isDeadMapFeature = mode === "deadMapFeature" && m.isDead;
@@ -1163,11 +1359,13 @@ export default function RouteEditor(): JSX.Element {
               const colorClass =
                 isDrawSel || isNavModeSet || isDeadMapFeature
                   ? "bg-destructive"
-                  : isBuildingSel
-                    ? "bg-brand-cta"
-                    : m.isDead
-                      ? "bg-destructive/70"
-                      : "bg-brand";
+                  : isCampusEntrance
+                    ? "bg-sky-600"
+                    : isBuildingSel
+                      ? "bg-brand-cta"
+                      : m.isDead
+                        ? "bg-destructive/70"
+                        : "bg-brand";
 
               const destNavRing =
                 mode !== "destination"

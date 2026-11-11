@@ -12,11 +12,12 @@ export const safeAreaTopClass =
   "pt-[max(0.5rem,calc(env(safe-area-inset-top,0px)+0.5rem))]";
 export const safeAreaBottomClass =
   "pb-[max(1rem,env(safe-area-inset-bottom,0px))]";
-/** Offset below the top search row (safe area + ~52px header). */
+/** Just under the from/to bar. */
 export const mapModeRowOffsetClass =
-  "top-[calc(env(safe-area-inset-top,0px)+3.5rem)]";
+  "top-[calc(env(safe-area-inset-top,0px)+7.25rem)]";
+/** Clear of the mode pills. */
 export const mapFavoritesRowOffsetClass =
-  "top-[calc(env(safe-area-inset-top,0px)+6.25rem)]";
+  "top-[calc(env(safe-area-inset-top,0px)+11.5rem)]";
 export const mapPageClass = "h-[100dvh] min-h-[100dvh]";
 export const sheetHandleClass =
   "mx-auto mb-3 h-1 w-10 shrink-0 rounded-full bg-panel-muted";
@@ -48,6 +49,15 @@ export const mapSearchShellClass = [
 
 export const mapModeChipClass =
   "rounded-2xl min-h-11 px-4 py-2 text-xs font-semibold uppercase transition shadow-sm";
+
+/** Pressable end cap inside the from/to bar (menu, swap). */
+export const mapBarActionClass = [
+  "flex w-[4.5rem] shrink-0 cursor-pointer flex-col items-center justify-center gap-1 self-stretch px-1",
+  "bg-panel-muted text-[10px] font-semibold uppercase tracking-wide text-panel-foreground",
+  "transition hover:bg-brand-cta/15 active:scale-[0.98]",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-cta",
+  "disabled:pointer-events-none disabled:opacity-50",
+].join(" ");
 
 export const mapFloatingActionClass = [
   "rounded-2xl min-h-11 min-w-11 shadow-md grid place-items-center touch-manipulation",

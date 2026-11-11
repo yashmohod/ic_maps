@@ -42,6 +42,7 @@ type EditorToolsMenuProps = {
   isSignedIn?: boolean;
   devMode?: boolean;
   chipClassName?: string;
+  chipLabel?: string;
   userName?: string | null;
   basemap: BasemapId;
   onBasemapChange: (id: BasemapId) => void;
@@ -206,6 +207,7 @@ export function EditorToolsMenu({
   isSignedIn = false,
   devMode = false,
   chipClassName = mapHeaderChipClass,
+  chipLabel,
   userName = null,
   basemap,
   onBasemapChange,
@@ -213,7 +215,9 @@ export function EditorToolsMenu({
   const router = useRouter();
   const links = useToolLinks(isAdmin, isIcUser, isSignedIn, devMode);
 
-  const chipClass = `${chipClassName} shrink-0 px-2`;
+  const chipClass = chipLabel
+    ? chipClassName
+    : `${chipClassName} shrink-0 px-2`;
 
   async function signOut() {
     await authClient.signOut();
@@ -230,6 +234,11 @@ export function EditorToolsMenu({
           className={chipClass}
         >
           <HomeLogo />
+          {chipLabel ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wide">
+              {chipLabel}
+            </span>
+          ) : null}
         </button>
       </SheetTrigger>
       <SheetContent

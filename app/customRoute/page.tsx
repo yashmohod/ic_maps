@@ -198,6 +198,7 @@ export default function CustomRoutesPage(): JSX.Element {
     setEditName(route.name ?? "");
     setEditDestinationId(route.destinationId ?? "");
     setEditParkingLotIds([]);
+    setEditEntranceIds([]);
 
     void (async () => {
       try {
@@ -212,6 +213,11 @@ export default function CustomRoutesPage(): JSX.Element {
             data.parkingLots.map((p: { id: number }) => Number(p.id)),
           );
         }
+        if (res.ok && Array.isArray(data.campusEntrances)) {
+          setEditEntranceIds(
+            data.campusEntrances.map((p: { id: number }) => Number(p.id)),
+          );
+        }
       } catch {
         /* ignore */
       }
@@ -224,6 +230,7 @@ export default function CustomRoutesPage(): JSX.Element {
     setEditingRouteId(null);
     setEditName("");
     setEditDestinationId("");
+    setEditEntranceIds([]);
   }
 
   async function saveEdit(routeId: number) {
@@ -247,6 +254,7 @@ export default function CustomRoutesPage(): JSX.Element {
           name,
           destinationIds: [Number(destinationId)],
           parkingLotIds: editParkingLotIds,
+          campusEntranceIds: editEntranceIds,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -271,6 +279,11 @@ export default function CustomRoutesPage(): JSX.Element {
   const [newRouteId, setNewRouteId] = useState("");
   const [newParkingLotIds, setNewParkingLotIds] = useState<number[]>([]);
   const [editParkingLotIds, setEditParkingLotIds] = useState<number[]>([]);
+  const [campusEntrances, setCampusEntrances] = useState<
+    Array<{ id: number; name: string }>
+  >([]);
+  const [newEntranceIds, setNewEntranceIds] = useState<number[]>([]);
+  const [editEntranceIds, setEditEntranceIds] = useState<number[]>([]);
 
   /** ---------------- Share URL + QR ---------------- */
   const shareUrl = useMemo(() => {
@@ -321,6 +334,8 @@ export default function CustomRoutesPage(): JSX.Element {
     setEditingRouteId(null);
     setNewName("");
     setNewRouteId("");
+    setNewParkingLotIds([]);
+    setNewEntranceIds([]);
     setNewModalOpen((v) => !v);
   }
 
@@ -401,6 +416,7 @@ export default function CustomRoutesPage(): JSX.Element {
           name,
           destinationIds: [Number(destinationId)],
           parkingLotIds: newParkingLotIds,
+          campusEntranceIds: newEntranceIds,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -652,6 +668,22 @@ export default function CustomRoutesPage(): JSX.Element {
 
   useEffect(() => {
     void getDestinations();
+    void (async () => {
+      try {
+        const res = await fetch(withBasePath("/api/map/campusEntrance"));
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data.entrances)) {
+          setCampusEntrances(
+            data.entrances.map((row: { id: number; name: string }) => ({
+              id: Number(row.id),
+              name: String(row.name),
+            })),
+          );
+        }
+      } catch {
+        /* picker stays empty */
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -992,6 +1024,44 @@ export default function CustomRoutesPage(): JSX.Element {
                               </div>
                             </div>
 
+                            {campusEntrances.length > 0 && (
+                              <div>
+                                <label className="text-xs font-medium text-panel-muted-foreground">
+                                  Campus entrances (guest can start or end here)
+                                </label>
+                                <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+                                  {campusEntrances.map((row) => {
+                                    const checked = editEntranceIds.includes(
+                                      row.id,
+                                    );
+                                    return (
+                                      <label
+                                        key={row.id}
+                                        className={[
+                                          "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2 text-sm",
+                                          borderMutedClass,
+                                        ].join(" ")}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="size-4 accent-brand-cta"
+                                          checked={checked}
+                                          onChange={() =>
+                                            toggleParkingLot(
+                                              row.id,
+                                              setEditEntranceIds,
+                                            )
+                                          }
+                                          disabled={isSavingThisEdit}
+                                        />
+                                        {row.name}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
                             {parkingDestinations.length > 0 && (
                               <div>
                                 <label className="text-xs font-medium text-panel-muted-foreground">
@@ -1160,6 +1230,39 @@ export default function CustomRoutesPage(): JSX.Element {
                         ))}
                       </select>
                     </div>
+
+                    {campusEntrances.length > 0 && (
+                      <div className="mt-3">
+                        <label className="text-xs font-medium text-panel-muted-foreground">
+                          Campus entrances (guest can start or end here)
+                        </label>
+                        <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+                          {campusEntrances.map((row) => {
+                            const checked = newEntranceIds.includes(row.id);
+                            return (
+                              <label
+                                key={row.id}
+                                className={[
+                                  "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2 text-sm",
+                                  borderMutedClass,
+                                ].join(" ")}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-brand-cta"
+                                  checked={checked}
+                                  onChange={() =>
+                                    toggleParkingLot(row.id, setNewEntranceIds)
+                                  }
+                                  disabled={createPending}
+                                />
+                                {row.name}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {parkingDestinations.length > 0 && (
                       <div className="mt-3">
