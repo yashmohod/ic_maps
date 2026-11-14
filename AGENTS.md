@@ -7,6 +7,7 @@ Project docs live in [`docs/`](./docs/).
 - **Audit tracker:** [docs/AUDIT_WORKING_DOC.md](./docs/AUDIT_WORKING_DOC.md)
 - **Production readiness:** [docs/PRODUCTION_READINESS.md](./docs/PRODUCTION_READINESS.md)
 - **Floorplan editor:** [docs/FLOORPLAN_DOCS.md](./docs/FLOORPLAN_DOCS.md)
+- **Feature comparison:** [docs/FEATURE_COMPARISON.md](./docs/FEATURE_COMPARISON.md)
 
 <!-- BEGIN:nextjs-agent-rules -->
 

@@ -7,5 +7,6 @@
 | [AUDIT_WORKING_DOC.md](./AUDIT_WORKING_DOC.md) | Living audit / bug / security tracker |
 | [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md) | Pre-launch security and ops backlog |
 | [FLOORPLAN_DOCS.md](./FLOORPLAN_DOCS.md) | Indoor floorplan editor flow |
+| [FEATURE_COMPARISON.md](./FEATURE_COMPARISON.md) | Features we have, and missing ones ranked by whether to add them |
 
 A short pointer also lives at the repo root [`AGENTS.md`](../AGENTS.md) so tools that look for that filename still find the index.
